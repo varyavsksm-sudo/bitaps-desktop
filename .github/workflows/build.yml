@@ -60,3 +60,31 @@ jobs:
           files: |
             bitaps-x86_64.AppImage
             bitaps-linux-x64.tar.gz
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter --version
+      - run: flutter config --enable-macos-desktop
+      - run: flutter create --platforms=macos --project-name bitaps_vpn .
+      - run: flutter pub get
+      - run: flutter build macos --release
+      - name: Package DMG
+        run: |
+          set -e
+          APP=$(ls -d build/macos/Build/Products/Release/*.app | head -1)
+          echo "app: $APP"
+          mkdir -p dmgroot
+          cp -R "$APP" dmgroot/
+          ln -s /Applications dmgroot/Applications
+          hdiutil create -volname "bitaps VPN" -srcfolder dmgroot -ov -format UDZO bitaps-macos.dmg
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Последняя сборка
+          files: bitaps-macos.dmg
