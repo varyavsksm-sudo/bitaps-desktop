@@ -35,9 +35,9 @@ const List<List<Color>> chipGrads = [
 ];
 
 TextStyle disp(double s, {FontWeight w = FontWeight.w700, Color c = C.text}) =>
-    TextStyle(fontSize: s, fontWeight: w, color: c, letterSpacing: -0.3, height: 1.15);
+    TextStyle(fontFamily: 'SpaceGrotesk', fontSize: s, fontWeight: w, color: c, letterSpacing: -0.3, height: 1.15);
 TextStyle mono(double s, {FontWeight w = FontWeight.w500, Color c = C.muted}) =>
-    TextStyle(fontSize: s, fontWeight: w, color: c, fontFamily: 'monospace', height: 1.2);
+    TextStyle(fontSize: s, fontWeight: w, color: c, fontFamily: 'JetBrainsMono', height: 1.2);
 
 // ============================ MODELS / MOCK DATA ============================
 class Server {
@@ -106,7 +106,7 @@ class BitApp extends StatelessWidget {
         scaffoldBackgroundColor: C.bg,
         colorScheme: const ColorScheme.dark(primary: C.accent, surface: C.card),
         useMaterial3: true,
-        fontFamily: null,
+        fontFamily: 'SpaceGrotesk',
       ),
       home: const Shell(),
     );
