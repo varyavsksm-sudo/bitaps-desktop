@@ -150,6 +150,38 @@ class ArcPainter extends CustomPainter {
   bool shouldRepaint(ArcPainter old) => old.v != v || old.col != col;
 }
 
+// Шестерёнка рисуется в коде, чтобы перекрашиваться под выбранную тему
+class GearPainter extends CustomPainter {
+  final Color col;
+  GearPainter(this.col);
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = Offset(size.width / 2, size.height / 2);
+    final r = size.width / 2;
+    final p = Paint()
+      ..shader = LinearGradient(colors: [C.accentSoft, col], begin: Alignment.topLeft, end: Alignment.bottomRight)
+          .createShader(Rect.fromCircle(center: c, radius: r));
+    for (int i = 0; i < 10; i++) {
+      canvas.save();
+      canvas.translate(c.dx, c.dy);
+      canvas.rotate(i / 10 * 2 * math.pi);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(center: Offset(0, -r * 0.84), width: r * 0.20, height: r * 0.34),
+          Radius.circular(r * 0.05)),
+        p);
+      canvas.restore();
+    }
+    canvas.drawCircle(c, r * 0.72, p);
+    canvas.drawCircle(c, r * 0.50, Paint()..color = C.bg2);
+    canvas.drawCircle(c, r * 0.50,
+      Paint()..style = PaintingStyle.stroke..strokeWidth = 2..color = col.withOpacity(0.45));
+  }
+
+  @override
+  bool shouldRepaint(GearPainter old) => old.col != col;
+}
+
 // ============================ APP ============================
 class BitApp extends StatelessWidget {
   const BitApp({super.key});
@@ -250,9 +282,9 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
           animation: _twinkle,
           builder: (_, __) => CustomPaint(painter: StarPainter(_twinkle.value * 2 * math.pi)),
         )),
-        const Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(
-          gradient: RadialGradient(center: Alignment(0, -0.95), radius: 0.95,
-            colors: [Color(0x2BFF7A1A), Color(0x00FF7A1A)])))),
+        Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(
+          gradient: RadialGradient(center: const Alignment(0, -0.95), radius: 0.95,
+            colors: [C.accent.withOpacity(0.17), C.accent.withOpacity(0)])))),
         const Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(
           gradient: RadialGradient(center: Alignment(1.0, -0.9), radius: 0.8,
             colors: [Color(0x1A2D8BFF), Color(0x002D8BFF)])))),
@@ -397,7 +429,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     final connected = conn == 2;
     final busy = conn == 1;
     final glow = connected ? 0.6 : busy ? 0.35 : 0.0;
-    final col = connected ? C.accent : busy ? C.accentSoft : C.muted;
+    final col = busy ? C.accentSoft : C.accent;
     final showRings = connected || btnStyle == 3;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -464,8 +496,8 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       default: // шестерёнка
         return Stack(alignment: Alignment.center, children: [
           RotationTransition(turns: _spin, child: AnimatedOpacity(
-            duration: const Duration(milliseconds: 350), opacity: conn == 0 ? 0.82 : 1,
-            child: Image.asset('assets/gearring.png', width: 212, height: 212, fit: BoxFit.contain))),
+            duration: const Duration(milliseconds: 350), opacity: conn == 0 ? 0.85 : 1,
+            child: CustomPaint(size: const Size(212, 212), painter: GearPainter(col)))),
           Text('B', style: disp(60, w: FontWeight.w800, c: Colors.white)),
         ]);
     }
