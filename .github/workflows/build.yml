@@ -1,0 +1,54 @@
+name: build-desktop
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter --version
+      - run: flutter config --enable-windows-desktop
+      - run: flutter create --platforms=windows --project-name bitaps_vpn .
+      - run: flutter pub get
+      - run: flutter build windows --release
+      - name: Package
+        run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath bitaps-windows-x64.zip
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Последняя сборка
+          files: bitaps-windows-x64.zip
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux build deps
+        run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter --version
+      - run: flutter config --enable-linux-desktop
+      - run: flutter create --platforms=linux --project-name bitaps_vpn .
+      - run: flutter pub get
+      - run: flutter build linux --release
+      - name: Package
+        run: tar -czf bitaps-linux-x64.tar.gz -C build/linux/x64/release/bundle .
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Последняя сборка
+          files: bitaps-linux-x64.tar.gz
