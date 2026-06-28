@@ -1,34 +1,43 @@
 import 'dart:async';
+import 'dart:math' as math;
+import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
 
-void main() => runApp(const BitApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await windowManager.ensureInitialized();
+  final opts = WindowOptions(
+    size: const Size(440, 900),
+    minimumSize: const Size(390, 760),
+    center: true,
+    backgroundColor: C.bg,
+    title: 'bitaps VPN',
+  );
+  windowManager.waitUntilReadyToShow(opts, () async {
+    await windowManager.show();
+    await windowManager.focus();
+  });
+  runApp(const BitApp());
+}
 
-// ============================ DESIGN TOKENS ============================
+// ============================ TOKENS ============================
 class C {
   static const bg = Color(0xFF06040C);
-  static const bg2 = Color(0xFF0A0810);
-  static const card = Color(0xFF12101C);
-  static const cardHi = Color(0xFF1A1728);
+  static const bg2 = Color(0xFF0C0A14);
   static const text = Color(0xFFEDF1F8);
   static const muted = Color(0xFF8A93A6);
   static const line = Color(0x14FFFFFF);
   static const accent = Color(0xFFFF7A1A);
   static const accentSoft = Color(0xFFFFB347);
+  static const accent2 = Color(0xFF2D8BFF);
   static const ok = Color(0xFF39D98A);
   static const warn = Color(0xFFFFAE3D);
   static const danger = Color(0xFFFF5470);
 }
 
-const LinearGradient accentGrad = LinearGradient(
-  colors: [C.accentSoft, C.accent], begin: Alignment.topLeft, end: Alignment.bottomRight);
-
-const List<List<Color>> chipGrads = [
-  [Color(0xFFFF9D3D), Color(0xFFFF6A00)],
-  [Color(0xFF9B7BFF), Color(0xFF6A4BFF)],
-  [Color(0xFF3AD6C0), Color(0xFF14A890)],
-  [Color(0xFFFF5D8F), Color(0xFFFF2D6D)],
-  [Color(0xFF59B4FF), Color(0xFF2D7BFF)],
-];
+const LinearGradient accentGrad =
+    LinearGradient(colors: [C.accentSoft, C.accent], begin: Alignment.topLeft, end: Alignment.bottomRight);
 
 TextStyle disp(double s, {FontWeight w = FontWeight.w700, Color c = C.text}) =>
     TextStyle(fontFamily: 'SpaceGrotesk', fontSize: s, fontWeight: w, color: c, letterSpacing: -0.3, height: 1.15);
@@ -70,6 +79,39 @@ const faqs = [
 
 const modeLabels = ['Авто', 'Стрим', 'Игры', 'Прив.'];
 
+// ============================ STARFIELD (premium bg) ============================
+class _Star {
+  final double x, y, r, o;
+  final bool accent;
+  const _Star(this.x, this.y, this.r, this.o, this.accent);
+}
+
+final List<_Star> _stars = () {
+  int seed = 0x9E3779B9;
+  double next() {
+    seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF;
+    return seed / 0x7FFFFFFF;
+  }
+  return List.generate(120, (_) => _Star(next(), next(), 0.4 + next() * 1.6, 0.12 + next() * 0.6, next() > 0.92));
+}();
+
+class StarPainter extends CustomPainter {
+  final double t;
+  StarPainter(this.t);
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (int i = 0; i < _stars.length; i++) {
+      final s = _stars[i];
+      final twinkle = 0.7 + 0.3 * math.sin(t * 0.8 + i * 1.7);
+      final col = (s.accent ? C.accent : Colors.white).withOpacity((s.o * twinkle).clamp(0, 1));
+      canvas.drawCircle(Offset(s.x * size.width, s.y * size.height), s.r, Paint()..color = col);
+    }
+  }
+
+  @override
+  bool shouldRepaint(StarPainter old) => old.t != t;
+}
+
 // ============================ APP ============================
 class BitApp extends StatelessWidget {
   const BitApp({super.key});
@@ -81,7 +123,7 @@ class BitApp extends StatelessWidget {
       theme: ThemeData(
         brightness: Brightness.dark,
         scaffoldBackgroundColor: C.bg,
-        colorScheme: const ColorScheme.dark(primary: C.accent, surface: C.card),
+        colorScheme: const ColorScheme.dark(primary: C.accent, surface: C.bg2),
         useMaterial3: true,
         fontFamily: 'SpaceGrotesk',
       ),
@@ -96,7 +138,7 @@ class Shell extends StatefulWidget {
   State<Shell> createState() => _ShellState();
 }
 
-class _ShellState extends State<Shell> {
+class _ShellState extends State<Shell> with TickerProviderStateMixin {
   int tab = 0;
   int conn = 0; // 0 off, 1 connecting, 2 on
   int secs = 0;
@@ -105,9 +147,19 @@ class _ShellState extends State<Shell> {
   Server server = ruServers[0];
   bool tgl1 = false, tgl2 = true, tgl3 = true, tgl4 = false;
 
+  late final AnimationController _spin =
+      AnimationController(vsync: this, duration: const Duration(seconds: 6))..repeat();
+  late final AnimationController _wave =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 2600))..repeat();
+  late final AnimationController _twinkle =
+      AnimationController(vsync: this, duration: const Duration(seconds: 4))..repeat();
+
   @override
   void dispose() {
     _timer?.cancel();
+    _spin.dispose();
+    _wave.dispose();
+    _twinkle.dispose();
     super.dispose();
   }
 
@@ -115,7 +167,9 @@ class _ShellState extends State<Shell> {
     if (conn == 1) return;
     if (conn == 0) {
       setState(() => conn = 1);
-      Future.delayed(const Duration(milliseconds: 800), () {
+      _spin.duration = const Duration(milliseconds: 1400);
+      _spin.repeat();
+      Future.delayed(const Duration(milliseconds: 900), () {
         if (!mounted) return;
         setState(() => conn = 2);
         secs = 0;
@@ -125,6 +179,8 @@ class _ShellState extends State<Shell> {
       });
     } else {
       _timer?.cancel();
+      _spin.duration = const Duration(seconds: 6);
+      _spin.repeat();
       setState(() {
         conn = 0;
         secs = 0;
@@ -144,17 +200,20 @@ class _ShellState extends State<Shell> {
     final screens = [_home(), _servers(), _account(), _settings()];
     return Scaffold(
       backgroundColor: C.bg,
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: RadialGradient(
-            center: Alignment(0, -0.72), radius: 1.05,
-            colors: [Color(0x3AFF7A1A), C.bg], stops: [0, 0.55],
-          ),
-        ),
-        child: SafeArea(bottom: false, child: Center(
-          child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 520), child: screens[tab]),
+      body: Stack(children: [
+        const Positioned.fill(child: ColoredBox(color: C.bg)),
+        Positioned.fill(child: AnimatedBuilder(
+          animation: _twinkle,
+          builder: (_, __) => CustomPaint(painter: StarPainter(_twinkle.value * 2 * math.pi)),
         )),
-      ),
+        const Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(
+          gradient: RadialGradient(center: Alignment(0, -0.95), radius: 0.95,
+            colors: [Color(0x2BFF7A1A), Color(0x00FF7A1A)])))),
+        const Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(
+          gradient: RadialGradient(center: Alignment(1.0, -0.9), radius: 0.8,
+            colors: [Color(0x1A2D8BFF), Color(0x002D8BFF)])))),
+        SafeArea(bottom: false, child: screens[tab]),
+      ]),
       bottomNavigationBar: _bottomBar(),
     );
   }
@@ -167,15 +226,17 @@ class _ShellState extends State<Shell> {
       ('Кабинет', Icons.person_outline),
       ('Настройки', Icons.settings_outlined),
     ];
-    return Container(
-      decoration: const BoxDecoration(color: C.bg2, border: Border(top: BorderSide(color: C.line))),
-      child: SafeArea(top: false, child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 9),
-        child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-          for (int i = 0; i < 4; i++) _tabItem(items[i].$1, items[i].$2, i),
-        ]),
-      )),
-    );
+    return ClipRect(child: BackdropFilter(
+      filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+      child: Container(
+        decoration: BoxDecoration(color: C.bg2.withOpacity(0.7), border: const Border(top: BorderSide(color: C.line))),
+        child: SafeArea(top: false, child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 9),
+          child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [for (int i = 0; i < 4; i++) _tabItem(items[i].$1, items[i].$2, i)]),
+        )),
+      ),
+    ));
   }
 
   Widget _tabItem(String label, IconData ic, int i) {
@@ -184,11 +245,11 @@ class _ShellState extends State<Shell> {
       behavior: HitTestBehavior.opaque,
       onTap: () => setState(() => tab = i),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 6),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Icon(ic, size: 22, color: sel ? C.accent : C.muted),
           const SizedBox(height: 4),
-          Text(label, style: mono(11, c: sel ? C.accent : C.muted, w: FontWeight.w600)),
+          Text(label, style: mono(10.5, c: sel ? C.accent : C.muted, w: FontWeight.w600)),
         ]),
       ),
     );
@@ -198,32 +259,30 @@ class _ShellState extends State<Shell> {
   Widget _home() {
     final connected = conn == 2;
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
       children: [
         Row(children: [_logo(), const Spacer(), _shieldPill(connected)]),
-        const SizedBox(height: 16),
-        Center(child: _gearButton()),
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
+        Center(child: _powerButton()),
+        const SizedBox(height: 4),
         Center(child: Text(
           conn == 0 ? 'Отключено' : conn == 1 ? 'Подключение…' : 'Подключено',
           style: disp(22, w: FontWeight.w700, c: connected ? C.accent : C.text))),
         const SizedBox(height: 6),
         Center(child: Text(connected ? hms : '00:00:00',
-          style: TextStyle(fontFamily: 'JetBrainsMono', fontSize: 40, fontWeight: FontWeight.w700,
+          style: TextStyle(fontFamily: 'JetBrainsMono', fontSize: 38, fontWeight: FontWeight.w700,
             color: connected ? C.accentSoft : C.muted, letterSpacing: 2))),
         const SizedBox(height: 4),
         Center(child: Text(connected ? 'под защитой' : 'нажми на кнопку', style: mono(12))),
-        const SizedBox(height: 22),
+        const SizedBox(height: 20),
         Row(children: [
           for (int i = 0; i < 4; i++)
-            Expanded(child: Padding(
-              padding: EdgeInsets.only(right: i < 3 ? 8 : 0),
-              child: _modeChip(modeLabels[i], i))),
+            Expanded(child: Padding(padding: EdgeInsets.only(right: i < 3 ? 8 : 0), child: _modeChip(modeLabels[i], i))),
         ]),
         const SizedBox(height: 10),
         Text('Сами подберём лучший сервер и маршрут.', style: mono(12)),
-        const SizedBox(height: 16),
-        _bitCard(child: Row(children: [
+        const SizedBox(height: 14),
+        _card(child: Row(children: [
           Text(server.flag, style: const TextStyle(fontSize: 24)),
           const SizedBox(width: 13),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -247,11 +306,10 @@ class _ShellState extends State<Shell> {
           const SizedBox(width: 8),
           Expanded(child: SizedBox(height: 32, child: ListView(
             scrollDirection: Axis.horizontal,
-            children: [for (final s in [ruServers[1], ruServers[2], ...intlServers]) _miniChip(s)],
-          ))),
+            children: [for (final s in [ruServers[1], ruServers[2], ...intlServers]) _miniChip(s)]))),
         ]),
         const SizedBox(height: 12),
-        _bitCard(padding: 13, child: Row(children: [
+        _card(padding: 13, child: Row(children: [
           Text('↓', style: disp(15, c: C.muted)),
           const SizedBox(width: 5),
           Text(connected ? '84' : '—', style: mono(13, c: C.text, w: FontWeight.w600)),
@@ -268,11 +326,10 @@ class _ShellState extends State<Shell> {
         GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: toggle,
-          child: _bitCard(child: Row(children: [
-            _gIcon(Icons.bolt, 0),
+          child: _card(child: Row(children: [
+            _gIcon(Icons.bolt),
             const SizedBox(width: 13),
-            Text(connected ? 'Отключить' : 'Подключить быстрейший сервер',
-                style: disp(15, w: FontWeight.w600)),
+            Text(connected ? 'Отключить' : 'Подключить быстрейший сервер', style: disp(15, w: FontWeight.w600)),
           ])),
         ),
       ],
@@ -281,36 +338,73 @@ class _ShellState extends State<Shell> {
 
   Widget _logo() => Row(children: [
         Container(width: 30, height: 30, alignment: Alignment.center,
-          decoration: BoxDecoration(gradient: accentGrad, borderRadius: BorderRadius.circular(9)),
+          decoration: BoxDecoration(gradient: accentGrad, borderRadius: BorderRadius.circular(9),
+            boxShadow: [BoxShadow(color: C.accent.withOpacity(0.5), blurRadius: 12)]),
           child: Text('₿', style: disp(17, w: FontWeight.w900, c: C.bg))),
         const SizedBox(width: 9),
         Text('bit', style: disp(22, w: FontWeight.w800)),
         Text('aps', style: disp(22, w: FontWeight.w800, c: C.accent)),
       ]);
 
-  Widget _gearButton() => GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: toggle,
-        child: AnimatedScale(
-          duration: const Duration(milliseconds: 250),
-          scale: conn == 2 ? 1.0 : 0.94,
-          child: AnimatedOpacity(
-            duration: const Duration(milliseconds: 250),
-            opacity: conn == 0 ? 0.8 : 1,
-            child: Image.asset('assets/gear.png', width: 232, height: 232, fit: BoxFit.contain),
+  // ---------------- PREMIUM POWER BUTTON ----------------
+  Widget _powerButton() {
+    final connected = conn == 2;
+    final busy = conn == 1;
+    final glow = connected ? 0.6 : busy ? 0.35 : 0.0;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: toggle,
+      child: SizedBox(
+        width: 270, height: 270,
+        child: Stack(alignment: Alignment.center, children: [
+          // expanding pulse rings (connected)
+          if (connected)
+            AnimatedBuilder(animation: _wave, builder: (_, __) {
+              return Stack(alignment: Alignment.center, children: [
+                for (int i = 0; i < 3; i++) _pulseRing((_wave.value + i / 3) % 1.0),
+              ]);
+            }),
+          // halo glow (blooms on connect)
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 450),
+            width: 270, height: 270,
+            decoration: BoxDecoration(shape: BoxShape.circle, gradient: RadialGradient(
+              colors: [C.accent.withOpacity(glow), C.accent.withOpacity(0)], stops: const [0.25, 1.0])),
           ),
-        ),
-      );
+          // spinning gear ring
+          RotationTransition(turns: _spin,
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 350),
+              opacity: conn == 0 ? 0.82 : 1,
+              child: Image.asset('assets/gearring.png', width: 212, height: 212, fit: BoxFit.contain),
+            )),
+          // static hub B
+          Text('B', style: disp(60, w: FontWeight.w800, c: Colors.white)),
+        ]),
+      ),
+    );
+  }
+
+  Widget _pulseRing(double v) {
+    return Opacity(
+      opacity: ((1 - v) * 0.45).clamp(0, 1),
+      child: Container(
+        width: 150 + v * 110, height: 150 + v * 110,
+        decoration: BoxDecoration(shape: BoxShape.circle,
+          border: Border.all(color: C.accent.withOpacity(0.5), width: 2)),
+      ),
+    );
+  }
 
   Widget _modeChip(String label, int i) {
     final sel = mode == i;
     return GestureDetector(
       onTap: () => setState(() => mode = i),
-      child: Container(
-        height: 40,
-        alignment: Alignment.center,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        height: 40, alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: sel ? C.accent.withOpacity(0.14) : C.card,
+          color: sel ? C.accent.withOpacity(0.16) : Colors.white.withOpacity(0.04),
           borderRadius: BorderRadius.circular(11),
           border: Border.all(color: sel ? C.accent : C.line),
         ),
@@ -324,7 +418,8 @@ class _ShellState extends State<Shell> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12),
           alignment: Alignment.center,
-          decoration: BoxDecoration(color: C.card, borderRadius: BorderRadius.circular(20), border: Border.all(color: C.line)),
+          decoration: BoxDecoration(color: Colors.white.withOpacity(0.04),
+            borderRadius: BorderRadius.circular(20), border: Border.all(color: C.line)),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Text(s.flag, style: const TextStyle(fontSize: 13)),
             const SizedBox(width: 6),
@@ -334,48 +429,46 @@ class _ShellState extends State<Shell> {
       );
 
   // ---------------- SERVERS ----------------
-  Widget _servers() {
-    return ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        Text('Серверы', style: disp(26, w: FontWeight.w800)),
-        const SizedBox(height: 18),
-        Row(children: [
-          Expanded(child: _infoTile('32', 'серверов онлайн')),
-          const SizedBox(width: 12),
-          Expanded(child: _infoTile('12', 'локаций')),
-          const SizedBox(width: 12),
-          Expanded(child: _infoTile('99.9%', 'аптайм')),
-        ]),
-        const SizedBox(height: 16),
-        _bitCard(strong: true, child: Row(children: [
-          _gIcon(Icons.bolt, 0),
-          const SizedBox(width: 14),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [Text('Быстрый сервер', style: disp(16, w: FontWeight.w700)),
-              const SizedBox(width: 8), _badge('АВТО', C.accent)]),
-            const SizedBox(height: 3),
-            Text('Москва · 12 ms', style: mono(12)),
+  Widget _servers() => ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          Text('Серверы', style: disp(26, w: FontWeight.w800)),
+          const SizedBox(height: 18),
+          Row(children: [
+            Expanded(child: _infoTile('32', 'серверов\nонлайн')),
+            const SizedBox(width: 12),
+            Expanded(child: _infoTile('12', 'локаций')),
+            const SizedBox(width: 12),
+            Expanded(child: _infoTile('99.9%', 'аптайм')),
+          ]),
+          const SizedBox(height: 16),
+          _card(strong: true, child: Row(children: [
+            _gIcon(Icons.bolt),
+            const SizedBox(width: 14),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [Text('Быстрый сервер', style: disp(16, w: FontWeight.w700)),
+                const SizedBox(width: 8), _badge('АВТО', C.accent)]),
+              const SizedBox(height: 3),
+              Text('Москва · 12 ms', style: mono(12)),
+            ])),
+            const Icon(Icons.chevron_right, color: C.muted),
           ])),
-          const Icon(Icons.chevron_right, color: C.muted),
-        ])),
-        const SizedBox(height: 12),
-        _bitCard(padding: 12, child: Row(children: [
-          const Icon(Icons.search, size: 18, color: C.muted),
-          const SizedBox(width: 10),
-          Text('Поиск города или страны', style: mono(13, c: C.muted)),
-        ])),
-        const SizedBox(height: 22),
-        _kicker('🇷🇺 Россия'),
-        const SizedBox(height: 10),
-        for (final s in ruServers) _serverRow(s),
-        const SizedBox(height: 22),
-        _kicker('🌍 Зарубежные · скоро'),
-        const SizedBox(height: 10),
-        for (final s in intlServers) _serverRow(s),
-      ],
-    );
-  }
+          const SizedBox(height: 12),
+          _card(padding: 12, child: Row(children: [
+            const Icon(Icons.search, size: 18, color: C.muted),
+            const SizedBox(width: 10),
+            Text('Поиск города или страны', style: mono(13, c: C.muted)),
+          ])),
+          const SizedBox(height: 22),
+          _kicker('🇷🇺 Россия'),
+          const SizedBox(height: 10),
+          for (final s in ruServers) _serverRow(s),
+          const SizedBox(height: 22),
+          _kicker('🌍 Зарубежные · скоро'),
+          const SizedBox(height: 10),
+          for (final s in intlServers) _serverRow(s),
+        ],
+      );
 
   Widget _serverRow(Server s) {
     final sel = s.id == server.id;
@@ -388,13 +481,12 @@ class _ShellState extends State<Shell> {
         child: Container(
           margin: const EdgeInsets.only(bottom: 8),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-          decoration: BoxDecoration(
-            color: C.card, borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: sel ? C.accent.withOpacity(0.5) : C.line),
-          ),
+          decoration: BoxDecoration(color: Colors.white.withOpacity(0.04),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: sel ? C.accent.withOpacity(0.5) : C.line)),
           child: Row(children: [
             Container(width: 40, height: 40, alignment: Alignment.center,
-              decoration: BoxDecoration(color: C.cardHi, borderRadius: BorderRadius.circular(12)),
+              decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), borderRadius: BorderRadius.circular(12)),
               child: Text(s.flag, style: const TextStyle(fontSize: 20))),
             const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -408,7 +500,7 @@ class _ShellState extends State<Shell> {
             ])),
             Text('${s.ping} ms', style: mono(13, c: pingCol, w: FontWeight.w600)),
             const SizedBox(width: 12),
-            SizedBox(width: 56, child: _loadBar(s.load)),
+            SizedBox(width: 50, child: _loadBar(s.load)),
             const SizedBox(width: 10),
             Icon(sel ? Icons.check_circle : Icons.circle_outlined, size: 20, color: sel ? C.accent : C.muted),
           ]),
@@ -419,115 +511,110 @@ class _ShellState extends State<Shell> {
 
   Widget _loadBar(int pct) {
     final col = pct < 50 ? C.ok : pct < 80 ? C.warn : C.danger;
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      ClipRRect(borderRadius: BorderRadius.circular(3),
-        child: LinearProgressIndicator(value: pct / 100, minHeight: 4, backgroundColor: C.cardHi, color: col)),
-      const SizedBox(height: 3),
-      Text('$pct%', style: mono(10)),
-    ]);
+    return ClipRRect(borderRadius: BorderRadius.circular(3),
+      child: LinearProgressIndicator(value: pct / 100, minHeight: 4, backgroundColor: C.line, color: col));
   }
 
   // ---------------- ACCOUNT ----------------
-  Widget _account() {
-    return ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        Text('Кабинет', style: disp(26, w: FontWeight.w800)),
-        const SizedBox(height: 18),
-        _bitCard(strong: true, child: Row(children: [
-          Container(width: 60, height: 60, alignment: Alignment.center,
-            decoration: const BoxDecoration(shape: BoxShape.circle, gradient: accentGrad),
-            child: Text('Д', style: disp(26, w: FontWeight.w800, c: C.bg))),
-          const SizedBox(width: 14),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Демо-режим', style: disp(20, w: FontWeight.w700)),
-            const SizedBox(height: 4),
-            Row(children: [_badge('Пробный', C.accent), const SizedBox(width: 6), _badge('DEMO', C.muted)]),
-          ])),
-        ])),
-        const SizedBox(height: 14),
-        _bitCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [_gIcon(Icons.workspace_premium, 1), const SizedBox(width: 12), _kicker('подписка')]),
-          const SizedBox(height: 16),
-          Row(children: [
-            _ring(3, 30),
-            const SizedBox(width: 20),
+  Widget _account() => ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          Text('Кабинет', style: disp(26, w: FontWeight.w800)),
+          const SizedBox(height: 18),
+          _card(strong: true, child: Row(children: [
+            Container(width: 60, height: 60, alignment: Alignment.center,
+              decoration: BoxDecoration(shape: BoxShape.circle, gradient: accentGrad,
+                boxShadow: [BoxShadow(color: C.accent.withOpacity(0.4), blurRadius: 18)]),
+              child: Text('Д', style: disp(26, w: FontWeight.w800, c: C.bg))),
+            const SizedBox(width: 14),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Пробный период', style: disp(20, w: FontWeight.w700, c: C.accent)),
-              const SizedBox(height: 6),
-              Row(children: [const Icon(Icons.event, size: 14, color: C.muted), const SizedBox(width: 6), Text('осталось 3 дня', style: mono(13))]),
+              Text('Демо-режим', style: disp(20, w: FontWeight.w700)),
               const SizedBox(height: 4),
-              Row(children: [const Icon(Icons.devices, size: 14, color: C.muted), const SizedBox(width: 6), Text('2 / 10 устройств', style: mono(13))]),
+              Row(children: [_badge('Пробный', C.accent), const SizedBox(width: 6), _badge('DEMO', C.muted)]),
             ])),
-          ]),
-          const SizedBox(height: 16),
-          _btn('Продлить подписку', kind: 0, icon: Icons.bolt),
-        ])),
-        const SizedBox(height: 14),
-        _bitCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [_gIcon(Icons.qr_code_2, 4), const SizedBox(width: 12),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _kicker('ключ доступа'), const SizedBox(height: 3), Text('для роутера и ручной настройки', style: mono(11))]))]),
-          const SizedBox(height: 12),
-          Container(padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: C.bg, borderRadius: BorderRadius.circular(10)),
-            child: Text('vless://3a7c9f1e…3e2f@msk.bitaps.app:443?security=reality#bitaps-РФ',
-                style: mono(11, c: C.text), maxLines: 2, overflow: TextOverflow.ellipsis)),
-          const SizedBox(height: 12),
-          Row(children: [
-            Expanded(child: _btn('Скопировать', kind: 1, icon: Icons.copy)),
-            const SizedBox(width: 12),
-            Expanded(child: _btn('Обновить', kind: 2, icon: Icons.refresh)),
-          ]),
-        ])),
-        const SizedBox(height: 14),
-        _bitCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [_gIcon(Icons.card_giftcard, 3), const SizedBox(width: 12),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _kicker('пригласи друзей'), const SizedBox(height: 3), Text('Приглашай — получай бонусные дни', style: mono(11))]))]),
-          const SizedBox(height: 14),
-          Row(children: [
-            Expanded(child: _miniStat('3', 'позвал')),
-            Expanded(child: _miniStat('2', 'оформили')),
-            Expanded(child: _miniStat('30', 'дней бонус')),
-          ]),
-          const SizedBox(height: 12),
-          _btn('Поделиться ссылкой', kind: 1, icon: Icons.share),
-        ])),
-        const SizedBox(height: 14),
-        _bitCard(strong: true, child: Row(children: [
-          _gIcon(Icons.router, 0),
-          const SizedBox(width: 12),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('B-box — VPN для всего дома', style: disp(16, w: FontWeight.w600)),
-            const SizedBox(height: 3),
-            Text('коробочка · 15 000 ₽', style: mono(12, c: C.accent)),
           ])),
-          const Icon(Icons.chevron_right, color: C.muted),
-        ])),
-        const SizedBox(height: 14),
-        _bitCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [_gIcon(Icons.forum, 2), const SizedBox(width: 12), _kicker('поддержка')]),
-          const SizedBox(height: 12),
-          Container(height: 80, padding: const EdgeInsets.all(12), alignment: Alignment.topLeft,
-            decoration: BoxDecoration(color: C.bg, borderRadius: BorderRadius.circular(10)),
-            child: Text('Опиши проблему…', style: mono(13, c: C.muted))),
-          const SizedBox(height: 12),
-          _btn('Отправить', kind: 0, icon: Icons.send),
-          const SizedBox(height: 10),
-          Center(child: Text('или напиши @bitapssupport', style: mono(12, c: C.accent))),
-        ])),
-        const SizedBox(height: 14),
-        _bitCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [_gIcon(Icons.help, 0), const SizedBox(width: 12), _kicker('частые вопросы')]),
-          const SizedBox(height: 8),
-          for (final f in faqs) _faqRow(f),
-        ])),
-        const SizedBox(height: 18),
-        Center(child: Text('bitaps vpn · v1.0', style: mono(11, c: C.muted))),
-      ],
-    );
-  }
+          const SizedBox(height: 14),
+          _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [_gIcon(Icons.workspace_premium), const SizedBox(width: 12), _kicker('подписка')]),
+            const SizedBox(height: 16),
+            Row(children: [
+              _ring(3, 30),
+              const SizedBox(width: 20),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Пробный период', style: disp(20, w: FontWeight.w700, c: C.accent)),
+                const SizedBox(height: 6),
+                Row(children: [const Icon(Icons.event, size: 14, color: C.muted), const SizedBox(width: 6), Text('осталось 3 дня', style: mono(13))]),
+                const SizedBox(height: 4),
+                Row(children: [const Icon(Icons.devices, size: 14, color: C.muted), const SizedBox(width: 6), Text('2 / 10 устройств', style: mono(13))]),
+              ])),
+            ]),
+            const SizedBox(height: 16),
+            _btn('Продлить подписку', kind: 0, icon: Icons.bolt),
+          ])),
+          const SizedBox(height: 14),
+          _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [_gIcon(Icons.qr_code_2), const SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                _kicker('ключ доступа'), const SizedBox(height: 3), Text('для роутера и ручной настройки', style: mono(11))]))]),
+            const SizedBox(height: 12),
+            Container(padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: Colors.black.withOpacity(0.35), borderRadius: BorderRadius.circular(10)),
+              child: Text('vless://3a7c9f1e…3e2f@msk.bitaps.app:443?security=reality#bitaps-РФ',
+                style: mono(11, c: C.text), maxLines: 2, overflow: TextOverflow.ellipsis)),
+            const SizedBox(height: 12),
+            Row(children: [
+              Expanded(child: _btn('Скопировать', kind: 1, icon: Icons.copy)),
+              const SizedBox(width: 12),
+              Expanded(child: _btn('Обновить', kind: 2, icon: Icons.refresh)),
+            ]),
+          ])),
+          const SizedBox(height: 14),
+          _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [_gIcon(Icons.card_giftcard), const SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                _kicker('пригласи друзей'), const SizedBox(height: 3), Text('Приглашай — получай бонусные дни', style: mono(11))]))]),
+            const SizedBox(height: 14),
+            Row(children: [
+              Expanded(child: _miniStat('3', 'позвал')),
+              Expanded(child: _miniStat('2', 'оформили')),
+              Expanded(child: _miniStat('30', 'дней бонус')),
+            ]),
+            const SizedBox(height: 12),
+            _btn('Поделиться ссылкой', kind: 1, icon: Icons.share),
+          ])),
+          const SizedBox(height: 14),
+          _card(strong: true, child: Row(children: [
+            _gIcon(Icons.router),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('B-box — VPN для всего дома', style: disp(16, w: FontWeight.w600)),
+              const SizedBox(height: 3),
+              Text('коробочка · 15 000 ₽', style: mono(12, c: C.accent)),
+            ])),
+            const Icon(Icons.chevron_right, color: C.muted),
+          ])),
+          const SizedBox(height: 14),
+          _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [_gIcon(Icons.forum), const SizedBox(width: 12), _kicker('поддержка')]),
+            const SizedBox(height: 12),
+            Container(height: 80, padding: const EdgeInsets.all(12), alignment: Alignment.topLeft,
+              decoration: BoxDecoration(color: Colors.black.withOpacity(0.35), borderRadius: BorderRadius.circular(10)),
+              child: Text('Опиши проблему…', style: mono(13, c: C.muted))),
+            const SizedBox(height: 12),
+            _btn('Отправить', kind: 0, icon: Icons.send),
+            const SizedBox(height: 10),
+            Center(child: Text('или напиши @bitapssupport', style: mono(12, c: C.accent))),
+          ])),
+          const SizedBox(height: 14),
+          _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [_gIcon(Icons.help), const SizedBox(width: 12), _kicker('частые вопросы')]),
+            const SizedBox(height: 8),
+            for (final f in faqs) _faqRow(f),
+          ])),
+          const SizedBox(height: 18),
+          Center(child: Text('bitaps vpn · v1.0', style: mono(11, c: C.muted))),
+        ],
+      );
 
   Widget _faqRow(Faq f) => Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
@@ -542,52 +629,50 @@ class _ShellState extends State<Shell> {
       );
 
   // ---------------- SETTINGS ----------------
-  Widget _settings() {
-    return ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        Text('Настройки', style: disp(26, w: FontWeight.w800)),
-        const SizedBox(height: 18),
-        _kicker('безопасность'),
-        const SizedBox(height: 10),
-        _bitCard(child: Column(children: [
-          _toggle('Блокировка входа', 'Спрашивать Face ID / код при открытии', tgl1, (v) => setState(() => tgl1 = v)),
-          _divider(),
-          _toggle('Обрыв соединения', 'Уведомлять, если VPN отвалился', tgl2, (v) => setState(() => tgl2 = v)),
-          _divider(),
-          _toggle('Подписка истекает', 'Напомнить за пару дней', tgl3, (v) => setState(() => tgl3 = v)),
-          _divider(),
-          _toggle('Лимит трафика', 'Сигнал при большом расходе', tgl4, (v) => setState(() => tgl4 = v)),
-        ])),
-        const SizedBox(height: 22),
-        _kicker('инструменты'),
-        const SizedBox(height: 10),
-        _bitCard(padding: 6, child: Column(children: [
-          _navRow(Icons.speed, 'Спид-тест'),
-          _divider(),
-          _navRow(Icons.bar_chart, 'Статистика'),
-          _divider(),
-          _navRow(Icons.shield, 'Проверка утечек'),
-          _divider(),
-          _navRow(Icons.upload_file, 'Свой конфиг'),
-        ])),
-        const SizedBox(height: 22),
-        _kicker('подключение'),
-        const SizedBox(height: 10),
-        _bitCard(child: Column(children: [
-          _radioRow('Авто', true),
-          _divider(),
-          _radioRow('VLESS + Reality', false),
-          _divider(),
-          _radioRow('WireGuard', false),
-        ])),
-        const SizedBox(height: 22),
-        _btn('Выйти', kind: 1, icon: Icons.logout),
-        const SizedBox(height: 16),
-        Center(child: Text('bitaps vpn · v1.0', style: mono(11, c: C.muted))),
-      ],
-    );
-  }
+  Widget _settings() => ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          Text('Настройки', style: disp(26, w: FontWeight.w800)),
+          const SizedBox(height: 18),
+          _kicker('безопасность'),
+          const SizedBox(height: 10),
+          _card(child: Column(children: [
+            _toggle('Блокировка входа', 'Спрашивать Face ID / код при открытии', tgl1, (v) => setState(() => tgl1 = v)),
+            _divider(),
+            _toggle('Обрыв соединения', 'Уведомлять, если VPN отвалился', tgl2, (v) => setState(() => tgl2 = v)),
+            _divider(),
+            _toggle('Подписка истекает', 'Напомнить за пару дней', tgl3, (v) => setState(() => tgl3 = v)),
+            _divider(),
+            _toggle('Лимит трафика', 'Сигнал при большом расходе', tgl4, (v) => setState(() => tgl4 = v)),
+          ])),
+          const SizedBox(height: 22),
+          _kicker('инструменты'),
+          const SizedBox(height: 10),
+          _card(padding: 6, child: Column(children: [
+            _navRow(Icons.speed, 'Спид-тест'),
+            _divider(),
+            _navRow(Icons.bar_chart, 'Статистика'),
+            _divider(),
+            _navRow(Icons.shield, 'Проверка утечек'),
+            _divider(),
+            _navRow(Icons.upload_file, 'Свой конфиг'),
+          ])),
+          const SizedBox(height: 22),
+          _kicker('подключение'),
+          const SizedBox(height: 10),
+          _card(child: Column(children: [
+            _radioRow('Авто', true),
+            _divider(),
+            _radioRow('VLESS + Reality', false),
+            _divider(),
+            _radioRow('WireGuard', false),
+          ])),
+          const SizedBox(height: 22),
+          _btn('Выйти', kind: 1, icon: Icons.logout),
+          const SizedBox(height: 16),
+          Center(child: Text('bitaps vpn · v1.0', style: mono(11, c: C.muted))),
+        ],
+      );
 
   Widget _navRow(IconData ic, String label) => Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
@@ -621,26 +706,38 @@ class _ShellState extends State<Shell> {
         ]),
       );
 
-  // ---------------- SHARED ----------------
-  Widget _bitCard({required Widget child, double padding = 16, bool strong = false}) => Container(
-        padding: EdgeInsets.all(padding),
-        decoration: BoxDecoration(
-          color: strong ? C.cardHi : C.card,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: C.line),
-          boxShadow: const [BoxShadow(color: Color(0x55000000), blurRadius: 18, offset: Offset(0, 10))],
+  // ---------------- GLASS CARD + SHARED ----------------
+  Widget _card({required Widget child, double padding = 16, bool strong = false}) {
+    final r = BorderRadius.circular(18);
+    return Container(
+      decoration: BoxDecoration(borderRadius: r,
+        boxShadow: const [BoxShadow(color: Color(0x70000000), blurRadius: 20, offset: Offset(0, 12))]),
+      child: ClipRRect(
+        borderRadius: r,
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+          child: Container(
+            padding: EdgeInsets.all(padding),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: strong
+                    ? [Colors.white.withOpacity(0.13), Colors.white.withOpacity(0.05)]
+                    : [Colors.white.withOpacity(0.08), Colors.white.withOpacity(0.025)],
+                begin: Alignment.topLeft, end: Alignment.bottomRight),
+              borderRadius: r,
+              border: Border.all(color: Colors.white.withOpacity(0.14)),
+            ),
+            child: child,
+          ),
         ),
-        child: child,
-      );
-
-  Widget _gIcon(IconData ic, int idx) {
-    final g = chipGrads[idx % chipGrads.length];
-    return Container(width: 42, height: 42, alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: g[1].withOpacity(0.14), borderRadius: BorderRadius.circular(13),
-        border: Border.all(color: g[0].withOpacity(0.35))),
-      child: Icon(ic, size: 19, color: g[0]));
+      ),
+    );
   }
+
+  Widget _gIcon(IconData ic) => Container(width: 42, height: 42, alignment: Alignment.center,
+        decoration: BoxDecoration(color: C.accent.withOpacity(0.12), borderRadius: BorderRadius.circular(13),
+          border: Border.all(color: C.accent.withOpacity(0.30))),
+        child: Icon(ic, size: 19, color: C.accent));
 
   Widget _kicker(String t) => Text('// $t', style: mono(12, c: C.accent, w: FontWeight.w600));
 
@@ -654,13 +751,14 @@ class _ShellState extends State<Shell> {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         decoration: BoxDecoration(color: (on ? C.ok : C.muted).withOpacity(0.12), borderRadius: BorderRadius.circular(20)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: on ? C.ok : C.muted)),
+          Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: on ? C.ok : C.muted,
+            boxShadow: on ? [BoxShadow(color: C.ok.withOpacity(0.6), blurRadius: 8)] : null)),
           const SizedBox(width: 7),
           Text(on ? 'защищено' : 'не защищено', style: mono(12, c: on ? C.ok : C.muted, w: FontWeight.w600)),
         ]),
       );
 
-  Widget _infoTile(String val, String label) => _bitCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+  Widget _infoTile(String val, String label) => _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(val, style: disp(22, w: FontWeight.w800, c: C.accent)),
         const SizedBox(height: 4),
         Text(label, style: mono(11)),
@@ -676,7 +774,7 @@ class _ShellState extends State<Shell> {
         width: 78, height: 78,
         child: Stack(alignment: Alignment.center, children: [
           SizedBox(width: 78, height: 78, child: CircularProgressIndicator(
-            value: days / max, strokeWidth: 7, backgroundColor: C.cardHi, color: C.accent)),
+            value: days / max, strokeWidth: 7, backgroundColor: C.line, color: C.accent)),
           Column(mainAxisSize: MainAxisSize.min, children: [
             Text('$days', style: disp(24, w: FontWeight.w800)),
             Text('дн.', style: mono(10)),
@@ -697,10 +795,10 @@ class _ShellState extends State<Shell> {
         alignment: Alignment.center,
         decoration: BoxDecoration(
           gradient: solid ? accentGrad : null,
-          color: solid ? null : (line ? Colors.transparent : C.cardHi),
+          color: solid ? null : (line ? Colors.transparent : Colors.white.withOpacity(0.05)),
           borderRadius: BorderRadius.circular(12),
           border: line ? Border.all(color: C.line) : null,
-          boxShadow: solid ? [BoxShadow(color: C.accent.withOpacity(0.4), blurRadius: 20)] : null,
+          boxShadow: solid ? [BoxShadow(color: C.accent.withOpacity(0.45), blurRadius: 22)] : null,
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           if (icon != null) ...[Icon(icon, size: 17, color: solid ? C.bg : C.text), const SizedBox(width: 8)],
