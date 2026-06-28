@@ -7,6 +7,7 @@ DefaultDirName={autopf}\bitaps VPN
 DefaultGroupName=bitaps VPN
 DisableProgramGroupPage=yes
 OutputBaseFilename=bitaps-setup
+SourceDir=..
 OutputDir=.
 Compression=lzma2
 SolidCompression=yes
