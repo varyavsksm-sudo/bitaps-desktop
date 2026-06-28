@@ -1,7 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 
 Future<void> main() async {
@@ -38,6 +43,15 @@ class C {
 
 LinearGradient get accentGrad =>
     LinearGradient(colors: [C.accentSoft, C.accent], begin: Alignment.topLeft, end: Alignment.bottomRight);
+
+// Реальные ссылки/бэкенд
+const kBot = 'https://t.me/bitaps_vpn_auth_bot';
+const kSupport = 'https://t.me/bitapssupport';
+const kChannel = 'https://t.me/bitapsvpnofficial';
+const kRef = 'https://t.me/bitaps_vpn_auth_bot?start=ref_demo';
+const kNotify = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/notify';
+const kApiKey = 'sb_publishable_X2CJWgjqeZtbNelAri9ofw_trbfWF9Z';
+const kDemoKey = 'vless://3a7c9f1e…3e2f@msk.bitaps.app:443?security=reality#bitaps-РФ';
 
 // Персонализация: акцентные темы (имя, основной, мягкий) + стили кнопки
 const List<(String, Color, Color)> accentThemes = [
@@ -185,12 +199,17 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
   int conn = 0; // 0 off, 1 connecting, 2 on
   int secs = 0;
   int mode = 0;
+  int proto = 0;
+  int sessions = 0;
   Timer? _timer;
   Server server = ruServers[0];
   bool tgl1 = false, tgl2 = true, tgl3 = true, tgl4 = false;
   int accentIdx = 0, btnStyle = 0, down = 0, up = 0;
+  String keyStr = kDemoKey;
+  String? customCfg;
   final math.Random _rnd = math.Random();
   final TextEditingController _search = TextEditingController();
+  final TextEditingController _support = TextEditingController();
   String _q = '';
   final Set<String> favs = {};
 
@@ -202,13 +221,59 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       AnimationController(vsync: this, duration: const Duration(seconds: 4))..repeat();
 
   @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
   void dispose() {
     _timer?.cancel();
     _spin.dispose();
     _wave.dispose();
     _twinkle.dispose();
     _search.dispose();
+    _support.dispose();
     super.dispose();
+  }
+
+  // ----- persistence: настройки реально сохраняются между запусками -----
+  Future<void> _load() async {
+    final p = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      accentIdx = (p.getInt('accent') ?? 0).clamp(0, accentThemes.length - 1);
+      btnStyle = (p.getInt('btnStyle') ?? 0).clamp(0, btnStyleNames.length - 1);
+      mode = (p.getInt('mode') ?? 0).clamp(0, modeLabels.length - 1);
+      proto = (p.getInt('proto') ?? 0).clamp(0, 2);
+      tgl1 = p.getBool('tgl1') ?? false;
+      tgl2 = p.getBool('tgl2') ?? true;
+      tgl3 = p.getBool('tgl3') ?? true;
+      tgl4 = p.getBool('tgl4') ?? false;
+      sessions = p.getInt('sessions') ?? 0;
+      customCfg = p.getString('cfg');
+      favs
+        ..clear()
+        ..addAll(p.getStringList('favs') ?? const []);
+      final th = accentThemes[accentIdx];
+      C.accent = th.$2;
+      C.accentSoft = th.$3;
+    });
+  }
+
+  Future<void> _save() async {
+    final p = await SharedPreferences.getInstance();
+    await p.setInt('accent', accentIdx);
+    await p.setInt('btnStyle', btnStyle);
+    await p.setInt('mode', mode);
+    await p.setInt('proto', proto);
+    await p.setBool('tgl1', tgl1);
+    await p.setBool('tgl2', tgl2);
+    await p.setBool('tgl3', tgl3);
+    await p.setBool('tgl4', tgl4);
+    await p.setInt('sessions', sessions);
+    await p.setStringList('favs', favs.toList());
+    if (customCfg != null) await p.setString('cfg', customCfg!);
   }
 
   void toggle() {
@@ -219,8 +284,14 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       _spin.repeat();
       Future.delayed(const Duration(milliseconds: 900), () {
         if (!mounted) return;
-        setState(() => conn = 2);
-        secs = 0; down = 84; up = 13;
+        setState(() {
+          conn = 2;
+          secs = 0;
+          down = 84;
+          up = 13;
+          sessions++;
+        });
+        _save();
         _timer = Timer.periodic(const Duration(seconds: 1), (_) {
           if (mounted) setState(() { secs++; down = 60 + _rnd.nextInt(70); up = 8 + _rnd.nextInt(20); });
         });
@@ -241,6 +312,188 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     final m = ((secs % 3600) ~/ 60).toString().padLeft(2, '0');
     final s = (secs % 60).toString().padLeft(2, '0');
     return '$h:$m:$s';
+  }
+
+  // ----- реальные действия -----
+  void _toast(String m) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(m, style: mono(13, c: C.text)),
+        backgroundColor: C.bg2,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12), side: const BorderSide(color: C.line)),
+        duration: const Duration(seconds: 2),
+      ));
+  }
+
+  Future<void> _open(String url) async {
+    try {
+      final ok = await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      if (!ok) _toast('Не удалось открыть ссылку');
+    } catch (_) {
+      _toast('Не удалось открыть ссылку');
+    }
+  }
+
+  void _copy(String text, String label) {
+    Clipboard.setData(ClipboardData(text: text));
+    _toast('$label · скопировано в буфер');
+  }
+
+  void _genKey() {
+    final id = List.generate(8, (_) => '0123456789abcdef'[_rnd.nextInt(16)]).join();
+    final tail = List.generate(4, (_) => '0123456789abcdef'[_rnd.nextInt(16)]).join();
+    setState(() => keyStr = 'vless://$id…$tail@msk.bitaps.app:443?security=reality#bitaps-РФ');
+    _toast('Ключ перевыпущен ✓');
+  }
+
+  Future<void> _sendSupport() async {
+    final msg = _support.text.trim();
+    if (msg.isEmpty) {
+      _toast('Сначала напиши сообщение');
+      return;
+    }
+    _toast('Отправляю…');
+    try {
+      final r = await http.post(Uri.parse(kNotify),
+          headers: {'content-type': 'application/json', 'apikey': kApiKey},
+          body: jsonEncode({
+            'type': 'support',
+            'name': 'Пользователь приложения',
+            'email': '',
+            'message': msg,
+            'source': 'десктоп-приложение'
+          }));
+      if (r.statusCode >= 200 && r.statusCode < 300) {
+        _support.clear();
+        setState(() {});
+        _toast('Отправлено в поддержку ✓');
+      } else {
+        _toast('Ошибка отправки (${r.statusCode})');
+      }
+    } catch (_) {
+      _toast('Нет связи с сервером');
+    }
+  }
+
+  Future<void> _leakCheck() async {
+    _toast('Проверяю внешний IP…');
+    try {
+      final r = await http.get(Uri.parse('https://api.ipify.org?format=json'));
+      final ip = (jsonDecode(r.body) as Map)['ip'];
+      _dialog('Проверка утечек', 'Твой текущий внешний IP:\n\n$ip\n\nС включённым VPN он сменится на адрес сервера — так проверяется, что трафик идёт через туннель.');
+    } catch (_) {
+      _toast('Не удалось получить IP');
+    }
+  }
+
+  Future<void> _speedTest() async {
+    _toast('Замеряю скорость…');
+    try {
+      final sw = Stopwatch()..start();
+      final r = await http.get(Uri.parse('https://speed.cloudflare.com/__down?bytes=4000000'));
+      sw.stop();
+      final secs = sw.elapsedMilliseconds / 1000.0;
+      final mbps = r.bodyBytes.length * 8 / secs / 1e6;
+      final mb = r.bodyBytes.length / 1048576;
+      _dialog('Спид-тест',
+          'Скорость загрузки: ${mbps.toStringAsFixed(1)} Mbps\n\nПолучено ${mb.toStringAsFixed(1)} MB за ${sw.elapsedMilliseconds} мс\n(реальный замер через Cloudflare)');
+    } catch (_) {
+      _toast('Спид-тест не удался');
+    }
+  }
+
+  void _showStats() {
+    _dialog('Статистика',
+        'Сессий запущено: $sessions\nТекущая сессия: ${conn == 2 ? hms : "не подключено"}\nСервер: ${server.city}\nРежим: ${modeLabels[mode]}\nИзбранных серверов: ${favs.length}');
+  }
+
+  void _customConfig() {
+    final ctrl = TextEditingController(text: customCfg ?? '');
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: C.bg2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: C.line)),
+        title: Text('Свой конфиг', style: disp(18, w: FontWeight.w700)),
+        content: TextField(
+          controller: ctrl,
+          maxLines: 4,
+          style: mono(12, c: C.text),
+          cursorColor: C.accent,
+          decoration: InputDecoration(hintText: 'Вставь vless:// или другой конфиг', hintStyle: mono(12, c: C.muted)),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: Text('Отмена', style: mono(13, c: C.muted))),
+          TextButton(
+            onPressed: () {
+              setState(() => customCfg = ctrl.text.trim().isEmpty ? null : ctrl.text.trim());
+              _save();
+              Navigator.pop(context);
+              _toast(customCfg == null ? 'Конфиг очищен' : 'Конфиг сохранён ✓');
+            },
+            child: Text('Сохранить', style: mono(13, c: C.accent)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _logout() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: C.bg2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: C.line)),
+        title: Text('Выйти?', style: disp(18, w: FontWeight.w700)),
+        content: Text('Сбросит подключение и настройки этого устройства.', style: mono(13, c: C.muted)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: Text('Отмена', style: mono(13, c: C.muted))),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              _timer?.cancel();
+              final p = await SharedPreferences.getInstance();
+              await p.clear();
+              if (!mounted) return;
+              setState(() {
+                conn = 0; secs = 0; tab = 0; accentIdx = 0; btnStyle = 0; mode = 0; proto = 0;
+                tgl1 = false; tgl2 = true; tgl3 = true; tgl4 = false; customCfg = null; keyStr = kDemoKey;
+                favs.clear();
+                C.accent = accentThemes[0].$2;
+                C.accentSoft = accentThemes[0].$3;
+              });
+              _toast('Готово — всё сброшено');
+            },
+            child: Text('Выйти', style: mono(13, c: C.danger)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _dialog(String title, String body) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: C.bg2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: C.line)),
+        title: Text(title, style: disp(18, w: FontWeight.w700)),
+        content: Text(body, style: mono(13, c: C.text)),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text('Ок', style: mono(13, c: C.accent)))],
+      ),
+    );
+  }
+
+  void _pickServer(Server s) {
+    if (!s.available) {
+      _toast('${s.city} — скоро');
+      return;
+    }
+    setState(() => server = s);
+    _toast('Сервер: ${s.city}');
   }
 
   @override
@@ -481,7 +734,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
   Widget _modeChip(String label, int i) {
     final sel = mode == i;
     return GestureDetector(
-      onTap: () => setState(() => mode = i),
+      onTap: () { setState(() => mode = i); _save(); },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         height: 40, alignment: Alignment.center,
@@ -497,16 +750,22 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
 
   Widget _miniChip(Server s) => Padding(
         padding: const EdgeInsets.only(right: 8),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(color: Colors.white.withOpacity(0.04),
-            borderRadius: BorderRadius.circular(20), border: Border.all(color: C.line)),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Text(s.flag, style: const TextStyle(fontSize: 13)),
-            const SizedBox(width: 6),
-            Text(s.city, style: disp(12, w: FontWeight.w600)),
-          ]),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => _pickServer(s),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: server.id == s.id ? C.accent.withOpacity(0.16) : Colors.white.withOpacity(0.04),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: server.id == s.id ? C.accent : C.line)),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Text(s.flag, style: const TextStyle(fontSize: 13)),
+              const SizedBox(width: 6),
+              Text(s.city, style: disp(12, w: FontWeight.w600)),
+            ]),
+          ),
         ),
       );
 
@@ -514,11 +773,14 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     final th = accentThemes[i];
     final sel = accentIdx == i;
     return GestureDetector(
-      onTap: () => setState(() {
-        accentIdx = i;
-        C.accent = th.$2;
-        C.accentSoft = th.$3;
-      }),
+      onTap: () {
+        setState(() {
+          accentIdx = i;
+          C.accent = th.$2;
+          C.accentSoft = th.$3;
+        });
+        _save();
+      },
       child: Container(
         margin: const EdgeInsets.only(right: 12),
         width: 44, height: 44, alignment: Alignment.center,
@@ -534,7 +796,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
   Widget _styleChip(int i) {
     final sel = btnStyle == i;
     return GestureDetector(
-      onTap: () => setState(() => btnStyle = i),
+      onTap: () { setState(() => btnStyle = i); _save(); },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
         decoration: BoxDecoration(color: sel ? C.accent.withOpacity(0.16) : Colors.white.withOpacity(0.04),
@@ -557,17 +819,21 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
             Expanded(child: _infoTile('99.9%', 'аптайм')),
           ]),
           const SizedBox(height: 16),
-          _card(strong: true, child: Row(children: [
-            _gIcon(Icons.bolt),
-            const SizedBox(width: 14),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [Text('Быстрый сервер', style: disp(16, w: FontWeight.w700)),
-                const SizedBox(width: 8), _badge('АВТО', C.accent)]),
-              const SizedBox(height: 3),
-              Text('Москва · 12 ms', style: mono(12)),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => _pickServer(ruServers[0]),
+            child: _card(strong: true, child: Row(children: [
+              _gIcon(Icons.bolt),
+              const SizedBox(width: 14),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [Text('Быстрый сервер', style: disp(16, w: FontWeight.w700)),
+                  const SizedBox(width: 8), _badge('АВТО', C.accent)]),
+                const SizedBox(height: 3),
+                Text('Москва · 12 ms', style: mono(12)),
+              ])),
+              const Icon(Icons.chevron_right, color: C.muted),
             ])),
-            const Icon(Icons.chevron_right, color: C.muted),
-          ])),
+          ),
           const SizedBox(height: 12),
           _card(padding: 12, child: Row(children: [
             const Icon(Icons.search, size: 18, color: C.muted),
@@ -626,7 +892,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       opacity: s.available ? 1 : 0.55,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: s.available ? () => setState(() => server = s) : null,
+        onTap: () => _pickServer(s),
         child: Container(
           margin: const EdgeInsets.only(bottom: 8),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
@@ -653,7 +919,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
             const SizedBox(width: 8),
             GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTap: () => setState(() => favs.contains(s.id) ? favs.remove(s.id) : favs.add(s.id)),
+              onTap: () { setState(() => favs.contains(s.id) ? favs.remove(s.id) : favs.add(s.id)); _save(); },
               child: Icon(favs.contains(s.id) ? Icons.star : Icons.star_border, size: 18,
                 color: favs.contains(s.id) ? C.accentSoft : C.muted)),
             const SizedBox(width: 8),
@@ -704,7 +970,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
               ])),
             ]),
             const SizedBox(height: 16),
-            _btn('Продлить подписку', kind: 0, icon: Icons.bolt),
+            _btn('Продлить подписку', kind: 0, icon: Icons.bolt, onTap: () => _open(kBot)),
           ])),
           const SizedBox(height: 14),
           _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -714,13 +980,12 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
             const SizedBox(height: 12),
             Container(padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(color: Colors.black.withOpacity(0.35), borderRadius: BorderRadius.circular(10)),
-              child: Text('vless://3a7c9f1e…3e2f@msk.bitaps.app:443?security=reality#bitaps-РФ',
-                style: mono(11, c: C.text), maxLines: 2, overflow: TextOverflow.ellipsis)),
+              child: Text(keyStr, style: mono(11, c: C.text), maxLines: 2, overflow: TextOverflow.ellipsis)),
             const SizedBox(height: 12),
             Row(children: [
-              Expanded(child: _btn('Скопировать', kind: 1, icon: Icons.copy)),
+              Expanded(child: _btn('Скопировать', kind: 1, icon: Icons.copy, onTap: () => _copy(keyStr, 'Ключ'))),
               const SizedBox(width: 12),
-              Expanded(child: _btn('Обновить', kind: 2, icon: Icons.refresh)),
+              Expanded(child: _btn('Обновить', kind: 2, icon: Icons.refresh, onTap: _genKey)),
             ]),
           ])),
           const SizedBox(height: 14),
@@ -735,30 +1000,44 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
               Expanded(child: _miniStat('30', 'дней бонус')),
             ]),
             const SizedBox(height: 12),
-            _btn('Поделиться ссылкой', kind: 1, icon: Icons.share),
+            _btn('Поделиться ссылкой', kind: 1, icon: Icons.share, onTap: () => _copy(kRef, 'Реферальная ссылка')),
           ])),
           const SizedBox(height: 14),
-          _card(strong: true, child: Row(children: [
-            _gIcon(Icons.router),
-            const SizedBox(width: 12),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('B-box — VPN для всего дома', style: disp(16, w: FontWeight.w600)),
-              const SizedBox(height: 3),
-              Text('коробочка · 15 000 ₽', style: mono(12, c: C.accent)),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => _open(kBot),
+            child: _card(strong: true, child: Row(children: [
+              _gIcon(Icons.router),
+              const SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('B-box — VPN для всего дома', style: disp(16, w: FontWeight.w600)),
+                const SizedBox(height: 3),
+                Text('коробочка · 15 000 ₽', style: mono(12, c: C.accent)),
+              ])),
+              const Icon(Icons.chevron_right, color: C.muted),
             ])),
-            const Icon(Icons.chevron_right, color: C.muted),
-          ])),
+          ),
           const SizedBox(height: 14),
           _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [_gIcon(Icons.forum), const SizedBox(width: 12), _kicker('поддержка')]),
             const SizedBox(height: 12),
-            Container(height: 80, padding: const EdgeInsets.all(12), alignment: Alignment.topLeft,
+            Container(padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(color: Colors.black.withOpacity(0.35), borderRadius: BorderRadius.circular(10)),
-              child: Text('Опиши проблему…', style: mono(13, c: C.muted))),
+              child: TextField(
+                controller: _support,
+                maxLines: 3,
+                style: mono(13, c: C.text),
+                cursorColor: C.accent,
+                decoration: InputDecoration(isDense: true, border: InputBorder.none,
+                  contentPadding: EdgeInsets.zero, hintText: 'Опиши проблему…', hintStyle: mono(13, c: C.muted)),
+              )),
             const SizedBox(height: 12),
-            _btn('Отправить', kind: 0, icon: Icons.send),
+            _btn('Отправить', kind: 0, icon: Icons.send, onTap: _sendSupport),
             const SizedBox(height: 10),
-            Center(child: Text('или напиши @bitapssupport', style: mono(12, c: C.accent))),
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _open(kSupport),
+              child: Center(child: Text('или напиши @bitapssupport', style: mono(12, c: C.accent)))),
           ])),
           const SizedBox(height: 14),
           _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -804,62 +1083,73 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
           _kicker('безопасность'),
           const SizedBox(height: 10),
           _card(child: Column(children: [
-            _toggle('Блокировка входа', 'Спрашивать Face ID / код при открытии', tgl1, (v) => setState(() => tgl1 = v)),
+            _toggle('Блокировка входа', 'Спрашивать Face ID / код при открытии', tgl1, (v) { setState(() => tgl1 = v); _save(); }),
             _divider(),
-            _toggle('Обрыв соединения', 'Уведомлять, если VPN отвалился', tgl2, (v) => setState(() => tgl2 = v)),
+            _toggle('Обрыв соединения', 'Уведомлять, если VPN отвалился', tgl2, (v) { setState(() => tgl2 = v); _save(); }),
             _divider(),
-            _toggle('Подписка истекает', 'Напомнить за пару дней', tgl3, (v) => setState(() => tgl3 = v)),
+            _toggle('Подписка истекает', 'Напомнить за пару дней', tgl3, (v) { setState(() => tgl3 = v); _save(); }),
             _divider(),
-            _toggle('Лимит трафика', 'Сигнал при большом расходе', tgl4, (v) => setState(() => tgl4 = v)),
+            _toggle('Лимит трафика', 'Сигнал при большом расходе', tgl4, (v) { setState(() => tgl4 = v); _save(); }),
           ])),
           const SizedBox(height: 22),
           _kicker('инструменты'),
           const SizedBox(height: 10),
           _card(padding: 6, child: Column(children: [
-            _navRow(Icons.speed, 'Спид-тест'),
+            _navRow(Icons.speed, 'Спид-тест', _speedTest),
             _divider(),
-            _navRow(Icons.bar_chart, 'Статистика'),
+            _navRow(Icons.bar_chart, 'Статистика', _showStats),
             _divider(),
-            _navRow(Icons.shield, 'Проверка утечек'),
+            _navRow(Icons.shield, 'Проверка утечек', _leakCheck),
             _divider(),
-            _navRow(Icons.upload_file, 'Свой конфиг'),
+            _navRow(Icons.upload_file, customCfg == null ? 'Свой конфиг' : 'Свой конфиг ✓', _customConfig),
           ])),
           const SizedBox(height: 22),
           _kicker('подключение'),
           const SizedBox(height: 10),
           _card(child: Column(children: [
-            _radioRow('Авто', true),
+            _radioRow('Авто', 0),
             _divider(),
-            _radioRow('VLESS + Reality', false),
+            _radioRow('VLESS + Reality', 1),
             _divider(),
-            _radioRow('WireGuard', false),
+            _radioRow('WireGuard', 2),
           ])),
           const SizedBox(height: 22),
-          _btn('Выйти', kind: 1, icon: Icons.logout),
+          _btn('Выйти', kind: 1, icon: Icons.logout, onTap: _logout),
           const SizedBox(height: 16),
           Center(child: Text('bitaps vpn · v1.0', style: mono(11, c: C.muted))),
         ],
       );
 
-  Widget _navRow(IconData ic, String label) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-        child: Row(children: [
-          Icon(ic, size: 19, color: C.accent),
-          const SizedBox(width: 12),
-          Text(label, style: disp(15, w: FontWeight.w500)),
-          const Spacer(),
-          const Icon(Icons.chevron_right, size: 18, color: C.muted),
-        ]),
+  Widget _navRow(IconData ic, String label, VoidCallback onTap) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+          child: Row(children: [
+            Icon(ic, size: 19, color: C.accent),
+            const SizedBox(width: 12),
+            Text(label, style: disp(15, w: FontWeight.w500)),
+            const Spacer(),
+            const Icon(Icons.chevron_right, size: 18, color: C.muted),
+          ]),
+        ),
       );
 
-  Widget _radioRow(String label, bool sel) => Padding(
+  Widget _radioRow(String label, int idx) {
+    final sel = proto == idx;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () { setState(() => proto = idx); _save(); },
+      child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
         child: Row(children: [
           Text(label, style: disp(15, w: FontWeight.w500)),
           const Spacer(),
           Icon(sel ? Icons.radio_button_checked : Icons.radio_button_off, size: 20, color: sel ? C.accent : C.muted),
         ]),
-      );
+      ),
+    );
+  }
 
   Widget _toggle(String title, String sub, bool v, ValueChanged<bool> onCh) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
@@ -951,11 +1241,12 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
 
   Widget _divider() => Container(height: 1, color: C.line, margin: const EdgeInsets.symmetric(vertical: 4));
 
-  Widget _btn(String label, {int kind = 0, IconData? icon}) {
+  Widget _btn(String label, {int kind = 0, IconData? icon, VoidCallback? onTap}) {
     final solid = kind == 0;
     final line = kind == 1;
     return GestureDetector(
-      onTap: () {},
+      onTap: onTap ?? () {},
+      behavior: HitTestBehavior.opaque,
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 14),
