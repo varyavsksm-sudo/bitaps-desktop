@@ -21,21 +21,25 @@ jobs:
       - run: flutter create --platforms=windows --project-name bitaps_vpn .
       - run: flutter pub get
       - run: flutter build windows --release
-      - name: Package
-        run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath bitaps-windows-x64.zip
+      - name: Portable zip
+        run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath bitaps-windows-x64.zip -Force
+      - name: Installer (Inno Setup)
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" pkg\installer.iss'
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
           name: Последняя сборка
-          files: bitaps-windows-x64.zip
+          files: |
+            bitaps-setup.exe
+            bitaps-windows-x64.zip
 
   linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Linux build deps
-        run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+      - name: Build deps
+        run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libfuse2
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -44,11 +48,15 @@ jobs:
       - run: flutter create --platforms=linux --project-name bitaps_vpn .
       - run: flutter pub get
       - run: flutter build linux --release
-      - name: Package
+      - name: Portable tar.gz
         run: tar -czf bitaps-linux-x64.tar.gz -C build/linux/x64/release/bundle .
+      - name: AppImage
+        run: bash pkg/build-appimage.sh
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
           name: Последняя сборка
-          files: bitaps-linux-x64.tar.gz
+          files: |
+            bitaps-x86_64.AppImage
+            bitaps-linux-x64.tar.gz
