@@ -28,16 +28,26 @@ class C {
   static const text = Color(0xFFEDF1F8);
   static const muted = Color(0xFF8A93A6);
   static const line = Color(0x14FFFFFF);
-  static const accent = Color(0xFFFF7A1A);
-  static const accentSoft = Color(0xFFFFB347);
+  static Color accent = const Color(0xFFFF7A1A);
+  static Color accentSoft = const Color(0xFFFFB347);
   static const accent2 = Color(0xFF2D8BFF);
   static const ok = Color(0xFF39D98A);
   static const warn = Color(0xFFFFAE3D);
   static const danger = Color(0xFFFF5470);
 }
 
-const LinearGradient accentGrad =
+LinearGradient get accentGrad =>
     LinearGradient(colors: [C.accentSoft, C.accent], begin: Alignment.topLeft, end: Alignment.bottomRight);
+
+// Персонализация: акцентные темы (имя, основной, мягкий) + стили кнопки
+const List<(String, Color, Color)> accentThemes = [
+  ('Sunset', Color(0xFFFF7A1A), Color(0xFFFFB347)),
+  ('Neon', Color(0xFF2DE2FF), Color(0xFF6AA8FF)),
+  ('Emerald', Color(0xFF19D98A), Color(0xFF6FF0BD)),
+  ('Lavender', Color(0xFFA779FF), Color(0xFFD0B3FF)),
+  ('Crimson', Color(0xFFFF4D6D), Color(0xFFFF9BAD)),
+];
+const btnStyleNames = ['Шестерёнка', 'Кольцо', 'Пульс'];
 
 TextStyle disp(double s, {FontWeight w = FontWeight.w700, Color c = C.text}) =>
     TextStyle(fontFamily: 'SpaceGrotesk', fontSize: s, fontWeight: w, color: c, letterSpacing: -0.3, height: 1.15);
@@ -123,7 +133,7 @@ class BitApp extends StatelessWidget {
       theme: ThemeData(
         brightness: Brightness.dark,
         scaffoldBackgroundColor: C.bg,
-        colorScheme: const ColorScheme.dark(primary: C.accent, surface: C.bg2),
+        colorScheme: ColorScheme.dark(primary: C.accent, surface: C.bg2),
         useMaterial3: true,
         fontFamily: 'SpaceGrotesk',
       ),
@@ -146,6 +156,8 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
   Timer? _timer;
   Server server = ruServers[0];
   bool tgl1 = false, tgl2 = true, tgl3 = true, tgl4 = false;
+  int accentIdx = 0, btnStyle = 0, down = 0, up = 0;
+  final math.Random _rnd = math.Random();
 
   late final AnimationController _spin =
       AnimationController(vsync: this, duration: const Duration(seconds: 6))..repeat();
@@ -172,9 +184,9 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       Future.delayed(const Duration(milliseconds: 900), () {
         if (!mounted) return;
         setState(() => conn = 2);
-        secs = 0;
+        secs = 0; down = 84; up = 13;
         _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-          if (mounted) setState(() => secs++);
+          if (mounted) setState(() { secs++; down = 60 + _rnd.nextInt(70); up = 8 + _rnd.nextInt(20); });
         });
       });
     } else {
@@ -212,7 +224,9 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
         const Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(
           gradient: RadialGradient(center: Alignment(1.0, -0.9), radius: 0.8,
             colors: [Color(0x1A2D8BFF), Color(0x002D8BFF)])))),
-        SafeArea(bottom: false, child: screens[tab]),
+        SafeArea(bottom: false, child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 280),
+          child: KeyedSubtree(key: ValueKey(tab), child: screens[tab]))),
       ]),
       bottomNavigationBar: _bottomBar(),
     );
@@ -294,7 +308,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
             behavior: HitTestBehavior.opaque,
             onTap: () => setState(() => tab = 1),
             child: Row(children: [
-              const Icon(Icons.swap_horiz, size: 17, color: C.accent),
+              Icon(Icons.swap_horiz, size: 17, color: C.accent),
               const SizedBox(width: 5),
               Text('сменить', style: disp(13, w: FontWeight.w700, c: C.accent)),
             ]),
@@ -312,11 +326,11 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
         _card(padding: 13, child: Row(children: [
           Text('↓', style: disp(15, c: C.muted)),
           const SizedBox(width: 5),
-          Text(connected ? '84' : '—', style: mono(13, c: C.text, w: FontWeight.w600)),
+          Text(connected ? '$down' : '—', style: mono(13, c: C.text, w: FontWeight.w600)),
           const SizedBox(width: 16),
           Text('↑', style: disp(15, c: C.muted)),
           const SizedBox(width: 5),
-          Text(connected ? '13' : '—', style: mono(13, c: C.text, w: FontWeight.w600)),
+          Text(connected ? '$up' : '—', style: mono(13, c: C.text, w: FontWeight.w600)),
           const Spacer(),
           const Icon(Icons.language, size: 15, color: C.muted),
           const SizedBox(width: 6),
@@ -351,38 +365,54 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     final connected = conn == 2;
     final busy = conn == 1;
     final glow = connected ? 0.6 : busy ? 0.35 : 0.0;
+    final col = connected ? C.accent : busy ? C.accentSoft : C.muted;
+    final showRings = connected || btnStyle == 2;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: toggle,
       child: SizedBox(
         width: 270, height: 270,
         child: Stack(alignment: Alignment.center, children: [
-          // expanding pulse rings (connected)
-          if (connected)
+          if (showRings)
             AnimatedBuilder(animation: _wave, builder: (_, __) {
               return Stack(alignment: Alignment.center, children: [
                 for (int i = 0; i < 3; i++) _pulseRing((_wave.value + i / 3) % 1.0),
               ]);
             }),
-          // halo glow (blooms on connect)
           AnimatedContainer(
             duration: const Duration(milliseconds: 450),
             width: 270, height: 270,
             decoration: BoxDecoration(shape: BoxShape.circle, gradient: RadialGradient(
               colors: [C.accent.withOpacity(glow), C.accent.withOpacity(0)], stops: const [0.25, 1.0])),
           ),
-          // spinning gear ring
-          RotationTransition(turns: _spin,
-            child: AnimatedOpacity(
-              duration: const Duration(milliseconds: 350),
-              opacity: conn == 0 ? 0.82 : 1,
-              child: Image.asset('assets/gearring.png', width: 212, height: 212, fit: BoxFit.contain),
-            )),
-          // static hub B
-          Text('B', style: disp(60, w: FontWeight.w800, c: Colors.white)),
+          _powerInner(col),
         ]),
       ),
     );
+  }
+
+  Widget _powerInner(Color col) {
+    switch (btnStyle) {
+      case 1: // кольцо
+        return Stack(alignment: Alignment.center, children: [
+          Container(width: 210, height: 210,
+            decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: col, width: 6))),
+          Container(width: 168, height: 168,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: C.bg2, border: Border.all(color: C.line))),
+          Icon(Icons.power_settings_new, size: 64, color: col),
+        ]);
+      case 2: // пульс
+        return Container(width: 120, height: 120, alignment: Alignment.center,
+          decoration: BoxDecoration(shape: BoxShape.circle, color: C.bg2, border: Border.all(color: col, width: 2)),
+          child: Icon(Icons.power_settings_new, size: 50, color: col));
+      default: // шестерёнка
+        return Stack(alignment: Alignment.center, children: [
+          RotationTransition(turns: _spin, child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 350), opacity: conn == 0 ? 0.82 : 1,
+            child: Image.asset('assets/gearring.png', width: 212, height: 212, fit: BoxFit.contain))),
+          Text('B', style: disp(60, w: FontWeight.w800, c: Colors.white)),
+        ]);
+    }
   }
 
   Widget _pulseRing(double v) {
@@ -427,6 +457,38 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
           ]),
         ),
       );
+
+  Widget _accentSwatch(int i) {
+    final th = accentThemes[i];
+    final sel = accentIdx == i;
+    return GestureDetector(
+      onTap: () => setState(() {
+        accentIdx = i;
+        C.accent = th.$2;
+        C.accentSoft = th.$3;
+      }),
+      child: Container(
+        margin: const EdgeInsets.only(right: 12),
+        width: 44, height: 44, alignment: Alignment.center,
+        decoration: BoxDecoration(shape: BoxShape.circle,
+          gradient: LinearGradient(colors: [th.$3, th.$2]),
+          border: Border.all(color: sel ? Colors.white : Colors.transparent, width: 3),
+          boxShadow: [BoxShadow(color: th.$2.withOpacity(0.5), blurRadius: sel ? 14 : 6)]),
+        child: sel ? const Icon(Icons.check, size: 18, color: Colors.white) : null,
+      ),
+    );
+  }
+
+  Widget _styleChip(int i) {
+    final sel = btnStyle == i;
+    return GestureDetector(
+      onTap: () => setState(() => btnStyle = i),
+      child: Container(height: 40, alignment: Alignment.center,
+        decoration: BoxDecoration(color: sel ? C.accent.withOpacity(0.16) : Colors.white.withOpacity(0.04),
+          borderRadius: BorderRadius.circular(11), border: Border.all(color: sel ? C.accent : C.line)),
+        child: Text(btnStyleNames[i], style: disp(12, w: FontWeight.w600, c: sel ? C.accent : C.muted))),
+    );
+  }
 
   // ---------------- SERVERS ----------------
   Widget _servers() => ListView(
@@ -634,6 +696,21 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
         children: [
           Text('Настройки', style: disp(26, w: FontWeight.w800)),
           const SizedBox(height: 18),
+          _kicker('персонализация'),
+          const SizedBox(height: 10),
+          _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Цвет акцента', style: disp(15, w: FontWeight.w600)),
+            const SizedBox(height: 12),
+            Row(children: [for (int i = 0; i < accentThemes.length; i++) _accentSwatch(i)]),
+            const SizedBox(height: 18),
+            Text('Кнопка подключения', style: disp(15, w: FontWeight.w600)),
+            const SizedBox(height: 10),
+            Row(children: [
+              for (int i = 0; i < btnStyleNames.length; i++)
+                Expanded(child: Padding(padding: EdgeInsets.only(right: i < 2 ? 8 : 0), child: _styleChip(i))),
+            ]),
+          ])),
+          const SizedBox(height: 22),
           _kicker('безопасность'),
           const SizedBox(height: 10),
           _card(child: Column(children: [
