@@ -186,6 +186,9 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
   bool tgl1 = false, tgl2 = true, tgl3 = true, tgl4 = false;
   int accentIdx = 0, btnStyle = 0, down = 0, up = 0;
   final math.Random _rnd = math.Random();
+  final TextEditingController _search = TextEditingController();
+  String _q = '';
+  final Set<String> favs = {};
 
   late final AnimationController _spin =
       AnimationController(vsync: this, duration: const Duration(seconds: 6))..repeat();
@@ -200,6 +203,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     _spin.dispose();
     _wave.dispose();
     _twinkle.dispose();
+    _search.dispose();
     super.dispose();
   }
 
@@ -572,18 +576,52 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
           _card(padding: 12, child: Row(children: [
             const Icon(Icons.search, size: 18, color: C.muted),
             const SizedBox(width: 10),
-            Text('Поиск города или страны', style: mono(13, c: C.muted)),
+            Expanded(child: TextField(
+              controller: _search,
+              onChanged: (v) => setState(() => _q = v),
+              style: mono(13, c: C.text),
+              cursorColor: C.accent,
+              decoration: InputDecoration(isDense: true, border: InputBorder.none,
+                contentPadding: EdgeInsets.zero, hintText: 'Поиск города или страны', hintStyle: mono(13, c: C.muted)),
+            )),
+            if (_q.isNotEmpty) GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => setState(() { _q = ''; _search.clear(); }),
+              child: const Icon(Icons.close, size: 16, color: C.muted)),
           ])),
           const SizedBox(height: 22),
-          _kicker('🇷🇺 Россия'),
-          const SizedBox(height: 10),
-          for (final s in ruServers) _serverRow(s),
-          const SizedBox(height: 22),
-          _kicker('🌍 Зарубежные · скоро'),
-          const SizedBox(height: 10),
-          for (final s in intlServers) _serverRow(s),
+          ..._serverSections(),
         ],
       );
+
+  List<Widget> _serverSections() {
+    final all = [...ruServers, ...intlServers];
+    final q = _q.trim().toLowerCase();
+    if (q.isNotEmpty) {
+      final found = all.where((s) => s.city.toLowerCase().contains(q) || s.country.toLowerCase().contains(q)).toList();
+      return [
+        _kicker(found.isEmpty ? 'ничего не найдено' : 'результаты'),
+        const SizedBox(height: 10),
+        for (final s in found) _serverRow(s),
+      ];
+    }
+    final favList = all.where((s) => favs.contains(s.id)).toList();
+    return [
+      if (favList.isNotEmpty) ...[
+        _kicker('⭐ избранное'),
+        const SizedBox(height: 10),
+        for (final s in favList) _serverRow(s),
+        const SizedBox(height: 22),
+      ],
+      _kicker('🇷🇺 Россия'),
+      const SizedBox(height: 10),
+      for (final s in ruServers) _serverRow(s),
+      const SizedBox(height: 22),
+      _kicker('🌍 Зарубежные · скоро'),
+      const SizedBox(height: 10),
+      for (final s in intlServers) _serverRow(s),
+    ];
+  }
 
   Widget _serverRow(Server s) {
     final sel = s.id == server.id;
@@ -614,9 +652,15 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
               Text(s.country, style: mono(12)),
             ])),
             Text('${s.ping} ms', style: mono(13, c: pingCol, w: FontWeight.w600)),
-            const SizedBox(width: 12),
-            SizedBox(width: 50, child: _loadBar(s.load)),
             const SizedBox(width: 10),
+            SizedBox(width: 42, child: _loadBar(s.load)),
+            const SizedBox(width: 8),
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => setState(() => favs.contains(s.id) ? favs.remove(s.id) : favs.add(s.id)),
+              child: Icon(favs.contains(s.id) ? Icons.star : Icons.star_border, size: 18,
+                color: favs.contains(s.id) ? C.accentSoft : C.muted)),
+            const SizedBox(width: 8),
             Icon(sel ? Icons.check_circle : Icons.circle_outlined, size: 20, color: sel ? C.accent : C.muted),
           ]),
         ),
