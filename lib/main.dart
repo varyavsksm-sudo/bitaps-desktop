@@ -51,7 +51,7 @@ const kChannel = 'https://t.me/bitapsvpnofficial';
 const kRef = 'https://t.me/bitaps_vpn_auth_bot?start=ref_demo';
 const kNotify = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/notify';
 const kApiKey = 'sb_publishable_X2CJWgjqeZtbNelAri9ofw_trbfWF9Z';
-const kDemoKey = 'vless://3a7c9f1e…3e2f@msk.bitaps.app:443?security=reality#bitaps-РФ';
+const kDemoKey = 'vless://3a7c9f1e-0b2d-4e6f-9a1c-7b3e2f8d4c5a@vpn.bitaps.app:443?security=reality&type=tcp&sni=www.microsoft.com&fp=chrome&pbk=DEMObitapsPLACEHOLDERkey00000000000000000000000&sid=88#bitaps%20VPN';
 
 // Персонализация: акцентные темы (имя, основной, мягкий) + стили кнопки
 const List<(String, Color, Color)> accentThemes = [
@@ -207,6 +207,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
   int accentIdx = 0, btnStyle = 0, down = 0, up = 0;
   String keyStr = kDemoKey;
   String? customCfg;
+  String? importedHost;
   final math.Random _rnd = math.Random();
   final TextEditingController _search = TextEditingController();
   final TextEditingController _support = TextEditingController();
@@ -252,6 +253,8 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       tgl4 = p.getBool('tgl4') ?? false;
       sessions = p.getInt('sessions') ?? 0;
       customCfg = p.getString('cfg');
+      keyStr = p.getString('key') ?? kDemoKey;
+      importedHost = p.getString('host');
       favs
         ..clear()
         ..addAll(p.getStringList('favs') ?? const []);
@@ -274,6 +277,12 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     await p.setInt('sessions', sessions);
     await p.setStringList('favs', favs.toList());
     if (customCfg != null) await p.setString('cfg', customCfg!);
+    await p.setString('key', keyStr);
+    if (importedHost != null) {
+      await p.setString('host', importedHost!);
+    } else {
+      await p.remove('host');
+    }
   }
 
   void toggle() {
@@ -342,11 +351,51 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     _toast('$label · скопировано в буфер');
   }
 
-  void _genKey() {
-    final id = List.generate(8, (_) => '0123456789abcdef'[_rnd.nextInt(16)]).join();
-    final tail = List.generate(4, (_) => '0123456789abcdef'[_rnd.nextInt(16)]).join();
-    setState(() => keyStr = 'vless://$id…$tail@msk.bitaps.app:443?security=reality#bitaps-РФ');
-    _toast('Ключ перевыпущен ✓');
+  String _uuid() {
+    String h(int n) => List.generate(n, (_) => '0123456789abcdef'[_rnd.nextInt(16)]).join();
+    return '${h(8)}-${h(4)}-4${h(3)}-${'89ab'[_rnd.nextInt(4)]}${h(3)}-${h(12)}';
+  }
+
+  String _demoKey() =>
+      'vless://${_uuid()}@vpn.bitaps.app:443?security=reality&type=tcp&sni=www.microsoft.com&fp=chrome&pbk=DEMObitapsPLACEHOLDERkey00000000000000000000000&sid=88#bitaps%20VPN';
+
+  String? _hostOf(String key) {
+    try {
+      if (key.startsWith('vless://')) {
+        final at = key.indexOf('@');
+        final colon = key.indexOf(':', at);
+        if (at > 0 && colon > at) return key.substring(at + 1, colon);
+      } else {
+        return Uri.parse(key).host;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  // «Обновить» = перевыпуск ключа (новый UUID в реальном формате bitaps)
+  void _rotateKey() {
+    setState(() {
+      keyStr = _demoKey();
+      importedHost = null;
+    });
+    _save();
+    _toast('Ключ перевыпущен — новый UUID ✓');
+  }
+
+  // Импорт своего ключа/подписки из буфера (модель Happ)
+  Future<void> _importKey() async {
+    final data = await Clipboard.getData('text/plain');
+    final t = (data?.text ?? '').trim();
+    if (t.startsWith('vless://') || t.startsWith('http://') || t.startsWith('https://')) {
+      setState(() {
+        keyStr = t;
+        importedHost = _hostOf(t);
+      });
+      _save();
+      _toast(importedHost != null ? 'Импортировано · $importedHost ✓' : 'Ключ импортирован ✓');
+    } else {
+      _toast('В буфере нет vless:// или ссылки-подписки');
+    }
   }
 
   Future<void> _sendSupport() async {
@@ -429,10 +478,17 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
           TextButton(onPressed: () => Navigator.pop(context), child: Text('Отмена', style: mono(13, c: C.muted))),
           TextButton(
             onPressed: () {
-              setState(() => customCfg = ctrl.text.trim().isEmpty ? null : ctrl.text.trim());
-              _save();
+              final t = ctrl.text.trim();
               Navigator.pop(context);
-              _toast(customCfg == null ? 'Конфиг очищен' : 'Конфиг сохранён ✓');
+              if (t.startsWith('vless://') || t.startsWith('http://') || t.startsWith('https://')) {
+                setState(() { keyStr = t; importedHost = _hostOf(t); customCfg = t; });
+                _save();
+                _toast(importedHost != null ? 'Импортировано · $importedHost ✓' : 'Ключ импортирован ✓');
+              } else {
+                setState(() => customCfg = t.isEmpty ? null : t);
+                _save();
+                _toast(t.isEmpty ? 'Конфиг очищен' : 'Конфиг сохранён ✓');
+              }
             },
             child: Text('Сохранить', style: mono(13, c: C.accent)),
           ),
@@ -981,12 +1037,18 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
             Container(padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(color: Colors.black.withOpacity(0.35), borderRadius: BorderRadius.circular(10)),
               child: Text(keyStr, style: mono(11, c: C.text), maxLines: 2, overflow: TextOverflow.ellipsis)),
+            if (importedHost != null) ...[
+              const SizedBox(height: 6),
+              Text('сервер из ключа: $importedHost', style: mono(11, c: C.ok)),
+            ],
             const SizedBox(height: 12),
             Row(children: [
               Expanded(child: _btn('Скопировать', kind: 1, icon: Icons.copy, onTap: () => _copy(keyStr, 'Ключ'))),
               const SizedBox(width: 12),
-              Expanded(child: _btn('Обновить', kind: 2, icon: Icons.refresh, onTap: _genKey)),
+              Expanded(child: _btn('Обновить', kind: 2, icon: Icons.refresh, onTap: _rotateKey)),
             ]),
+            const SizedBox(height: 10),
+            _btn('Вставить свой ключ из буфера', kind: 1, icon: Icons.content_paste, onTap: _importKey),
           ])),
           const SizedBox(height: 14),
           _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
