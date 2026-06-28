@@ -20,6 +20,7 @@ jobs:
       - run: flutter config --enable-windows-desktop
       - run: flutter create --platforms=windows --project-name bitaps_vpn .
       - run: flutter pub get
+      - run: dart run flutter_launcher_icons
       - run: flutter build windows --release
       - name: Portable zip
         run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath bitaps-windows-x64.zip -Force
@@ -72,6 +73,7 @@ jobs:
       - run: flutter config --enable-macos-desktop
       - run: flutter create --platforms=macos --project-name bitaps_vpn .
       - run: flutter pub get
+      - run: dart run flutter_launcher_icons
       - run: flutter build macos --release
       - name: Package DMG
         run: |
