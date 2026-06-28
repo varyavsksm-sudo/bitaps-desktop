@@ -52,6 +52,8 @@ const kRef = 'https://t.me/bitaps_vpn_auth_bot?start=ref_demo';
 const kNotify = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/notify';
 const kApiKey = 'sb_publishable_X2CJWgjqeZtbNelAri9ofw_trbfWF9Z';
 const kDemoKey = 'vless://3a7c9f1e-0b2d-4e6f-9a1c-7b3e2f8d4c5a@vpn.bitaps.app:443?security=reality&type=tcp&sni=www.microsoft.com&fp=chrome&pbk=DEMObitapsPLACEHOLDERkey00000000000000000000000&sid=88#bitaps%20VPN';
+const kAppLogin = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/app-login';
+const kAppSub = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/app-sub';
 
 // Персонализация: акцентные темы (имя, основной, мягкий) + стили кнопки
 const List<(String, Color, Color)> accentThemes = [
@@ -213,6 +215,14 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
   final TextEditingController _support = TextEditingController();
   String _q = '';
   final Set<String> favs = {};
+  // вход / подписка / устройства (реальные данные из Supabase)
+  int? tgId;
+  String? appToken, subPlan, subExpires, subName;
+  int? subLimit;
+  bool subActive = false;
+  List<Map<String, dynamic>> devices = [];
+  final TextEditingController _loginCtrl = TextEditingController();
+  bool get loggedIn => tgId != null && appToken != null;
 
   late final AnimationController _spin =
       AnimationController(vsync: this, duration: const Duration(seconds: 6))..repeat();
@@ -235,6 +245,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     _twinkle.dispose();
     _search.dispose();
     _support.dispose();
+    _loginCtrl.dispose();
     super.dispose();
   }
 
@@ -255,6 +266,18 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       customCfg = p.getString('cfg');
       keyStr = p.getString('key') ?? kDemoKey;
       importedHost = p.getString('host');
+      tgId = p.getInt('tgId');
+      appToken = p.getString('appToken');
+      subPlan = p.getString('subPlan');
+      subExpires = p.getString('subExpires');
+      subName = p.getString('subName');
+      subLimit = p.getInt('subLimit');
+      subActive = p.getBool('subActive') ?? false;
+      try {
+        devices = ((jsonDecode(p.getString('devices') ?? '[]')) as List).cast<Map<String, dynamic>>();
+      } catch (_) {
+        devices = [];
+      }
       favs
         ..clear()
         ..addAll(p.getStringList('favs') ?? const []);
@@ -262,6 +285,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       C.accent = th.$2;
       C.accentSoft = th.$3;
     });
+    if (loggedIn) _refreshSub(silent: true);
   }
 
   Future<void> _save() async {
@@ -278,6 +302,14 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     await p.setStringList('favs', favs.toList());
     if (customCfg != null) await p.setString('cfg', customCfg!);
     await p.setString('key', keyStr);
+    if (tgId != null) { await p.setInt('tgId', tgId!); } else { await p.remove('tgId'); }
+    if (appToken != null) { await p.setString('appToken', appToken!); } else { await p.remove('appToken'); }
+    if (subPlan != null) await p.setString('subPlan', subPlan!);
+    if (subExpires != null) await p.setString('subExpires', subExpires!);
+    if (subName != null) await p.setString('subName', subName!);
+    if (subLimit != null) await p.setInt('subLimit', subLimit!);
+    await p.setBool('subActive', subActive);
+    await p.setString('devices', jsonEncode(devices));
     if (importedHost != null) {
       await p.setString('host', importedHost!);
     } else {
@@ -434,6 +466,97 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     }
   }
 
+  // ----- вход по ключу / реальная подписка / устройства -----
+  void _applySub(Map<String, dynamic> d) {
+    subName = d['name'] as String?;
+    subPlan = d['plan'] as String?;
+    subExpires = d['expires_at'] as String?;
+    subLimit = (d['device_limit'] as num?)?.toInt();
+    subActive = d['active'] == true;
+    if (d['vpn_key'] is String) keyStr = d['vpn_key'] as String;
+    devices = ((d['devices'] as List?) ?? const []).map((e) => (e as Map).cast<String, dynamic>()).toList();
+  }
+
+  int? _daysLeft() {
+    if (subExpires == null) return null;
+    final e = DateTime.tryParse(subExpires!);
+    if (e == null) return null;
+    return e.difference(DateTime.now()).inHours ~/ 24;
+  }
+
+  Future<void> _login() async {
+    final key = _loginCtrl.text.trim();
+    if (key.length < 12) {
+      _toast('Вставь свой ключ из бота');
+      return;
+    }
+    _toast('Вхожу…');
+    try {
+      final r = await http.post(Uri.parse(kAppLogin),
+          headers: {'content-type': 'application/json', 'apikey': kApiKey},
+          body: jsonEncode({'key': key}));
+      final d = jsonDecode(r.body) as Map<String, dynamic>;
+      if (d['ok'] == true) {
+        setState(() {
+          tgId = (d['telegram_id'] as num).toInt();
+          appToken = d['app_token'] as String?;
+          _applySub(d);
+          _loginCtrl.clear();
+        });
+        _save();
+        _toast('Вход выполнен ✓');
+      } else {
+        _toast('Ключ не найден. Возьми актуальный в боте.');
+      }
+    } catch (_) {
+      _toast('Нет связи с сервером');
+    }
+  }
+
+  Future<void> _refreshSub({String? del, bool silent = false}) async {
+    if (!loggedIn) {
+      if (!silent) _toast('Сначала войди по ключу');
+      return;
+    }
+    if (!silent) _toast(del != null ? 'Удаляю устройство…' : 'Обновляю…');
+    try {
+      final r = await http.post(Uri.parse(kAppSub),
+          headers: {'content-type': 'application/json', 'apikey': kApiKey},
+          body: jsonEncode({'telegram_id': tgId, 'token': appToken, if (del != null) 'del': del}));
+      if (r.statusCode == 401) {
+        if (!silent) _toast('Сессия истекла — войди заново');
+        _doLogout();
+        return;
+      }
+      final d = jsonDecode(r.body) as Map<String, dynamic>;
+      if (d['ok'] == true) {
+        setState(() => _applySub(d));
+        _save();
+        if (!silent) _toast(del != null ? 'Устройство удалено ✓' : 'Обновлено ✓');
+      } else if (!silent) {
+        _toast('Не удалось обновить');
+      }
+    } catch (_) {
+      if (!silent) _toast('Нет связи с сервером');
+    }
+  }
+
+  void _doLogout() {
+    setState(() {
+      tgId = null;
+      appToken = null;
+      subPlan = null;
+      subExpires = null;
+      subName = null;
+      subLimit = null;
+      subActive = false;
+      devices = [];
+      keyStr = kDemoKey;
+    });
+    _save();
+    _toast('Вышли из аккаунта');
+  }
+
   Future<void> _sendSupport() async {
     final msg = _support.text.trim();
     if (msg.isEmpty) {
@@ -542,6 +665,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
               setState(() {
                 conn = 0; secs = 0; tab = 0; accentIdx = 0; btnStyle = 0; mode = 0; proto = 0;
                 tgl1 = false; tgl2 = true; tgl3 = true; tgl4 = false; customCfg = null; keyStr = kDemoKey;
+                tgId = null; appToken = null; subPlan = null; subExpires = null; subName = null; subLimit = null; subActive = false; devices = [];
                 favs.clear();
                 C.accent = accentThemes[0].$2;
                 C.accentSoft = accentThemes[0].$3;
@@ -1023,58 +1147,12 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
         children: [
           Text('Кабинет', style: disp(26, w: FontWeight.w800)),
           const SizedBox(height: 18),
-          _card(strong: true, child: Row(children: [
-            Container(width: 60, height: 60, alignment: Alignment.center,
-              decoration: BoxDecoration(shape: BoxShape.circle, gradient: accentGrad,
-                boxShadow: [BoxShadow(color: C.accent.withOpacity(0.4), blurRadius: 18)]),
-              child: Text('Д', style: disp(26, w: FontWeight.w800, c: C.bg))),
-            const SizedBox(width: 14),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Демо-режим', style: disp(20, w: FontWeight.w700)),
-              const SizedBox(height: 4),
-              Row(children: [_badge('Пробный', C.accent), const SizedBox(width: 6), _badge('DEMO', C.muted)]),
-            ])),
-          ])),
+          _profileCard(),
           const SizedBox(height: 14),
-          _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [_gIcon(Icons.workspace_premium), const SizedBox(width: 12), _kicker('подписка')]),
-            const SizedBox(height: 16),
-            Row(children: [
-              _ring(3, 30),
-              const SizedBox(width: 20),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Пробный период', style: disp(20, w: FontWeight.w700, c: C.accent)),
-                const SizedBox(height: 6),
-                Row(children: [const Icon(Icons.event, size: 14, color: C.muted), const SizedBox(width: 6), Text('осталось 3 дня', style: mono(13))]),
-                const SizedBox(height: 4),
-                Row(children: [const Icon(Icons.devices, size: 14, color: C.muted), const SizedBox(width: 6), Text('2 / 10 устройств', style: mono(13))]),
-              ])),
-            ]),
-            const SizedBox(height: 16),
-            _btn('Продлить подписку', kind: 0, icon: Icons.bolt, onTap: () => _open(kBot)),
-          ])),
+          _subCard(),
           const SizedBox(height: 14),
-          _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [_gIcon(Icons.qr_code_2), const SizedBox(width: 12),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                _kicker('ключ доступа'), const SizedBox(height: 3), Text('для роутера и ручной настройки', style: mono(11))]))]),
-            const SizedBox(height: 12),
-            Container(padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: Colors.black.withOpacity(0.35), borderRadius: BorderRadius.circular(10)),
-              child: Text(keyStr, style: mono(11, c: C.text), maxLines: 2, overflow: TextOverflow.ellipsis)),
-            if (importedHost != null) ...[
-              const SizedBox(height: 6),
-              Text('сервер из ключа: $importedHost', style: mono(11, c: C.ok)),
-            ],
-            const SizedBox(height: 12),
-            Row(children: [
-              Expanded(child: _btn('Скопировать', kind: 1, icon: Icons.copy, onTap: () => _copy(keyStr, 'Ключ'))),
-              const SizedBox(width: 12),
-              Expanded(child: _btn('Обновить', kind: 2, icon: Icons.refresh, onTap: _rotateKey)),
-            ]),
-            const SizedBox(height: 10),
-            _btn('Вставить свой ключ из буфера', kind: 1, icon: Icons.content_paste, onTap: _importKey),
-          ])),
+          _keyCard(),
+          if (loggedIn) ...[const SizedBox(height: 14), _devicesCard()],
           const SizedBox(height: 14),
           _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [_gIcon(Icons.card_giftcard), const SizedBox(width: 12),
@@ -1136,6 +1214,139 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
           Center(child: Text('bitaps vpn · v1.0', style: mono(11, c: C.muted))),
         ],
       );
+
+  Widget _profileCard() {
+    final name = loggedIn ? ((subName != null && subName!.isNotEmpty) ? subName! : 'Аккаунт') : 'Демо-режим';
+    final initial = name.isNotEmpty ? name.substring(0, 1).toUpperCase() : 'A';
+    return _card(strong: true, child: Row(children: [
+      Container(width: 60, height: 60, alignment: Alignment.center,
+        decoration: BoxDecoration(shape: BoxShape.circle, gradient: accentGrad,
+          boxShadow: [BoxShadow(color: C.accent.withOpacity(0.4), blurRadius: 18)]),
+        child: Text(initial, style: disp(26, w: FontWeight.w800, c: C.bg))),
+      const SizedBox(width: 14),
+      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(name, style: disp(20, w: FontWeight.w700)),
+        const SizedBox(height: 4),
+        Row(children: loggedIn
+            ? [_badge(subActive ? 'Активна' : 'Не активна', subActive ? C.ok : C.muted),
+               if (subPlan != null) ...[const SizedBox(width: 6), _badge(subPlan!.toUpperCase(), C.accent)]]
+            : [_badge('Гость', C.muted), const SizedBox(width: 6), _badge('DEMO', C.muted)]),
+      ])),
+      if (loggedIn) GestureDetector(behavior: HitTestBehavior.opaque, onTap: _doLogout,
+        child: Icon(Icons.logout, size: 20, color: C.muted)),
+    ]));
+  }
+
+  String _planLabel(String? p) {
+    if (p == null) return 'Нет подписки';
+    if (p == 'trial') return 'Пробный период';
+    return 'Тариф «$p»';
+  }
+
+  Widget _subCard() {
+    if (!loggedIn) {
+      return _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [_gIcon(Icons.login), const SizedBox(width: 12), _kicker('вход')]),
+        const SizedBox(height: 10),
+        Text('Войди по своему ключу из бота — увидишь реальную подписку, ключ и устройства.', style: mono(12)),
+        const SizedBox(height: 12),
+        Container(padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(color: Colors.black.withOpacity(0.35), borderRadius: BorderRadius.circular(10)),
+          child: TextField(controller: _loginCtrl, maxLines: 2, style: mono(11, c: C.text), cursorColor: C.accent,
+            decoration: InputDecoration(isDense: true, border: InputBorder.none, contentPadding: EdgeInsets.zero,
+              hintText: 'Вставь свой ключ vless://… из бота', hintStyle: mono(12, c: C.muted)))),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(child: _btn('Войти', kind: 0, icon: Icons.login, onTap: _login)),
+          const SizedBox(width: 12),
+          Expanded(child: _btn('Ключ в боте', kind: 1, icon: Icons.smart_toy, onTap: () => _open(kBot))),
+        ]),
+      ]));
+    }
+    final days = _daysLeft();
+    final ringVal = (days ?? 0).clamp(0, 30).toInt();
+    return _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [_gIcon(Icons.workspace_premium), const SizedBox(width: 12), _kicker('подписка'), const Spacer(),
+        GestureDetector(behavior: HitTestBehavior.opaque, onTap: () => _refreshSub(), child: Icon(Icons.refresh, size: 18, color: C.accent))]),
+      const SizedBox(height: 16),
+      Row(children: [
+        _ring(ringVal, 30),
+        const SizedBox(width: 20),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(_planLabel(subPlan), style: disp(20, w: FontWeight.w700, c: subActive ? C.accent : C.muted)),
+          const SizedBox(height: 6),
+          Row(children: [Icon(Icons.event, size: 14, color: C.muted), const SizedBox(width: 6),
+            Text(days != null ? (days > 0 ? 'осталось $days дн.' : 'истекла') : (subActive ? 'активна' : 'не активна'), style: mono(13))]),
+          const SizedBox(height: 4),
+          Row(children: [Icon(Icons.devices, size: 14, color: C.muted), const SizedBox(width: 6),
+            Text('${devices.length} / ${subLimit ?? "?"} устройств', style: mono(13))]),
+        ])),
+      ]),
+      const SizedBox(height: 16),
+      Row(children: [
+        Expanded(child: _btn('Продлить', kind: 0, icon: Icons.bolt, onTap: () => _open(kBot))),
+        const SizedBox(width: 12),
+        Expanded(child: _btn('Обновить', kind: 1, icon: Icons.refresh, onTap: () => _refreshSub())),
+      ]),
+    ]));
+  }
+
+  Widget _keyCard() => _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [_gIcon(Icons.qr_code_2), const SizedBox(width: 12),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _kicker('ключ доступа'), const SizedBox(height: 3),
+            Text(loggedIn ? 'твой ключ из аккаунта' : 'для роутера и ручной настройки', style: mono(11))]))]),
+        const SizedBox(height: 12),
+        Container(padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(color: Colors.black.withOpacity(0.35), borderRadius: BorderRadius.circular(10)),
+          child: Text(keyStr, style: mono(11, c: C.text), maxLines: 2, overflow: TextOverflow.ellipsis)),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(child: _btn('Скопировать', kind: 1, icon: Icons.copy, onTap: () => _copy(keyStr, 'Ключ'))),
+          const SizedBox(width: 12),
+          Expanded(child: loggedIn
+              ? _btn('Обновить', kind: 2, icon: Icons.refresh, onTap: () => _refreshSub())
+              : _btn('Вставить', kind: 2, icon: Icons.content_paste, onTap: _importKey)),
+        ]),
+      ]));
+
+  Widget _devicesCard() => _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [_gIcon(Icons.devices), const SizedBox(width: 12),
+          _kicker('устройства · ${devices.length}/${subLimit ?? "?"}'), const Spacer(),
+          GestureDetector(behavior: HitTestBehavior.opaque, onTap: () => _refreshSub(), child: Icon(Icons.refresh, size: 18, color: C.accent))]),
+        const SizedBox(height: 8),
+        if (devices.isEmpty)
+          Padding(padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Text('Пока нет привязанных устройств. Подключись с устройства — оно появится здесь.', style: mono(12)))
+        else
+          for (final d in devices) _deviceRow(d),
+      ]));
+
+  Widget _deviceRow(Map<String, dynamic> d) {
+    final name = (d['name'] as String?) ?? 'Устройство';
+    final id = d['id'] as String?;
+    return Padding(padding: const EdgeInsets.symmetric(vertical: 7), child: Row(children: [
+      Icon(Icons.smartphone, size: 18, color: C.muted),
+      const SizedBox(width: 10),
+      Expanded(child: Text(name, style: disp(14, w: FontWeight.w600), overflow: TextOverflow.ellipsis)),
+      GestureDetector(behavior: HitTestBehavior.opaque,
+        onTap: id == null ? null : () => _confirmDelDevice(id, name),
+        child: Icon(Icons.delete_outline, size: 19, color: C.danger)),
+    ]));
+  }
+
+  void _confirmDelDevice(String id, String name) {
+    showDialog(context: context, builder: (_) => AlertDialog(
+      backgroundColor: C.bg2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: C.line)),
+      title: Text('Удалить устройство?', style: disp(18, w: FontWeight.w700)),
+      content: Text('«$name» будет отвязано от подписки.', style: mono(13, c: C.muted)),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: Text('Отмена', style: mono(13, c: C.muted))),
+        TextButton(onPressed: () { Navigator.pop(context); _refreshSub(del: id); }, child: Text('Удалить', style: mono(13, c: C.danger))),
+      ],
+    ));
+  }
 
   Widget _faqRow(Faq f) => Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
