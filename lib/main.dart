@@ -6,25 +6,21 @@ void main() => runApp(const BitApp());
 // ============================ DESIGN TOKENS ============================
 class C {
   static const bg = Color(0xFF06040C);
-  static const bg2 = Color(0xFF0C0A14);
-  static const card = Color(0xFF131120);
-  static const cardHi = Color(0xFF1B1830);
-  static const text = Color(0xFFE8EDF5);
-  static const muted = Color(0xFF8A96AB);
-  static const line = Color(0x16FFFFFF);
+  static const bg2 = Color(0xFF0A0810);
+  static const card = Color(0xFF12101C);
+  static const cardHi = Color(0xFF1A1728);
+  static const text = Color(0xFFEDF1F8);
+  static const muted = Color(0xFF8A93A6);
+  static const line = Color(0x14FFFFFF);
   static const accent = Color(0xFFFF7A1A);
-  static const accentSoft = Color(0xFFFFAE3D);
+  static const accentSoft = Color(0xFFFFB347);
   static const ok = Color(0xFF39D98A);
   static const warn = Color(0xFFFFAE3D);
   static const danger = Color(0xFFFF5470);
-  static const accent2 = Color(0xFF2D8BFF);
 }
 
 const LinearGradient accentGrad = LinearGradient(
-  colors: [C.accentSoft, C.accent],
-  begin: Alignment.topLeft,
-  end: Alignment.bottomRight,
-);
+  colors: [C.accentSoft, C.accent], begin: Alignment.topLeft, end: Alignment.bottomRight);
 
 const List<List<Color>> chipGrads = [
   [Color(0xFFFF9D3D), Color(0xFFFF6A00)],
@@ -37,40 +33,27 @@ const List<List<Color>> chipGrads = [
 TextStyle disp(double s, {FontWeight w = FontWeight.w700, Color c = C.text}) =>
     TextStyle(fontFamily: 'SpaceGrotesk', fontSize: s, fontWeight: w, color: c, letterSpacing: -0.3, height: 1.15);
 TextStyle mono(double s, {FontWeight w = FontWeight.w500, Color c = C.muted}) =>
-    TextStyle(fontSize: s, fontWeight: w, color: c, fontFamily: 'JetBrainsMono', height: 1.2);
+    TextStyle(fontFamily: 'JetBrainsMono', fontSize: s, fontWeight: w, color: c, height: 1.2);
 
-// ============================ MODELS / MOCK DATA ============================
+// ============================ MODELS / MOCK ============================
 class Server {
   final String id, city, country, flag, proto;
   final int ping, load;
   final bool premium, available;
   const Server(this.id, this.city, this.country, this.flag, this.ping, this.load,
-      {this.premium = false, this.available = true, this.proto = 'VLESS + Reality'});
+      {this.premium = false, this.available = true, this.proto = 'Reality'});
 }
 
 const ruServers = [
   Server('ru-msk', 'Москва', 'Россия', '🇷🇺', 12, 34),
   Server('ru-spb', 'Санкт-Петербург', 'Россия', '🇷🇺', 21, 41),
+  Server('ru-ekb', 'Екатеринбург', 'Россия', '🇷🇺', 33, 28),
 ];
 const intlServers = [
   Server('nl-ams', 'Амстердам', 'Нидерланды', '🇳🇱', 48, 22, premium: true, available: false),
   Server('de-fra', 'Франкфурт', 'Германия', '🇩🇪', 52, 18, premium: true, available: false),
   Server('fi-hel', 'Хельсинки', 'Финляндия', '🇫🇮', 45, 27, premium: true, available: false),
   Server('tr-ist', 'Стамбул', 'Турция', '🇹🇷', 63, 31, premium: true, available: false),
-];
-
-class Plan {
-  final String title;
-  final int months, total, perMonth;
-  final bool best;
-  const Plan(this.title, this.months, this.total, this.perMonth, {this.best = false});
-}
-
-const plans = [
-  Plan('1 месяц', 1, 399, 399),
-  Plan('3 месяца', 3, 999, 333),
-  Plan('6 месяцев', 6, 1790, 298),
-  Plan('12 месяцев', 12, 2990, 249, best: true),
 ];
 
 class Faq {
@@ -80,18 +63,12 @@ class Faq {
 
 const faqs = [
   Faq('Сколько устройств можно подключить?', 'До 10 устройств одновременно по одной подписке.'),
-  Faq('Вы ведёте логи?', 'Нет. Мы не храним логи вашей активности — только техническую информацию для работы сервиса.'),
-  Faq('Как продлить подписку?', 'В разделе «Кабинет» нажми «Продлить» — оплата через Telegram, СБП или крипту.'),
-  Faq('VPN не подключается — что делать?', 'Смени локацию или протокол на «Авто», проверь интернет. Если не помогло — напиши в поддержку.'),
+  Faq('Вы ведёте логи?', 'Нет. Мы не храним логи активности — только техническую информацию для работы сервиса.'),
+  Faq('Как продлить подписку?', 'В «Кабинете» нажми «Продлить» — оплата через Telegram, СБП или крипту.'),
+  Faq('VPN не подключается?', 'Смени локацию или протокол на «Авто», проверь интернет. Не помогло — напиши в поддержку.'),
 ];
 
-const modes = [
-  ('Авто', Icons.bolt),
-  ('Стриминг', Icons.play_circle_fill),
-  ('Игры', Icons.sports_esports),
-  ('Приватность', Icons.lock),
-  ('Работа', Icons.work),
-];
+const modeLabels = ['Авто', 'Стрим', 'Игры', 'Прив.'];
 
 // ============================ APP ============================
 class BitApp extends StatelessWidget {
@@ -113,7 +90,6 @@ class BitApp extends StatelessWidget {
   }
 }
 
-// ============================ SHELL (sidebar nav) ============================
 class Shell extends StatefulWidget {
   const Shell({super.key});
   @override
@@ -122,11 +98,12 @@ class Shell extends StatefulWidget {
 
 class _ShellState extends State<Shell> {
   int tab = 0;
-  int conn = 0; // 0 disconnected, 1 connecting, 2 connected
+  int conn = 0; // 0 off, 1 connecting, 2 on
   int secs = 0;
   int mode = 0;
   Timer? _timer;
   Server server = ruServers[0];
+  bool tgl1 = false, tgl2 = true, tgl3 = true, tgl4 = false;
 
   @override
   void dispose() {
@@ -155,93 +132,63 @@ class _ShellState extends State<Shell> {
     }
   }
 
-  String get timeStr {
-    final m = (secs ~/ 60).toString().padLeft(2, '0');
+  String get hms {
+    final h = (secs ~/ 3600).toString().padLeft(2, '0');
+    final m = ((secs % 3600) ~/ 60).toString().padLeft(2, '0');
     final s = (secs % 60).toString().padLeft(2, '0');
-    return '$m:$s';
+    return '$h:$m:$s';
   }
 
   @override
   Widget build(BuildContext context) {
     final screens = [_home(), _servers(), _account(), _settings()];
     return Scaffold(
-      body: Row(
-        children: [
-          _sidebar(),
-          Expanded(
-            child: Container(
-              decoration: const BoxDecoration(
-                gradient: RadialGradient(
-                  center: Alignment(0, -1.1),
-                  radius: 1.4,
-                  colors: [Color(0x22FF7A1A), C.bg],
-                  stops: [0, 0.7],
-                ),
-              ),
-              child: SafeArea(child: screens[tab]),
-            ),
+      backgroundColor: C.bg,
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: RadialGradient(
+            center: Alignment(0, -0.72), radius: 1.05,
+            colors: [Color(0x3AFF7A1A), C.bg], stops: [0, 0.55],
           ),
-        ],
+        ),
+        child: SafeArea(bottom: false, child: Center(
+          child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 520), child: screens[tab]),
+        )),
       ),
+      bottomNavigationBar: _bottomBar(),
     );
   }
 
-  // ---------------- SIDEBAR ----------------
-  Widget _sidebar() {
-    final items = [
-      ('Главная', Icons.bolt),
+  // ---------------- BOTTOM NAV ----------------
+  Widget _bottomBar() {
+    const items = [
+      ('Главная', Icons.power_settings_new),
       ('Серверы', Icons.public),
-      ('Кабинет', Icons.person),
-      ('Настройки', Icons.settings),
+      ('Кабинет', Icons.person_outline),
+      ('Настройки', Icons.settings_outlined),
     ];
     return Container(
-      width: 210,
-      color: C.bg2,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 26, 20, 26),
-            child: Row(children: [
-              const Text('₿', style: TextStyle(color: C.accent, fontSize: 26, fontWeight: FontWeight.w900)),
-              const SizedBox(width: 8),
-              Text('bitaps', style: disp(20, w: FontWeight.w800)),
-              const SizedBox(width: 4),
-              Text('VPN', style: disp(20, w: FontWeight.w800, c: C.accent)),
-            ]),
-          ),
-          for (int i = 0; i < items.length; i++) _navItem(items[i].$1, items[i].$2, i),
-          const Spacer(),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(children: [
-              Container(width: 8, height: 8, decoration: BoxDecoration(
-                shape: BoxShape.circle, color: conn == 2 ? C.ok : C.muted)),
-              const SizedBox(width: 8),
-              Text(conn == 2 ? 'защищено' : 'не защищено', style: mono(12, c: conn == 2 ? C.ok : C.muted)),
-            ]),
-          ),
-        ],
-      ),
+      decoration: const BoxDecoration(color: C.bg2, border: Border(top: BorderSide(color: C.line))),
+      child: SafeArea(top: false, child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 9),
+        child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+          for (int i = 0; i < 4; i++) _tabItem(items[i].$1, items[i].$2, i),
+        ]),
+      )),
     );
   }
 
-  Widget _navItem(String label, IconData ic, int i) {
+  Widget _tabItem(String label, IconData ic, int i) {
     final sel = tab == i;
-    return InkWell(
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: () => setState(() => tab = i),
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: sel ? C.accent.withOpacity(0.12) : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: sel ? C.accent.withOpacity(0.30) : Colors.transparent),
-        ),
-        child: Row(children: [
-          Icon(ic, size: 20, color: sel ? C.accent : C.muted),
-          const SizedBox(width: 12),
-          Text(label, style: disp(15, w: FontWeight.w600, c: sel ? C.text : C.muted)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Icon(ic, size: 22, color: sel ? C.accent : C.muted),
+          const SizedBox(height: 4),
+          Text(label, style: mono(11, c: sel ? C.accent : C.muted, w: FontWeight.w600)),
         ]),
       ),
     );
@@ -251,125 +198,148 @@ class _ShellState extends State<Shell> {
   Widget _home() {
     final connected = conn == 2;
     return ListView(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
       children: [
-        Row(children: [
-          Text('Главная', style: disp(26, w: FontWeight.w800)),
-          const Spacer(),
-          _pill('🛡 7дн.', C.accent),
-          const SizedBox(width: 8),
-          _shieldPill(connected),
-        ]),
-        const SizedBox(height: 28),
-        Center(child: _powerButton()),
-        const SizedBox(height: 18),
+        Row(children: [_logo(), const Spacer(), _shieldPill(connected)]),
+        const SizedBox(height: 16),
+        Center(child: _gearButton()),
+        const SizedBox(height: 8),
         Center(child: Text(
           conn == 0 ? 'Отключено' : conn == 1 ? 'Подключение…' : 'Подключено',
           style: disp(22, w: FontWeight.w700, c: connected ? C.accent : C.text))),
+        const SizedBox(height: 6),
+        Center(child: Text(connected ? hms : '00:00:00',
+          style: TextStyle(fontFamily: 'JetBrainsMono', fontSize: 40, fontWeight: FontWeight.w700,
+            color: connected ? C.accentSoft : C.muted, letterSpacing: 2))),
         const SizedBox(height: 4),
-        Center(child: Text(connected ? timeStr : 'нажми, чтобы подключиться',
-            style: mono(connected ? 26 : 13, c: connected ? C.accentSoft : C.muted))),
-        const SizedBox(height: 24),
-        SizedBox(height: 40, child: ListView(
-          scrollDirection: Axis.horizontal,
-          children: [
-            for (int i = 0; i < modes.length; i++) _modeChip(modes[i].$1, modes[i].$2, i),
-          ],
-        )),
-        const SizedBox(height: 18),
+        Center(child: Text(connected ? 'под защитой' : 'нажми на кнопку', style: mono(12))),
+        const SizedBox(height: 22),
+        Row(children: [
+          for (int i = 0; i < 4; i++)
+            Expanded(child: Padding(
+              padding: EdgeInsets.only(right: i < 3 ? 8 : 0),
+              child: _modeChip(modeLabels[i], i))),
+        ]),
+        const SizedBox(height: 10),
+        Text('Сами подберём лучший сервер и маршрут.', style: mono(12)),
+        const SizedBox(height: 16),
         _bitCard(child: Row(children: [
-          Container(width: 44, height: 44, alignment: Alignment.center,
-            decoration: BoxDecoration(color: C.cardHi, borderRadius: BorderRadius.circular(13)),
-            child: Text(server.flag, style: const TextStyle(fontSize: 22))),
+          Text(server.flag, style: const TextStyle(fontSize: 24)),
           const SizedBox(width: 13),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(server.city, style: disp(16, w: FontWeight.w600)),
-            const SizedBox(height: 3),
-            Text('${server.ping} ms · быстрый узел', style: mono(12)),
+            Text(server.city, style: disp(16, w: FontWeight.w700)),
+            const SizedBox(height: 2),
+            Text('${server.ping} ms · ${server.proto}', style: mono(12)),
           ])),
-          _badge(server.proto, C.accent),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => setState(() => tab = 1),
+            child: Row(children: [
+              const Icon(Icons.swap_horiz, size: 17, color: C.accent),
+              const SizedBox(width: 5),
+              Text('сменить', style: disp(13, w: FontWeight.w700, c: C.accent)),
+            ]),
+          ),
+        ])),
+        const SizedBox(height: 10),
+        Row(children: [
+          Text('ещё:', style: mono(12)),
           const SizedBox(width: 8),
-          const Icon(Icons.chevron_right, color: C.muted),
-        ])),
-        const SizedBox(height: 14),
-        _bitCard(child: Row(children: [
-          _stat('↓', connected ? '84.2' : '—', 'Мбит/с'),
-          const SizedBox(width: 20),
-          _stat('↑', connected ? '12.7' : '—', 'Мбит/с'),
+          Expanded(child: SizedBox(height: 32, child: ListView(
+            scrollDirection: Axis.horizontal,
+            children: [for (final s in [ruServers[1], ruServers[2], ...intlServers]) _miniChip(s)],
+          ))),
+        ]),
+        const SizedBox(height: 12),
+        _bitCard(padding: 13, child: Row(children: [
+          Text('↓', style: disp(15, c: C.muted)),
+          const SizedBox(width: 5),
+          Text(connected ? '84' : '—', style: mono(13, c: C.text, w: FontWeight.w600)),
+          const SizedBox(width: 16),
+          Text('↑', style: disp(15, c: C.muted)),
+          const SizedBox(width: 5),
+          Text(connected ? '13' : '—', style: mono(13, c: C.text, w: FontWeight.w600)),
           const Spacer(),
-          const Icon(Icons.language, size: 16, color: C.muted),
+          const Icon(Icons.language, size: 15, color: C.muted),
           const SizedBox(width: 6),
-          Text(connected ? '185.244.214.10' : 'скрыт', style: mono(12)),
+          Text(connected ? '95.142.16.7' : 'IP скрыт', style: mono(12)),
         ])),
-        const SizedBox(height: 14),
-        _bitCard(child: Row(children: [
-          _gIcon(Icons.shield_outlined, 0),
-          const SizedBox(width: 13),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Проверить защиту', style: disp(16, w: FontWeight.w600)),
-            const SizedBox(height: 3),
-            Text('Мой IP · DNS / WebRTC утечки', style: mono(12)),
+        const SizedBox(height: 12),
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: toggle,
+          child: _bitCard(child: Row(children: [
+            _gIcon(Icons.bolt, 0),
+            const SizedBox(width: 13),
+            Text(connected ? 'Отключить' : 'Подключить быстрейший сервер',
+                style: disp(15, w: FontWeight.w600)),
           ])),
-          const Icon(Icons.chevron_right, color: C.muted),
-        ])),
-        const SizedBox(height: 24),
-        Center(child: Text('демо-режим · реальный коннект — с запуском сети bitaps',
-            style: mono(11, c: C.muted), textAlign: TextAlign.center)),
+        ),
       ],
     );
   }
 
-  Widget _powerButton() {
-    final connected = conn == 2;
-    final busy = conn == 1;
-    final col = connected ? C.accent : busy ? C.accentSoft : C.muted;
-    return GestureDetector(
-      onTap: toggle,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 350),
-        width: 200, height: 200,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: connected ? C.accent.withOpacity(0.14) : C.card,
-          border: Border.all(color: col.withOpacity(connected ? 1 : 0.45), width: 4),
-          boxShadow: connected
-              ? [BoxShadow(color: C.accent.withOpacity(0.45), blurRadius: 48, spreadRadius: 6)]
-              : null,
-        ),
-        child: Icon(Icons.power_settings_new, size: 76, color: col),
-      ),
-    );
-  }
+  Widget _logo() => Row(children: [
+        Container(width: 30, height: 30, alignment: Alignment.center,
+          decoration: BoxDecoration(gradient: accentGrad, borderRadius: BorderRadius.circular(9)),
+          child: Text('₿', style: disp(17, w: FontWeight.w900, c: C.bg))),
+        const SizedBox(width: 9),
+        Text('bit', style: disp(22, w: FontWeight.w800)),
+        Text('aps', style: disp(22, w: FontWeight.w800, c: C.accent)),
+      ]);
 
-  Widget _modeChip(String label, IconData ic, int i) {
+  Widget _gearButton() => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: toggle,
+        child: AnimatedScale(
+          duration: const Duration(milliseconds: 250),
+          scale: conn == 2 ? 1.0 : 0.94,
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 250),
+            opacity: conn == 0 ? 0.8 : 1,
+            child: Image.asset('assets/gear.png', width: 232, height: 232, fit: BoxFit.contain),
+          ),
+        ),
+      );
+
+  Widget _modeChip(String label, int i) {
     final sel = mode == i;
     return GestureDetector(
       onTap: () => setState(() => mode = i),
       child: Container(
-        margin: const EdgeInsets.only(right: 9),
-        padding: const EdgeInsets.symmetric(horizontal: 14),
+        height: 40,
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: sel ? C.accent.withOpacity(0.14) : C.card,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: sel ? C.accent.withOpacity(0.4) : C.line),
+          borderRadius: BorderRadius.circular(11),
+          border: Border.all(color: sel ? C.accent : C.line),
         ),
-        child: Row(children: [
-          Icon(ic, size: 15, color: sel ? C.accent : C.muted),
-          const SizedBox(width: 6),
-          Text(label, style: disp(13, w: FontWeight.w600, c: sel ? C.text : C.muted)),
-        ]),
+        child: Text(label, style: disp(13, w: FontWeight.w700, c: sel ? C.accent : C.muted)),
       ),
     );
   }
 
+  Widget _miniChip(Server s) => Padding(
+        padding: const EdgeInsets.only(right: 8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(color: C.card, borderRadius: BorderRadius.circular(20), border: Border.all(color: C.line)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text(s.flag, style: const TextStyle(fontSize: 13)),
+            const SizedBox(width: 6),
+            Text(s.city, style: disp(12, w: FontWeight.w600)),
+          ]),
+        ),
+      );
+
   // ---------------- SERVERS ----------------
   Widget _servers() {
     return ListView(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20),
       children: [
         Text('Серверы', style: disp(26, w: FontWeight.w800)),
-        const SizedBox(height: 20),
+        const SizedBox(height: 18),
         Row(children: [
           Expanded(child: _infoTile('32', 'серверов онлайн')),
           const SizedBox(width: 12),
@@ -377,26 +347,23 @@ class _ShellState extends State<Shell> {
           const SizedBox(width: 12),
           Expanded(child: _infoTile('99.9%', 'аптайм')),
         ]),
-        const SizedBox(height: 18),
+        const SizedBox(height: 16),
         _bitCard(strong: true, child: Row(children: [
           _gIcon(Icons.bolt, 0),
           const SizedBox(width: 14),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Text('Быстрый сервер', style: disp(16, w: FontWeight.w600)),
-              const SizedBox(width: 8),
-              _badge('АВТО', C.accent),
-            ]),
+            Row(children: [Text('Быстрый сервер', style: disp(16, w: FontWeight.w700)),
+              const SizedBox(width: 8), _badge('АВТО', C.accent)]),
             const SizedBox(height: 3),
             Text('Москва · 12 ms', style: mono(12)),
           ])),
           const Icon(Icons.chevron_right, color: C.muted),
         ])),
-        const SizedBox(height: 14),
+        const SizedBox(height: 12),
         _bitCard(padding: 12, child: Row(children: [
           const Icon(Icons.search, size: 18, color: C.muted),
           const SizedBox(width: 10),
-          Expanded(child: Text('Поиск города или страны', style: mono(13, c: C.muted))),
+          Text('Поиск города или страны', style: mono(13, c: C.muted)),
         ])),
         const SizedBox(height: 22),
         _kicker('🇷🇺 Россия'),
@@ -416,13 +383,13 @@ class _ShellState extends State<Shell> {
     return Opacity(
       opacity: s.available ? 1 : 0.55,
       child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: s.available ? () => setState(() => server = s) : null,
         child: Container(
           margin: const EdgeInsets.only(bottom: 8),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
           decoration: BoxDecoration(
-            color: C.card,
-            borderRadius: BorderRadius.circular(14),
+            color: C.card, borderRadius: BorderRadius.circular(14),
             border: Border.all(color: sel ? C.accent.withOpacity(0.5) : C.line),
           ),
           child: Row(children: [
@@ -441,10 +408,9 @@ class _ShellState extends State<Shell> {
             ])),
             Text('${s.ping} ms', style: mono(13, c: pingCol, w: FontWeight.w600)),
             const SizedBox(width: 12),
-            SizedBox(width: 60, child: _loadBar(s.load)),
+            SizedBox(width: 56, child: _loadBar(s.load)),
             const SizedBox(width: 10),
-            Icon(sel ? Icons.check_circle : Icons.circle_outlined,
-                size: 20, color: sel ? C.accent : C.muted),
+            Icon(sel ? Icons.check_circle : Icons.circle_outlined, size: 20, color: sel ? C.accent : C.muted),
           ]),
         ),
       ),
@@ -454,11 +420,8 @@ class _ShellState extends State<Shell> {
   Widget _loadBar(int pct) {
     final col = pct < 50 ? C.ok : pct < 80 ? C.warn : C.danger;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      ClipRRect(
-        borderRadius: BorderRadius.circular(3),
-        child: LinearProgressIndicator(value: pct / 100, minHeight: 4,
-            backgroundColor: C.cardHi, color: col),
-      ),
+      ClipRRect(borderRadius: BorderRadius.circular(3),
+        child: LinearProgressIndicator(value: pct / 100, minHeight: 4, backgroundColor: C.cardHi, color: col)),
       const SizedBox(height: 3),
       Text('$pct%', style: mono(10)),
     ]);
@@ -467,7 +430,7 @@ class _ShellState extends State<Shell> {
   // ---------------- ACCOUNT ----------------
   Widget _account() {
     return ListView(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20),
       children: [
         Text('Кабинет', style: disp(26, w: FontWeight.w800)),
         const SizedBox(height: 18),
@@ -492,11 +455,9 @@ class _ShellState extends State<Shell> {
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('Пробный период', style: disp(20, w: FontWeight.w700, c: C.accent)),
               const SizedBox(height: 6),
-              Row(children: [const Icon(Icons.event, size: 14, color: C.muted), const SizedBox(width: 6),
-                Text('осталось 3 дня', style: mono(13))]),
+              Row(children: [const Icon(Icons.event, size: 14, color: C.muted), const SizedBox(width: 6), Text('осталось 3 дня', style: mono(13))]),
               const SizedBox(height: 4),
-              Row(children: [const Icon(Icons.devices, size: 14, color: C.muted), const SizedBox(width: 6),
-                Text('2 / 10 устройств', style: mono(13))]),
+              Row(children: [const Icon(Icons.devices, size: 14, color: C.muted), const SizedBox(width: 6), Text('2 / 10 устройств', style: mono(13))]),
             ])),
           ]),
           const SizedBox(height: 16),
@@ -506,17 +467,12 @@ class _ShellState extends State<Shell> {
         _bitCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [_gIcon(Icons.qr_code_2, 4), const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _kicker('ключ доступа'),
-              const SizedBox(height: 3),
-              Text('для роутера и ручной настройки', style: mono(11)),
-            ]))]),
+              _kicker('ключ доступа'), const SizedBox(height: 3), Text('для роутера и ручной настройки', style: mono(11))]))]),
           const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(12),
+          Container(padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(color: C.bg, borderRadius: BorderRadius.circular(10)),
             child: Text('vless://3a7c9f1e…3e2f@msk.bitaps.app:443?security=reality#bitaps-РФ',
-                style: mono(11, c: C.text), maxLines: 2, overflow: TextOverflow.ellipsis),
-          ),
+                style: mono(11, c: C.text), maxLines: 2, overflow: TextOverflow.ellipsis)),
           const SizedBox(height: 12),
           Row(children: [
             Expanded(child: _btn('Скопировать', kind: 1, icon: Icons.copy)),
@@ -528,10 +484,7 @@ class _ShellState extends State<Shell> {
         _bitCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [_gIcon(Icons.card_giftcard, 3), const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _kicker('пригласи друзей'),
-              const SizedBox(height: 3),
-              Text('Приглашай — получай бонусные дни', style: mono(11)),
-            ]))]),
+              _kicker('пригласи друзей'), const SizedBox(height: 3), Text('Приглашай — получай бонусные дни', style: mono(11))]))]),
           const SizedBox(height: 14),
           Row(children: [
             Expanded(child: _miniStat('3', 'позвал')),
@@ -556,13 +509,9 @@ class _ShellState extends State<Shell> {
         _bitCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [_gIcon(Icons.forum, 2), const SizedBox(width: 12), _kicker('поддержка')]),
           const SizedBox(height: 12),
-          Container(
-            height: 84,
-            padding: const EdgeInsets.all(12),
+          Container(height: 80, padding: const EdgeInsets.all(12), alignment: Alignment.topLeft,
             decoration: BoxDecoration(color: C.bg, borderRadius: BorderRadius.circular(10)),
-            alignment: Alignment.topLeft,
-            child: Text('Опиши проблему…', style: mono(13, c: C.muted)),
-          ),
+            child: Text('Опиши проблему…', style: mono(13, c: C.muted))),
           const SizedBox(height: 12),
           _btn('Отправить', kind: 0, icon: Icons.send),
           const SizedBox(height: 10),
@@ -574,34 +523,31 @@ class _ShellState extends State<Shell> {
           const SizedBox(height: 8),
           for (final f in faqs) _faqRow(f),
         ])),
-        const SizedBox(height: 20),
+        const SizedBox(height: 18),
         Center(child: Text('bitaps vpn · v1.0', style: mono(11, c: C.muted))),
       ],
     );
   }
 
-  Widget _faqRow(Faq f) {
-    return Theme(
-      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
-        tilePadding: EdgeInsets.zero,
-        childrenPadding: const EdgeInsets.only(bottom: 12),
-        iconColor: C.accent,
-        collapsedIconColor: C.muted,
-        title: Text(f.q, style: disp(14, w: FontWeight.w600)),
-        children: [Align(alignment: Alignment.centerLeft, child: Text(f.a, style: mono(13)))],
-      ),
-    );
-  }
+  Widget _faqRow(Faq f) => Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          childrenPadding: const EdgeInsets.only(bottom: 12),
+          iconColor: C.accent,
+          collapsedIconColor: C.muted,
+          title: Text(f.q, style: disp(14, w: FontWeight.w600)),
+          children: [Align(alignment: Alignment.centerLeft, child: Text(f.a, style: mono(13)))],
+        ),
+      );
 
   // ---------------- SETTINGS ----------------
-  bool tgl1 = false, tgl2 = true, tgl3 = true, tgl4 = false;
   Widget _settings() {
     return ListView(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20),
       children: [
         Text('Настройки', style: disp(26, w: FontWeight.w800)),
-        const SizedBox(height: 20),
+        const SizedBox(height: 18),
         _kicker('безопасность'),
         const SizedBox(height: 10),
         _bitCard(child: Column(children: [
@@ -659,8 +605,7 @@ class _ShellState extends State<Shell> {
         child: Row(children: [
           Text(label, style: disp(15, w: FontWeight.w500)),
           const Spacer(),
-          Icon(sel ? Icons.radio_button_checked : Icons.radio_button_off,
-              size: 20, color: sel ? C.accent : C.muted),
+          Icon(sel ? Icons.radio_button_checked : Icons.radio_button_off, size: 20, color: sel ? C.accent : C.muted),
         ]),
       );
 
@@ -676,7 +621,7 @@ class _ShellState extends State<Shell> {
         ]),
       );
 
-  // ---------------- SHARED WIDGETS ----------------
+  // ---------------- SHARED ----------------
   Widget _bitCard({required Widget child, double padding = 16, bool strong = false}) => Container(
         padding: EdgeInsets.all(padding),
         decoration: BoxDecoration(
@@ -692,10 +637,8 @@ class _ShellState extends State<Shell> {
     final g = chipGrads[idx % chipGrads.length];
     return Container(width: 42, height: 42, alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: g[1].withOpacity(0.14),
-        borderRadius: BorderRadius.circular(13),
-        border: Border.all(color: g[0].withOpacity(0.35)),
-      ),
+        color: g[1].withOpacity(0.14), borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: g[0].withOpacity(0.35))),
       child: Icon(ic, size: 19, color: g[0]));
   }
 
@@ -703,39 +646,19 @@ class _ShellState extends State<Shell> {
 
   Widget _badge(String t, Color col) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(color: col.withOpacity(0.14), borderRadius: BorderRadius.circular(20)),
+        decoration: BoxDecoration(color: col.withOpacity(0.16), borderRadius: BorderRadius.circular(20)),
         child: Text(t, style: mono(11, c: col, w: FontWeight.w600)),
       );
 
-  Widget _pill(String t, Color col) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: C.card, borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: col.withOpacity(0.30)),
-        ),
-        child: Text(t, style: mono(12, c: col, w: FontWeight.w600)),
-      );
-
   Widget _shieldPill(bool on) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: (on ? C.ok : C.muted).withOpacity(0.12), borderRadius: BorderRadius.circular(20),
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(color: (on ? C.ok : C.muted).withOpacity(0.12), borderRadius: BorderRadius.circular(20)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: on ? C.ok : C.muted)),
           const SizedBox(width: 7),
           Text(on ? 'защищено' : 'не защищено', style: mono(12, c: on ? C.ok : C.muted, w: FontWeight.w600)),
         ]),
       );
-
-  Widget _stat(String arrow, String val, String unit) => Row(mainAxisSize: MainAxisSize.min, children: [
-        Text(arrow, style: disp(18, w: FontWeight.w700, c: C.accent)),
-        const SizedBox(width: 6),
-        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(val, style: mono(15, c: C.text, w: FontWeight.w600)),
-          Text(unit, style: mono(10)),
-        ]),
-      ]);
 
   Widget _infoTile(String val, String label) => _bitCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(val, style: disp(22, w: FontWeight.w800, c: C.accent)),
