@@ -47,7 +47,7 @@ const List<(String, Color, Color)> accentThemes = [
   ('Lavender', Color(0xFFA779FF), Color(0xFFD0B3FF)),
   ('Crimson', Color(0xFFFF4D6D), Color(0xFFFF9BAD)),
 ];
-const btnStyleNames = ['Шестерёнка', 'Кольцо', 'Пульс'];
+const btnStyleNames = ['Шестерёнка', 'Кольцо', 'Орб', 'Пульс', 'Дуга'];
 
 TextStyle disp(double s, {FontWeight w = FontWeight.w700, Color c = C.text}) =>
     TextStyle(fontFamily: 'SpaceGrotesk', fontSize: s, fontWeight: w, color: c, letterSpacing: -0.3, height: 1.15);
@@ -120,6 +120,34 @@ class StarPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(StarPainter old) => old.t != t;
+}
+
+// Спидометр-дуга для стиля кнопки «Дуга»
+class ArcPainter extends CustomPainter {
+  final Color col;
+  final double v;
+  ArcPainter(this.col, this.v);
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Rect.fromLTWH(7, 7, size.width - 14, size.height - 14);
+    const start = math.pi * 0.75;
+    const sweep = math.pi * 1.5;
+    final track = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 12
+      ..strokeCap = StrokeCap.round
+      ..color = C.line;
+    canvas.drawArc(rect, start, sweep, false, track);
+    final fill = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 12
+      ..strokeCap = StrokeCap.round
+      ..color = col;
+    canvas.drawArc(rect, start, sweep * v.clamp(0.0, 1.0), false, fill);
+  }
+
+  @override
+  bool shouldRepaint(ArcPainter old) => old.v != v || old.col != col;
 }
 
 // ============================ APP ============================
@@ -366,7 +394,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     final busy = conn == 1;
     final glow = connected ? 0.6 : busy ? 0.35 : 0.0;
     final col = connected ? C.accent : busy ? C.accentSoft : C.muted;
-    final showRings = connected || btnStyle == 2;
+    final showRings = connected || btnStyle == 3;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: toggle,
@@ -392,19 +420,43 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
   }
 
   Widget _powerInner(Color col) {
+    final on = conn == 2;
     switch (btnStyle) {
-      case 1: // кольцо
+      case 1: // кольцо — толстое светящееся кольцо
         return Stack(alignment: Alignment.center, children: [
-          Container(width: 210, height: 210,
-            decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: col, width: 6))),
-          Container(width: 168, height: 168,
+          Container(width: 214, height: 214,
+            decoration: BoxDecoration(shape: BoxShape.circle,
+              border: Border.all(color: col, width: 10),
+              boxShadow: [BoxShadow(color: col.withOpacity(on ? 0.5 : 0.14), blurRadius: 22)])),
+          Container(width: 150, height: 150,
             decoration: BoxDecoration(shape: BoxShape.circle, color: C.bg2, border: Border.all(color: C.line))),
-          Icon(Icons.power_settings_new, size: 64, color: col),
+          Icon(Icons.power_settings_new, size: 60, color: col),
         ]);
-      case 2: // пульс
-        return Container(width: 120, height: 120, alignment: Alignment.center,
-          decoration: BoxDecoration(shape: BoxShape.circle, color: C.bg2, border: Border.all(color: col, width: 2)),
-          child: Icon(Icons.power_settings_new, size: 50, color: col));
+      case 2: // орб — наполненная светящаяся сфера
+        return Container(width: 192, height: 192, alignment: Alignment.center,
+          decoration: BoxDecoration(shape: BoxShape.circle,
+            gradient: RadialGradient(center: const Alignment(-0.4, -0.4),
+              colors: on ? [C.accentSoft, C.accent, C.accent.withOpacity(0.55)] : const [Color(0xFF1A1728), Color(0xFF12101C)]),
+            boxShadow: [BoxShadow(color: col.withOpacity(on ? 0.55 : 0.14), blurRadius: 36)]),
+          child: Icon(Icons.power_settings_new, size: 62, color: on ? Colors.black.withOpacity(0.85) : col));
+      case 3: // пульс — концентрические кольца от ядра
+        return Stack(alignment: Alignment.center, children: [
+          for (final r in const [220.0, 178.0, 136.0])
+            Container(width: r, height: r,
+              decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: col.withOpacity(0.22), width: 1.5))),
+          Container(width: 96, height: 96, alignment: Alignment.center,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: C.bg2, border: Border.all(color: col, width: 2),
+              boxShadow: [BoxShadow(color: col.withOpacity(on ? 0.5 : 0.1), blurRadius: 20)]),
+            child: Icon(Icons.power_settings_new, size: 44, color: col)),
+        ]);
+      case 4: // дуга — спидометр
+        return SizedBox(width: 222, height: 222,
+          child: CustomPaint(painter: ArcPainter(col, on ? 0.85 : conn == 1 ? 0.4 : 0.05),
+            child: Center(child: Stack(alignment: Alignment.center, children: [
+              Container(width: 150, height: 150,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: C.bg2, border: Border.all(color: C.line))),
+              Icon(Icons.power_settings_new, size: 56, color: col),
+            ]))));
       default: // шестерёнка
         return Stack(alignment: Alignment.center, children: [
           RotationTransition(turns: _spin, child: AnimatedOpacity(
@@ -483,10 +535,11 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     final sel = btnStyle == i;
     return GestureDetector(
       onTap: () => setState(() => btnStyle = i),
-      child: Container(height: 40, alignment: Alignment.center,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
         decoration: BoxDecoration(color: sel ? C.accent.withOpacity(0.16) : Colors.white.withOpacity(0.04),
           borderRadius: BorderRadius.circular(11), border: Border.all(color: sel ? C.accent : C.line)),
-        child: Text(btnStyleNames[i], style: disp(12, w: FontWeight.w600, c: sel ? C.accent : C.muted))),
+        child: Text(btnStyleNames[i], style: disp(13, w: FontWeight.w600, c: sel ? C.accent : C.muted))),
     );
   }
 
@@ -705,10 +758,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
             const SizedBox(height: 18),
             Text('Кнопка подключения', style: disp(15, w: FontWeight.w600)),
             const SizedBox(height: 10),
-            Row(children: [
-              for (int i = 0; i < btnStyleNames.length; i++)
-                Expanded(child: Padding(padding: EdgeInsets.only(right: i < 2 ? 8 : 0), child: _styleChip(i))),
-            ]),
+            Wrap(spacing: 8, runSpacing: 8, children: [for (int i = 0; i < btnStyleNames.length; i++) _styleChip(i)]),
           ])),
           const SizedBox(height: 22),
           _kicker('безопасность'),
