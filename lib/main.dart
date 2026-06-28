@@ -47,7 +47,7 @@ const List<(String, Color, Color)> accentThemes = [
   ('Lavender', Color(0xFFA779FF), Color(0xFFD0B3FF)),
   ('Crimson', Color(0xFFFF4D6D), Color(0xFFFF9BAD)),
 ];
-const btnStyleNames = ['Шестерёнка', 'Кольцо', 'Орб', 'Пульс', 'Дуга'];
+const btnStyleNames = ['Шестерёнка', 'Кольцо', 'Орб', 'Пульс'];
 
 TextStyle disp(double s, {FontWeight w = FontWeight.w700, Color c = C.text}) =>
     TextStyle(fontFamily: 'SpaceGrotesk', fontSize: s, fontWeight: w, color: c, letterSpacing: -0.3, height: 1.15);
@@ -120,34 +120,6 @@ class StarPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(StarPainter old) => old.t != t;
-}
-
-// Спидометр-дуга для стиля кнопки «Дуга»
-class ArcPainter extends CustomPainter {
-  final Color col;
-  final double v;
-  ArcPainter(this.col, this.v);
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = Rect.fromLTWH(7, 7, size.width - 14, size.height - 14);
-    const start = math.pi * 0.75;
-    const sweep = math.pi * 1.5;
-    final track = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 12
-      ..strokeCap = StrokeCap.round
-      ..color = C.line;
-    canvas.drawArc(rect, start, sweep, false, track);
-    final fill = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 12
-      ..strokeCap = StrokeCap.round
-      ..color = col;
-    canvas.drawArc(rect, start, sweep * v.clamp(0.0, 1.0), false, fill);
-  }
-
-  @override
-  bool shouldRepaint(ArcPainter old) => old.v != v || old.col != col;
 }
 
 // Шестерёнка рисуется в коде, чтобы перекрашиваться под выбранную тему
@@ -485,14 +457,6 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
               boxShadow: [BoxShadow(color: col.withOpacity(on ? 0.5 : 0.1), blurRadius: 20)]),
             child: Icon(Icons.power_settings_new, size: 44, color: col)),
         ]);
-      case 4: // дуга — спидометр
-        return SizedBox(width: 222, height: 222,
-          child: CustomPaint(painter: ArcPainter(col, on ? 0.85 : conn == 1 ? 0.4 : 0.05),
-            child: Center(child: Stack(alignment: Alignment.center, children: [
-              Container(width: 150, height: 150,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: C.bg2, border: Border.all(color: C.line))),
-              Icon(Icons.power_settings_new, size: 56, color: col),
-            ]))));
       default: // шестерёнка
         return Stack(alignment: Alignment.center, children: [
           RotationTransition(turns: _spin, child: AnimatedOpacity(
