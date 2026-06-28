@@ -75,10 +75,10 @@ const List<(String, Color, Color)> accentThemes = [
 ];
 const btnStyleNames = ['Шестерёнка', 'Кольцо', 'Орб', 'Пульс'];
 
-TextStyle disp(double s, {FontWeight w = FontWeight.w700, Color c = C.text}) =>
-    TextStyle(fontFamily: 'SpaceGrotesk', fontSize: s, fontWeight: w, color: c, letterSpacing: -0.3, height: 1.15);
-TextStyle mono(double s, {FontWeight w = FontWeight.w500, Color c = C.muted}) =>
-    TextStyle(fontFamily: 'JetBrainsMono', fontSize: s, fontWeight: w, color: c, height: 1.2);
+TextStyle disp(double s, {FontWeight w = FontWeight.w700, Color? c}) =>
+    TextStyle(fontFamily: 'SpaceGrotesk', fontSize: s, fontWeight: w, color: c ?? C.text, letterSpacing: -0.3, height: 1.15);
+TextStyle mono(double s, {FontWeight w = FontWeight.w500, Color? c}) =>
+    TextStyle(fontFamily: 'JetBrainsMono', fontSize: s, fontWeight: w, color: c ?? C.muted, height: 1.2);
 
 // ============================ MODELS / MOCK ============================
 class Server {
