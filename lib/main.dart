@@ -28,17 +28,27 @@ Future<void> main() async {
 
 // ============================ TOKENS ============================
 class C {
-  static const bg = Color(0xFF06040C);
-  static const bg2 = Color(0xFF0C0A14);
-  static const text = Color(0xFFEDF1F8);
-  static const muted = Color(0xFF8A93A6);
-  static const line = Color(0x14FFFFFF);
+  static Color bg = const Color(0xFF06040C);
+  static Color bg2 = const Color(0xFF0C0A14);
+  static Color text = const Color(0xFFEDF1F8);
+  static Color muted = const Color(0xFF8A93A6);
+  static Color line = const Color(0x14FFFFFF);
   static Color accent = const Color(0xFFFF7A1A);
   static Color accentSoft = const Color(0xFFFFB347);
   static const accent2 = Color(0xFF2D8BFF);
   static const ok = Color(0xFF39D98A);
   static const warn = Color(0xFFFFAE3D);
   static const danger = Color(0xFFFF5470);
+
+  static bool light = false;
+  static void applyTheme(bool isLight) {
+    light = isLight;
+    bg = isLight ? const Color(0xFFF3F6FC) : const Color(0xFF06040C);
+    bg2 = isLight ? const Color(0xFFFFFFFF) : const Color(0xFF0C0A14);
+    text = isLight ? const Color(0xFF0F1828) : const Color(0xFFEDF1F8);
+    muted = isLight ? const Color(0xFF5A6781) : const Color(0xFF8A93A6);
+    line = isLight ? const Color(0x1A101A30) : const Color(0x14FFFFFF);
+  }
 }
 
 LinearGradient get accentGrad =>
@@ -207,6 +217,8 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
   Server server = ruServers[0];
   bool tgl1 = false, tgl2 = true, tgl3 = true, tgl4 = false;
   int accentIdx = 0, btnStyle = 0, down = 0, up = 0;
+  int themeMode = 0; // 0 тёмная, 1 светлая, 2 системная
+  bool autoConnect = false;
   String keyStr = kDemoKey;
   String? customCfg;
   String? importedHost;
@@ -258,6 +270,8 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       btnStyle = (p.getInt('btnStyle') ?? 0).clamp(0, btnStyleNames.length - 1);
       mode = (p.getInt('mode') ?? 0).clamp(0, modeLabels.length - 1);
       proto = (p.getInt('proto') ?? 0).clamp(0, 2);
+      themeMode = (p.getInt('themeMode') ?? 0).clamp(0, 2);
+      autoConnect = p.getBool('autoConnect') ?? false;
       tgl1 = p.getBool('tgl1') ?? false;
       tgl2 = p.getBool('tgl2') ?? true;
       tgl3 = p.getBool('tgl3') ?? true;
@@ -284,8 +298,17 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       final th = accentThemes[accentIdx];
       C.accent = th.$2;
       C.accentSoft = th.$3;
+      _applyThemeMode();
     });
     if (loggedIn) _refreshSub(silent: true);
+    if (autoConnect && conn == 0) {
+      Future.delayed(const Duration(milliseconds: 500), () { if (mounted && conn == 0) toggle(); });
+    }
+  }
+
+  void _applyThemeMode() {
+    final sysLight = WidgetsBinding.instance.platformDispatcher.platformBrightness == Brightness.light;
+    C.applyTheme(themeMode == 1 || (themeMode == 2 && sysLight));
   }
 
   Future<void> _save() async {
@@ -294,6 +317,8 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     await p.setInt('btnStyle', btnStyle);
     await p.setInt('mode', mode);
     await p.setInt('proto', proto);
+    await p.setInt('themeMode', themeMode);
+    await p.setBool('autoConnect', autoConnect);
     await p.setBool('tgl1', tgl1);
     await p.setBool('tgl2', tgl2);
     await p.setBool('tgl3', tgl3);
@@ -387,7 +412,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
           final done = snap.connectionState == ConnectionState.done;
           return AlertDialog(
             backgroundColor: C.bg2,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: C.line)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
             title: Text(title, style: disp(18, w: FontWeight.w700)),
             content: !done
                 ? Row(mainAxisSize: MainAxisSize.min, children: [
@@ -613,7 +638,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: C.bg2,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: C.line)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
         title: Text('Свой конфиг', style: disp(18, w: FontWeight.w700)),
         content: TextField(
           controller: ctrl,
@@ -650,7 +675,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: C.bg2,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: C.line)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
         title: Text('Выйти?', style: disp(18, w: FontWeight.w700)),
         content: Text('Сбросит подключение и настройки этого устройства.', style: mono(13, c: C.muted)),
         actions: [
@@ -684,7 +709,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: C.bg2,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: C.line)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
         title: Text(title, style: disp(18, w: FontWeight.w700)),
         content: Text(body, style: mono(13, c: C.text)),
         actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text('Ок', style: mono(13, c: C.accent)))],
@@ -707,15 +732,15 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     return Scaffold(
       backgroundColor: C.bg,
       body: Stack(children: [
-        const Positioned.fill(child: ColoredBox(color: C.bg)),
-        Positioned.fill(child: AnimatedBuilder(
+        Positioned.fill(child: ColoredBox(color: C.bg)),
+        if (!C.light) Positioned.fill(child: AnimatedBuilder(
           animation: _twinkle,
           builder: (_, __) => CustomPaint(painter: StarPainter(_twinkle.value * 2 * math.pi)),
         )),
         Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(
           gradient: RadialGradient(center: const Alignment(0, -0.95), radius: 0.95,
-            colors: [C.accent.withOpacity(0.17), C.accent.withOpacity(0)])))),
-        const Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(
+            colors: [C.accent.withOpacity(C.light ? 0.10 : 0.17), C.accent.withOpacity(0)])))),
+        if (!C.light) const Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(
           gradient: RadialGradient(center: Alignment(1.0, -0.9), radius: 0.8,
             colors: [Color(0x1A2D8BFF), Color(0x002D8BFF)])))),
         SafeArea(bottom: false, child: AnimatedSwitcher(
@@ -737,7 +762,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     return ClipRect(child: BackdropFilter(
       filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
       child: Container(
-        decoration: BoxDecoration(color: C.bg2.withOpacity(0.7), border: const Border(top: BorderSide(color: C.line))),
+        decoration: BoxDecoration(color: C.bg2.withOpacity(0.7), border: Border(top: BorderSide(color: C.line))),
         child: SafeArea(top: false, child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 9),
           child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -826,7 +851,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
           const SizedBox(width: 5),
           Text(connected ? '$up' : '—', style: mono(13, c: C.text, w: FontWeight.w600)),
           const Spacer(),
-          const Icon(Icons.language, size: 15, color: C.muted),
+          Icon(Icons.language, size: 15, color: C.muted),
           const SizedBox(width: 6),
           Text(connected ? '95.142.16.7' : 'IP скрыт', style: mono(12)),
         ])),
@@ -1010,6 +1035,19 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     );
   }
 
+  Widget _themeChip(int i) {
+    const names = ['Тёмная', 'Светлая', 'Системная'];
+    final sel = themeMode == i;
+    return GestureDetector(
+      onTap: () { setState(() { themeMode = i; _applyThemeMode(); }); _save(); },
+      child: Container(
+        height: 40, alignment: Alignment.center,
+        decoration: BoxDecoration(color: sel ? C.accent.withOpacity(0.16) : Colors.white.withOpacity(0.04),
+          borderRadius: BorderRadius.circular(11), border: Border.all(color: sel ? C.accent : C.line)),
+        child: Text(names[i], style: disp(12.5, w: FontWeight.w600, c: sel ? C.accent : C.muted))),
+    );
+  }
+
   // ---------------- SERVERS ----------------
   Widget _servers() => ListView(
         padding: const EdgeInsets.all(20),
@@ -1036,12 +1074,12 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
                 const SizedBox(height: 3),
                 Text('Москва · 12 ms', style: mono(12)),
               ])),
-              const Icon(Icons.chevron_right, color: C.muted),
+              Icon(Icons.chevron_right, color: C.muted),
             ])),
           ),
           const SizedBox(height: 12),
           _card(padding: 12, child: Row(children: [
-            const Icon(Icons.search, size: 18, color: C.muted),
+            Icon(Icons.search, size: 18, color: C.muted),
             const SizedBox(width: 10),
             Expanded(child: TextField(
               controller: _search,
@@ -1054,7 +1092,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
             if (_q.isNotEmpty) GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: () => setState(() { _q = ''; _search.clear(); }),
-              child: const Icon(Icons.close, size: 16, color: C.muted)),
+              child: Icon(Icons.close, size: 16, color: C.muted)),
           ])),
           const SizedBox(height: 22),
           ..._serverSections(),
@@ -1179,7 +1217,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
                 const SizedBox(height: 3),
                 Text('коробочка · 15 000 ₽', style: mono(12, c: C.accent)),
               ])),
-              const Icon(Icons.chevron_right, color: C.muted),
+              Icon(Icons.chevron_right, color: C.muted),
             ])),
           ),
           const SizedBox(height: 14),
@@ -1338,7 +1376,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
   void _confirmDelDevice(String id, String name) {
     showDialog(context: context, builder: (_) => AlertDialog(
       backgroundColor: C.bg2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: C.line)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
       title: Text('Удалить устройство?', style: disp(18, w: FontWeight.w700)),
       content: Text('«$name» будет отвязано от подписки.', style: mono(13, c: C.muted)),
       actions: [
@@ -1376,6 +1414,13 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
             Text('Кнопка подключения', style: disp(15, w: FontWeight.w600)),
             const SizedBox(height: 10),
             Wrap(spacing: 8, runSpacing: 8, children: [for (int i = 0; i < btnStyleNames.length; i++) _styleChip(i)]),
+            const SizedBox(height: 18),
+            Text('Тема', style: disp(15, w: FontWeight.w600)),
+            const SizedBox(height: 10),
+            Row(children: [
+              for (int i = 0; i < 3; i++)
+                Expanded(child: Padding(padding: EdgeInsets.only(right: i < 2 ? 8 : 0), child: _themeChip(i))),
+            ]),
           ])),
           const SizedBox(height: 22),
           _kicker('безопасность'),
@@ -1388,6 +1433,8 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
             _toggle('Подписка истекает', 'Напомнить за пару дней', tgl3, (v) { setState(() => tgl3 = v); _save(); }),
             _divider(),
             _toggle('Лимит трафика', 'Сигнал при большом расходе', tgl4, (v) { setState(() => tgl4 = v); _save(); }),
+            _divider(),
+            _toggle('Авто-подключение', 'Подключаться сразу при запуске', autoConnect, (v) { setState(() => autoConnect = v); _save(); }),
           ])),
           const SizedBox(height: 22),
           _kicker('инструменты'),
@@ -1428,7 +1475,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
             const SizedBox(width: 12),
             Text(label, style: disp(15, w: FontWeight.w500)),
             const Spacer(),
-            const Icon(Icons.chevron_right, size: 18, color: C.muted),
+            Icon(Icons.chevron_right, size: 18, color: C.muted),
           ]),
         ),
       );
@@ -1464,9 +1511,10 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
   // ---------------- GLASS CARD + SHARED ----------------
   Widget _card({required Widget child, double padding = 16, bool strong = false}) {
     final r = BorderRadius.circular(18);
+    final lt = C.light;
     return Container(
       decoration: BoxDecoration(borderRadius: r,
-        boxShadow: const [BoxShadow(color: Color(0x70000000), blurRadius: 20, offset: Offset(0, 12))]),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(lt ? 0.08 : 0.44), blurRadius: 20, offset: const Offset(0, 12))]),
       child: ClipRRect(
         borderRadius: r,
         child: BackdropFilter(
@@ -1475,12 +1523,12 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
             padding: EdgeInsets.all(padding),
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: strong
-                    ? [Colors.white.withOpacity(0.13), Colors.white.withOpacity(0.05)]
-                    : [Colors.white.withOpacity(0.08), Colors.white.withOpacity(0.025)],
+                colors: lt
+                    ? (strong ? [Colors.white, Colors.white.withOpacity(0.93)] : [Colors.white.withOpacity(0.88), Colors.white.withOpacity(0.74)])
+                    : (strong ? [Colors.white.withOpacity(0.13), Colors.white.withOpacity(0.05)] : [Colors.white.withOpacity(0.08), Colors.white.withOpacity(0.025)]),
                 begin: Alignment.topLeft, end: Alignment.bottomRight),
               borderRadius: r,
-              border: Border.all(color: Colors.white.withOpacity(0.14)),
+              border: Border.all(color: lt ? Colors.black.withOpacity(0.07) : Colors.white.withOpacity(0.14)),
             ),
             child: child,
           ),
