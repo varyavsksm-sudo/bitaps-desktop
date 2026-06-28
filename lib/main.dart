@@ -328,13 +328,49 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(
-        content: Text(m, style: mono(13, c: C.text)),
-        backgroundColor: C.bg2,
+        content: Row(children: [
+          Container(width: 4, height: 30, decoration: BoxDecoration(color: C.accent, borderRadius: BorderRadius.circular(2))),
+          const SizedBox(width: 12),
+          Expanded(child: Text(m, style: disp(14, w: FontWeight.w600, c: C.text))),
+        ]),
+        backgroundColor: const Color(0xFF221F30),
         behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 18),
+        elevation: 10,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12), side: const BorderSide(color: C.line)),
-        duration: const Duration(seconds: 2),
+          borderRadius: BorderRadius.circular(14), side: BorderSide(color: C.accent.withOpacity(0.45))),
+        duration: const Duration(seconds: 3),
       ));
+  }
+
+  // Инструмент с сетью: окно с крутилкой → результат прямо в окне (видно всегда)
+  Future<void> _runTool(String title, Future<String> Function() work) async {
+    final fut = work();
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => FutureBuilder<String>(
+        future: fut,
+        builder: (c, snap) {
+          final done = snap.connectionState == ConnectionState.done;
+          return AlertDialog(
+            backgroundColor: C.bg2,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: C.line)),
+            title: Text(title, style: disp(18, w: FontWeight.w700)),
+            content: !done
+                ? Row(mainAxisSize: MainAxisSize.min, children: [
+                    SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: C.accent)),
+                    const SizedBox(width: 14),
+                    Text('Минутку…', style: mono(13, c: C.muted)),
+                  ])
+                : Text(snap.hasError ? 'Не удалось выполнить — проверь интернет.' : (snap.data ?? ''), style: mono(13, c: C.text)),
+            actions: done
+                ? [TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Ок', style: mono(13, c: C.accent)))]
+                : null,
+          );
+        },
+      ),
+    );
   }
 
   Future<void> _open(String url) async {
@@ -427,32 +463,21 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     }
   }
 
-  Future<void> _leakCheck() async {
-    _toast('Проверяю внешний IP…');
-    try {
-      final r = await http.get(Uri.parse('https://api.ipify.org?format=json'));
-      final ip = (jsonDecode(r.body) as Map)['ip'];
-      _dialog('Проверка утечек', 'Твой текущий внешний IP:\n\n$ip\n\nС включённым VPN он сменится на адрес сервера — так проверяется, что трафик идёт через туннель.');
-    } catch (_) {
-      _toast('Не удалось получить IP');
-    }
-  }
+  Future<void> _leakCheck() => _runTool('Проверка утечек', () async {
+        final r = await http.get(Uri.parse('https://api.ipify.org?format=json'));
+        final ip = (jsonDecode(r.body) as Map)['ip'];
+        return 'Твой текущий внешний IP:\n\n$ip\n\nС включённым VPN он сменится на адрес сервера — так видно, что трафик идёт через туннель.';
+      });
 
-  Future<void> _speedTest() async {
-    _toast('Замеряю скорость…');
-    try {
-      final sw = Stopwatch()..start();
-      final r = await http.get(Uri.parse('https://speed.cloudflare.com/__down?bytes=4000000'));
-      sw.stop();
-      final secs = sw.elapsedMilliseconds / 1000.0;
-      final mbps = r.bodyBytes.length * 8 / secs / 1e6;
-      final mb = r.bodyBytes.length / 1048576;
-      _dialog('Спид-тест',
-          'Скорость загрузки: ${mbps.toStringAsFixed(1)} Mbps\n\nПолучено ${mb.toStringAsFixed(1)} MB за ${sw.elapsedMilliseconds} мс\n(реальный замер через Cloudflare)');
-    } catch (_) {
-      _toast('Спид-тест не удался');
-    }
-  }
+  Future<void> _speedTest() => _runTool('Спид-тест', () async {
+        final sw = Stopwatch()..start();
+        final r = await http.get(Uri.parse('https://speed.cloudflare.com/__down?bytes=4000000'));
+        sw.stop();
+        final secs = sw.elapsedMilliseconds / 1000.0;
+        final mbps = r.bodyBytes.length * 8 / secs / 1e6;
+        final mb = r.bodyBytes.length / 1048576;
+        return 'Скорость загрузки: ${mbps.toStringAsFixed(1)} Mbps\n\nПолучено ${mb.toStringAsFixed(1)} MB за ${sw.elapsedMilliseconds} мс\n(реальный замер через Cloudflare)';
+      });
 
   void _showStats() {
     _dialog('Статистика',
