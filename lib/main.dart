@@ -49,7 +49,7 @@ class C {
   static bool light = false;
   static void applyTheme(bool isLight) {
     light = isLight;
-    bg = isLight ? const Color(0xFFF3F6FC) : const Color(0xFF06040C);
+    bg = isLight ? const Color(0xFFEAEEF6) : const Color(0xFF06040C);
     bg2 = isLight ? const Color(0xFFFFFFFF) : const Color(0xFF0C0A14);
     text = isLight ? const Color(0xFF0F1828) : const Color(0xFFEDF1F8);
     muted = isLight ? const Color(0xFF5A6781) : const Color(0xFF8A93A6);
@@ -356,7 +356,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       setState(() => conn = 1);
       _spin.duration = const Duration(milliseconds: 1400);
       _spin.repeat();
-      Future.delayed(const Duration(milliseconds: 900), () {
+      Future.delayed(const Duration(milliseconds: 1700), () {
         if (!mounted) return;
         setState(() {
           conn = 2;
@@ -750,7 +750,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
         )),
         Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(
           gradient: RadialGradient(center: const Alignment(0, -0.95), radius: 0.95,
-            colors: [C.accent.withOpacity(C.light ? 0.10 : 0.17), C.accent.withOpacity(0)])))),
+            colors: [C.accent.withOpacity(C.light ? 0.16 : 0.17), C.accent.withOpacity(0)])))),
         if (!C.light) const Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(
           gradient: RadialGradient(center: Alignment(1.0, -0.9), radius: 0.8,
             colors: [Color(0x1A2D8BFF), Color(0x002D8BFF)])))),
@@ -953,6 +953,8 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
         ]);
       default: // шестерёнка
         return Stack(alignment: Alignment.center, children: [
+          Container(width: 250, height: 250, decoration: BoxDecoration(shape: BoxShape.circle,
+            gradient: RadialGradient(colors: [col.withOpacity(C.light ? 0.20 : 0.0), col.withOpacity(0)]))),
           RotationTransition(turns: _spin, child: AnimatedOpacity(
             duration: const Duration(milliseconds: 350), opacity: conn == 0 ? 0.85 : 1,
             child: CustomPaint(size: const Size(212, 212), painter: GearPainter(col)))),
@@ -1528,7 +1530,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     final lt = C.light;
     return Container(
       decoration: BoxDecoration(borderRadius: r,
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(lt ? 0.08 : 0.44), blurRadius: 20, offset: const Offset(0, 12))]),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(lt ? 0.10 : 0.44), blurRadius: lt ? 26 : 20, offset: Offset(0, lt ? 8 : 12))]),
       child: ClipRRect(
         borderRadius: r,
         child: BackdropFilter(
@@ -1538,7 +1540,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: lt
-                    ? (strong ? [Colors.white, Colors.white.withOpacity(0.93)] : [Colors.white.withOpacity(0.88), Colors.white.withOpacity(0.74)])
+                    ? (strong ? [Colors.white, Colors.white] : [Colors.white, Colors.white.withOpacity(0.96)])
                     : (strong ? [Colors.white.withOpacity(0.13), Colors.white.withOpacity(0.05)] : [Colors.white.withOpacity(0.08), Colors.white.withOpacity(0.025)]),
                 begin: Alignment.topLeft, end: Alignment.bottomRight),
               borderRadius: r,
