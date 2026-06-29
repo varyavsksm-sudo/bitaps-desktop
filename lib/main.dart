@@ -179,7 +179,7 @@ class GearPainter extends CustomPainter {
       canvas.restore();
     }
     canvas.drawCircle(c, r * 0.72, p);
-    canvas.drawCircle(c, r * 0.50, Paint()..color = C.bg2);
+    canvas.drawCircle(c, r * 0.50, Paint()..color = const Color(0xFF0C0A14)); // тёмный медальон в обеих темах
     canvas.drawCircle(c, r * 0.50,
       Paint()..style = PaintingStyle.stroke..strokeWidth = 2..color = col.withOpacity(0.45));
   }
@@ -278,7 +278,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       btnStyle = (p.getInt('btnStyle') ?? 0).clamp(0, btnStyleNames.length - 1);
       mode = (p.getInt('mode') ?? 0).clamp(0, modeLabels.length - 1);
       proto = (p.getInt('proto') ?? 0).clamp(0, 2);
-      themeMode = (p.getInt('themeMode') ?? 1).clamp(0, 2); // TEMP: дефолт светлая для проверки
+      themeMode = (p.getInt('themeMode') ?? 0).clamp(0, 2);
       autoConnect = p.getBool('autoConnect') ?? false;
       tgl1 = p.getBool('tgl1') ?? false;
       tgl2 = p.getBool('tgl2') ?? true;
@@ -956,7 +956,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
           RotationTransition(turns: _spin, child: AnimatedOpacity(
             duration: const Duration(milliseconds: 350), opacity: conn == 0 ? 0.85 : 1,
             child: CustomPaint(size: const Size(212, 212), painter: GearPainter(col)))),
-          Text('B', style: disp(60, w: FontWeight.w800, c: C.light ? Colors.black : Colors.white)),
+          Text('B', style: disp(60, w: FontWeight.w800, c: Colors.white)),
         ]);
     }
   }
