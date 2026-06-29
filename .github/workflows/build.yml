@@ -18,7 +18,7 @@ jobs:
           channel: stable
       - run: flutter --version
       - run: flutter config --enable-windows-desktop
-      - run: flutter create --platforms=windows,android --project-name bitaps_vpn .
+      - run: flutter create --org com.bitapsvpn --platforms=windows,android --project-name bitaps_vpn .
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: flutter build windows --release
@@ -46,7 +46,7 @@ jobs:
           channel: stable
       - run: flutter --version
       - run: flutter config --enable-linux-desktop
-      - run: flutter create --platforms=linux --project-name bitaps_vpn .
+      - run: flutter create --org com.bitapsvpn --platforms=linux --project-name bitaps_vpn .
       - run: flutter pub get
       - run: flutter build linux --release
       - name: Portable tar.gz
@@ -71,7 +71,13 @@ jobs:
           channel: stable
       - run: flutter --version
       - run: flutter config --enable-macos-desktop
-      - run: flutter create --platforms=macos,android --project-name bitaps_vpn .
+      - run: flutter create --org com.bitapsvpn --platforms=macos,android --project-name bitaps_vpn .
+      - name: Inject network.client entitlement (sandboxed release needs it for HTTP)
+        run: |
+          for e in macos/Runner/Release.entitlements macos/Runner/DebugProfile.entitlements; do
+            [ -f "$e" ] && /usr/bin/perl -0pi -e 's/(<\/dict>)/\t<key>com.apple.security.network.client<\/key>\n\t<true\/>\n$1/ unless /network\.client/' "$e"
+          done
+          grep -q "network.client" macos/Runner/Release.entitlements && echo "network.client ok" || (echo "ENTITLEMENT MISSING" && exit 1)
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: flutter build macos --release
@@ -103,7 +109,13 @@ jobs:
         with:
           channel: stable
       - run: flutter --version
-      - run: flutter create --platforms=android --project-name bitaps_vpn .
+      - run: flutter create --org com.bitapsvpn --platforms=android --project-name bitaps_vpn .
+      - name: Patch Android manifest (INTERNET) + minSdk 24
+        run: |
+          perl -0pi -e 's/(<manifest\b[^>]*>)/$1\n    <uses-permission android:name="android.permission.INTERNET"\/>/' android/app/src/main/AndroidManifest.xml
+          grep -q "android.permission.INTERNET" android/app/src/main/AndroidManifest.xml && echo "INTERNET ok" || (echo "INTERNET MISSING" && exit 1)
+          sed -i.bak 's/minSdk = flutter.minSdkVersion/minSdk = 24/; s/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' android/app/build.gradle.kts 2>/dev/null || true
+          sed -i.bak 's/minSdk = flutter.minSdkVersion/minSdk = 24/; s/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' android/app/build.gradle 2>/dev/null || true
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: yes | flutter doctor --android-licenses || true
