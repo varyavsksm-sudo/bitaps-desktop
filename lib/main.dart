@@ -37,6 +37,8 @@ class C {
   static Color text = const Color(0xFFEDF1F8);
   static Color muted = const Color(0xFF8A93A6);
   static Color line = const Color(0x14FFFFFF);
+  static Color fill = const Color(0x0AFFFFFF);   // заливка чипов/строк (тема-зависимая)
+  static Color field = const Color(0x59000000);  // фон полей/код-блоков (тема-зависимая)
   static Color accent = const Color(0xFFFF7A1A);
   static Color accentSoft = const Color(0xFFFFB347);
   static const accent2 = Color(0xFF2D8BFF);
@@ -52,6 +54,8 @@ class C {
     text = isLight ? const Color(0xFF0F1828) : const Color(0xFFEDF1F8);
     muted = isLight ? const Color(0xFF5A6781) : const Color(0xFF8A93A6);
     line = isLight ? const Color(0x1A101A30) : const Color(0x14FFFFFF);
+    fill = isLight ? const Color(0x0D000000) : const Color(0x0AFFFFFF);
+    field = isLight ? const Color(0x0A000000) : const Color(0x59000000);
   }
 }
 
@@ -274,7 +278,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       btnStyle = (p.getInt('btnStyle') ?? 0).clamp(0, btnStyleNames.length - 1);
       mode = (p.getInt('mode') ?? 0).clamp(0, modeLabels.length - 1);
       proto = (p.getInt('proto') ?? 0).clamp(0, 2);
-      themeMode = (p.getInt('themeMode') ?? 0).clamp(0, 2);
+      themeMode = (p.getInt('themeMode') ?? 1).clamp(0, 2); // TEMP: дефолт светлая для проверки
       autoConnect = p.getBool('autoConnect') ?? false;
       tgl1 = p.getBool('tgl1') ?? false;
       tgl2 = p.getBool('tgl2') ?? true;
@@ -976,7 +980,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
         duration: const Duration(milliseconds: 200),
         height: 40, alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: sel ? C.accent.withOpacity(0.16) : Colors.white.withOpacity(0.04),
+          color: sel ? C.accent.withOpacity(0.16) : C.fill,
           borderRadius: BorderRadius.circular(11),
           border: Border.all(color: sel ? C.accent : C.line),
         ),
@@ -994,7 +998,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
             padding: const EdgeInsets.symmetric(horizontal: 12),
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: server.id == s.id ? C.accent.withOpacity(0.16) : Colors.white.withOpacity(0.04),
+              color: server.id == s.id ? C.accent.withOpacity(0.16) : C.fill,
               borderRadius: BorderRadius.circular(20),
               border: Border.all(color: server.id == s.id ? C.accent : C.line)),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -1036,7 +1040,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       onTap: () { setState(() => btnStyle = i); _save(); },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-        decoration: BoxDecoration(color: sel ? C.accent.withOpacity(0.16) : Colors.white.withOpacity(0.04),
+        decoration: BoxDecoration(color: sel ? C.accent.withOpacity(0.16) : C.fill,
           borderRadius: BorderRadius.circular(11), border: Border.all(color: sel ? C.accent : C.line)),
         child: Text(btnStyleNames[i], style: disp(13, w: FontWeight.w600, c: sel ? C.accent : C.muted))),
     );
@@ -1049,7 +1053,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       onTap: () { setState(() { themeMode = i; _applyThemeMode(); }); _save(); },
       child: Container(
         height: 40, alignment: Alignment.center,
-        decoration: BoxDecoration(color: sel ? C.accent.withOpacity(0.16) : Colors.white.withOpacity(0.04),
+        decoration: BoxDecoration(color: sel ? C.accent.withOpacity(0.16) : C.fill,
           borderRadius: BorderRadius.circular(11), border: Border.all(color: sel ? C.accent : C.line)),
         child: Text(names[i], style: disp(12.5, w: FontWeight.w600, c: sel ? C.accent : C.muted))),
     );
@@ -1146,7 +1150,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
         child: Container(
           margin: const EdgeInsets.only(bottom: 8),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-          decoration: BoxDecoration(color: Colors.white.withOpacity(0.04),
+          decoration: BoxDecoration(color: C.fill,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: sel ? C.accent.withOpacity(0.5) : C.line)),
           child: Row(children: [
@@ -1232,7 +1236,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
             Row(children: [_gIcon(Icons.forum), const SizedBox(width: 12), _kicker('поддержка')]),
             const SizedBox(height: 12),
             Container(padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: Colors.black.withOpacity(0.35), borderRadius: BorderRadius.circular(10)),
+              decoration: BoxDecoration(color: C.field, borderRadius: BorderRadius.circular(10)),
               child: TextField(
                 controller: _support,
                 maxLines: 3,
@@ -1296,7 +1300,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
         Text('Войди по своему ключу из бота — увидишь реальную подписку, ключ и устройства.', style: mono(12)),
         const SizedBox(height: 12),
         Container(padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(color: Colors.black.withOpacity(0.35), borderRadius: BorderRadius.circular(10)),
+          decoration: BoxDecoration(color: C.field, borderRadius: BorderRadius.circular(10)),
           child: TextField(controller: _loginCtrl, maxLines: 2, style: mono(11, c: C.text), cursorColor: C.accent,
             decoration: InputDecoration(isDense: true, border: InputBorder.none, contentPadding: EdgeInsets.zero,
               hintText: 'Вставь свой ключ vless://… из бота', hintStyle: mono(12, c: C.muted)))),
@@ -1343,7 +1347,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
             Text(loggedIn ? 'твой ключ из аккаунта' : 'для роутера и ручной настройки', style: mono(11))]))]),
         const SizedBox(height: 12),
         Container(padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(color: Colors.black.withOpacity(0.35), borderRadius: BorderRadius.circular(10)),
+          decoration: BoxDecoration(color: C.field, borderRadius: BorderRadius.circular(10)),
           child: Text(keyStr, style: mono(11, c: C.text), maxLines: 2, overflow: TextOverflow.ellipsis)),
         const SizedBox(height: 12),
         Row(children: [
