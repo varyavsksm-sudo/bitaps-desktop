@@ -18,7 +18,7 @@ jobs:
           channel: stable
       - run: flutter --version
       - run: flutter config --enable-windows-desktop
-      - run: flutter create --platforms=windows --project-name bitaps_vpn .
+      - run: flutter create --platforms=windows,android --project-name bitaps_vpn .
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: flutter build windows --release
@@ -71,7 +71,7 @@ jobs:
           channel: stable
       - run: flutter --version
       - run: flutter config --enable-macos-desktop
-      - run: flutter create --platforms=macos --project-name bitaps_vpn .
+      - run: flutter create --platforms=macos,android --project-name bitaps_vpn .
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: flutter build macos --release
