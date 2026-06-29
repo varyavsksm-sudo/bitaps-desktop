@@ -225,7 +225,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
   Server server = ruServers[0];
   bool tgl1 = false, tgl2 = true, tgl3 = true, tgl4 = false;
   int accentIdx = 0, btnStyle = 0, down = 0, up = 0;
-  int themeMode = 0; // 0 тёмная, 1 светлая, 2 системная
+  int themeMode = 0; // тема всегда тёмная (выбор темы убран); ключ хранится для совместимости
   bool autoConnect = false;
   String keyStr = kDemoKey;
   String? customCfg;
@@ -240,6 +240,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
   String? appToken, subPlan, subExpires, subName;
   int? subLimit;
   bool subActive = false;
+  bool _subLoading = false;
   List<Map<String, dynamic>> devices = [];
   final TextEditingController _loginCtrl = TextEditingController();
   bool get loggedIn => tgId != null && appToken != null;
@@ -278,7 +279,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       btnStyle = (p.getInt('btnStyle') ?? 0).clamp(0, btnStyleNames.length - 1);
       mode = (p.getInt('mode') ?? 0).clamp(0, modeLabels.length - 1);
       proto = (p.getInt('proto') ?? 0).clamp(0, 2);
-      themeMode = (p.getInt('themeMode') ?? 0).clamp(0, 2);
+      themeMode = 0; // тема всегда тёмная — выбор темы убран
       autoConnect = p.getBool('autoConnect') ?? false;
       tgl1 = p.getBool('tgl1') ?? false;
       tgl2 = p.getBool('tgl2') ?? true;
@@ -297,7 +298,8 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       subActive = p.getBool('subActive') ?? false;
       try {
         devices = ((jsonDecode(p.getString('devices') ?? '[]')) as List).cast<Map<String, dynamic>>();
-      } catch (_) {
+      } catch (e) {
+        debugPrint('cached devices decode error: $e');
         devices = [];
       }
       favs
@@ -315,8 +317,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
   }
 
   void _applyThemeMode() {
-    final sysLight = WidgetsBinding.instance.platformDispatcher.platformBrightness == Brightness.light;
-    C.applyTheme(themeMode == 1 || (themeMode == 2 && sysLight));
+    C.applyTheme(false); // премиум-тема всегда тёмная
   }
 
   Future<void> _save() async {
@@ -355,6 +356,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     if (conn == 0) {
       setState(() => conn = 1);
       _spin.duration = const Duration(milliseconds: 1400);
+      _spin.stop();
       _spin.repeat();
       Future.delayed(const Duration(milliseconds: 1700), () {
         if (!mounted) return;
@@ -373,6 +375,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     } else {
       _timer?.cancel();
       _spin.duration = const Duration(seconds: 6);
+      _spin.stop();
       _spin.repeat();
       setState(() {
         conn = 0;
@@ -382,10 +385,23 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
   }
 
   String get hms {
+    if (secs >= 86400) {
+      final d = secs ~/ 86400;
+      final h = (secs % 86400) ~/ 3600;
+      return '${d}d ${h}h';
+    }
     final h = (secs ~/ 3600).toString().padLeft(2, '0');
     final m = ((secs % 3600) ~/ 60).toString().padLeft(2, '0');
     final s = (secs % 60).toString().padLeft(2, '0');
     return '$h:$m:$s';
+  }
+
+  // Быстрейший доступный сервер (минимальный пинг среди ru+intl) — единый источник для Главной и Серверов
+  Server get fastestServer {
+    final avail = [...ruServers, ...intlServers].where((s) => s.available).toList();
+    if (avail.isEmpty) return ruServers[0];
+    avail.sort((a, b) => a.ping.compareTo(b.ping));
+    return avail.first;
   }
 
   // ----- реальные действия -----
@@ -428,7 +444,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
                     const SizedBox(width: 14),
                     Text('Минутку…', style: mono(13, c: C.muted)),
                   ])
-                : Text(snap.hasError ? 'Не удалось выполнить — проверь интернет.' : (snap.data ?? ''), style: mono(13, c: C.text)),
+                : Text(snap.hasError ? 'Не удалось выполнить.\n${snap.error}' : (snap.data ?? ''), style: mono(13, c: C.text)),
             actions: done
                 ? [TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Ок', style: mono(13, c: C.accent)))]
                 : null,
@@ -469,7 +485,9 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       } else {
         return Uri.parse(key).host;
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('_hostOf error: $e');
+    }
     return null;
   }
 
@@ -487,16 +505,37 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
   Future<void> _importKey() async {
     final data = await Clipboard.getData('text/plain');
     final t = (data?.text ?? '').trim();
-    if (t.startsWith('vless://') || t.startsWith('http://') || t.startsWith('https://')) {
-      setState(() {
-        keyStr = t;
-        importedHost = _hostOf(t);
-      });
-      _save();
-      _toast(importedHost != null ? 'Импортировано · $importedHost ✓' : 'Ключ импортирован ✓');
-    } else {
+    if (!(t.startsWith('vless://') || t.startsWith('http://') || t.startsWith('https://'))) {
       _toast('В буфере нет vless:// или ссылки-подписки');
+      return;
     }
+    final host = _hostOf(t);
+    if (host != null && !host.toLowerCase().contains('bitaps')) {
+      final ok = await _confirmForeignHost(host);
+      if (ok != true) return;
+    }
+    setState(() {
+      keyStr = t;
+      importedHost = host;
+    });
+    _save();
+    _toast(host != null ? 'Ключ заменён на $host ✓' : 'Ключ заменён ✓');
+  }
+
+  Future<bool?> _confirmForeignHost(String host) {
+    return showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: C.bg2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
+        title: Text('Не сервер bitaps', style: disp(18, w: FontWeight.w700)),
+        content: Text('$host — это не официальный сервер bitaps. Импортировать ключ всё равно?', style: mono(13, c: C.muted)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text('Отмена', style: mono(13, c: C.muted))),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: Text('Импортировать', style: mono(13, c: C.accent))),
+        ],
+      ),
+    );
   }
 
   // ----- вход по ключу / реальная подписка / устройства -----
@@ -514,8 +553,22 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     if (subExpires == null) return null;
     final e = DateTime.tryParse(subExpires!);
     if (e == null) return null;
-    return e.difference(DateTime.now()).inHours ~/ 24;
+    return e.toUtc().difference(DateTime.now().toUtc()).inHours ~/ 24;
   }
+
+  // Русские склонения дней: 1 день / 2-4 дня / 5+ дней
+  String _pluralDays(int n) {
+    final n10 = n % 10, n100 = n % 100;
+    if (n10 == 1 && n100 != 11) return 'день';
+    if (n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14)) return 'дня';
+    return 'дней';
+  }
+
+  // Лимит устройств: число, либо «…» при загрузке, либо «—» если неизвестно
+  String get _limitStr => subLimit != null ? '$subLimit' : (_subLoading ? '…' : '—');
+
+  String get _netErr => 'Нет связи с сервером — проверь интернет.';
+  String _srvErr(int code) => 'Сервер недоступен ($code). Попробуй позже.';
 
   Future<void> _login() async {
     final key = _loginCtrl.text.trim();
@@ -523,11 +576,26 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       _toast('Вставь свой ключ из бота');
       return;
     }
+    if (!(key.startsWith('vless://') || key.startsWith('http://') || key.startsWith('https://'))) {
+      _toast('Ключ должен начинаться с vless:// или https://');
+      return;
+    }
     _toast('Вхожу…');
     try {
-      final r = await http.post(Uri.parse(kAppLogin),
-          headers: {'content-type': 'application/json', 'apikey': kApiKey},
-          body: jsonEncode({'key': key}));
+      final r = await http
+          .post(Uri.parse(kAppLogin),
+              headers: {'content-type': 'application/json', 'apikey': kApiKey},
+              body: jsonEncode({'key': key}))
+          .timeout(const Duration(seconds: 20));
+      if (!mounted) return;
+      if (r.statusCode >= 500) {
+        _toast(_srvErr(r.statusCode));
+        return;
+      }
+      if (r.statusCode == 401 || r.statusCode == 403) {
+        _loginError('Этот ключ не подошёл. Возьми актуальный ключ в боте.');
+        return;
+      }
       final d = jsonDecode(r.body) as Map<String, dynamic>;
       if (d['ok'] == true && d['telegram_id'] is num) {
         setState(() {
@@ -539,11 +607,31 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
         _save();
         _toast('Вход выполнен ✓');
       } else {
-        _toast('Ключ не найден. Возьми актуальный в боте.');
+        _loginError('Ключ не найден. Возьми актуальный ключ в боте.');
       }
-    } catch (_) {
-      _toast('Нет связи с сервером');
+    } on TimeoutException catch (e) {
+      debugPrint('_login timeout: $e');
+      _toast(_netErr);
+    } catch (e) {
+      debugPrint('_login error: $e');
+      _toast(_netErr);
     }
+  }
+
+  void _loginError(String msg) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: C.bg2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
+        title: Text('Не удалось войти', style: disp(18, w: FontWeight.w700)),
+        content: Text(msg, style: mono(13, c: C.muted)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: Text('Закрыть', style: mono(13, c: C.muted))),
+          TextButton(onPressed: () { Navigator.pop(context); _open(kBot); }, child: Text('Открыть бота', style: mono(13, c: C.accent))),
+        ],
+      ),
+    );
   }
 
   Future<void> _refreshSub({String? del, bool silent = false}) async {
@@ -552,13 +640,21 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       return;
     }
     if (!silent) _toast(del != null ? 'Удаляю устройство…' : 'Обновляю…');
+    if (mounted) setState(() => _subLoading = true);
     try {
-      final r = await http.post(Uri.parse(kAppSub),
-          headers: {'content-type': 'application/json', 'apikey': kApiKey},
-          body: jsonEncode({'telegram_id': tgId, 'token': appToken, if (del != null) 'del': del}));
-      if (r.statusCode == 401) {
+      final r = await http
+          .post(Uri.parse(kAppSub),
+              headers: {'content-type': 'application/json', 'apikey': kApiKey},
+              body: jsonEncode({'telegram_id': tgId, 'token': appToken, if (del != null) 'del': del}))
+          .timeout(const Duration(seconds: 20));
+      if (!mounted) return;
+      if (r.statusCode == 401 || r.statusCode == 403) {
         if (!silent) _toast('Сессия истекла — войди заново');
         _doLogout();
+        return;
+      }
+      if (r.statusCode >= 500) {
+        if (!silent) _toast(_srvErr(r.statusCode));
         return;
       }
       final d = jsonDecode(r.body) as Map<String, dynamic>;
@@ -569,8 +665,14 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       } else if (!silent) {
         _toast('Не удалось обновить');
       }
-    } catch (_) {
-      if (!silent) _toast('Нет связи с сервером');
+    } on TimeoutException catch (e) {
+      debugPrint('_refreshSub timeout: $e');
+      if (!silent) _toast(_netErr);
+    } catch (e) {
+      debugPrint('_refreshSub error: $e');
+      if (!silent) _toast(_netErr);
+    } finally {
+      if (mounted) setState(() => _subLoading = false);
     }
   }
 
@@ -602,7 +704,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
           headers: {'content-type': 'application/json', 'apikey': kApiKey},
           body: jsonEncode({
             'type': 'support',
-            'name': 'Пользователь приложения',
+            'name': loggedIn ? (subName != null && subName!.isNotEmpty ? subName! : 'Аккаунт #$tgId') : 'Пользователь приложения',
             'email': '',
             'message': msg,
             'source': 'десктоп-приложение'
@@ -612,10 +714,11 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
         setState(() {});
         _toast('Отправлено в поддержку ✓');
       } else {
-        _toast('Ошибка отправки (${r.statusCode})');
+        _toast(r.statusCode >= 500 ? _srvErr(r.statusCode) : 'Ошибка отправки (${r.statusCode})');
       }
-    } catch (_) {
-      _toast('Нет связи с сервером');
+    } catch (e) {
+      debugPrint('_sendSupport error: $e');
+      _toast(_netErr);
     }
   }
 
@@ -659,15 +762,16 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
           decoration: InputDecoration(hintText: 'Вставь vless:// или другой конфиг', hintStyle: mono(12, c: C.muted)),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text('Отмена', style: mono(13, c: C.muted))),
+          TextButton(onPressed: () { ctrl.dispose(); Navigator.pop(context); }, child: Text('Отмена', style: mono(13, c: C.muted))),
           TextButton(
             onPressed: () {
               final t = ctrl.text.trim();
+              ctrl.dispose();
               Navigator.pop(context);
               if (t.startsWith('vless://') || t.startsWith('http://') || t.startsWith('https://')) {
                 setState(() { keyStr = t; importedHost = _hostOf(t); customCfg = t; });
                 _save();
-                _toast(importedHost != null ? 'Импортировано · $importedHost ✓' : 'Ключ импортирован ✓');
+                _toast(importedHost != null ? 'Ключ заменён на $importedHost ✓' : 'Ключ заменён ✓');
               } else {
                 setState(() => customCfg = t.isEmpty ? null : t);
                 _save();
@@ -688,7 +792,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
         backgroundColor: C.bg2,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
         title: Text('Выйти?', style: disp(18, w: FontWeight.w700)),
-        content: Text('Сбросит подключение и настройки этого устройства.', style: mono(13, c: C.muted)),
+        content: Text('Выйдешь из аккаунта на этом устройстве. Подключение отключится, персональные настройки сохранятся.', style: mono(13, c: C.muted)),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: Text('Отмена', style: mono(13, c: C.muted))),
           TextButton(
@@ -696,17 +800,17 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
               Navigator.pop(context);
               _timer?.cancel();
               final p = await SharedPreferences.getInstance();
-              await p.clear();
+              for (final k in ['tgId', 'appToken', 'subPlan', 'subExpires', 'subName', 'subLimit', 'subActive', 'devices', 'cfg', 'host']) {
+                await p.remove(k);
+              }
               if (!mounted) return;
               setState(() {
-                conn = 0; secs = 0; tab = 0; accentIdx = 0; btnStyle = 0; mode = 0; proto = 0;
-                tgl1 = false; tgl2 = true; tgl3 = true; tgl4 = false; customCfg = null; keyStr = kDemoKey;
-                tgId = null; appToken = null; subPlan = null; subExpires = null; subName = null; subLimit = null; subActive = false; devices = [];
-                favs.clear();
-                C.accent = accentThemes[0].$2;
-                C.accentSoft = accentThemes[0].$3;
+                conn = 0; secs = 0;
+                customCfg = null; importedHost = null;
+                tgId = null; appToken = null; subPlan = null; subExpires = null;
+                subName = null; subLimit = null; subActive = false; devices = [];
               });
-              _toast('Готово — всё сброшено');
+              _toast('Вышли из аккаунта');
             },
             child: Text('Выйти', style: mono(13, c: C.danger)),
           ),
@@ -729,6 +833,10 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
   }
 
   void _pickServer(Server s) {
+    if (conn == 2) {
+      _toast('Отключитесь, чтобы сменить сервер');
+      return;
+    }
     if (!s.available) {
       _toast('${s.city} — скоро');
       return;
@@ -811,7 +919,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
         const SizedBox(height: 4),
         Center(child: Text(
           conn == 0 ? 'Отключено' : conn == 1 ? 'Подключение…' : 'Подключено',
-          style: disp(22, w: FontWeight.w700, c: connected ? C.accent : C.text))),
+          style: disp(22, w: FontWeight.w700, c: connected ? C.accent : (conn == 1 ? C.warn : C.text)))),
         const SizedBox(height: 6),
         Center(child: Text(connected ? hms : '00:00:00',
           style: TextStyle(fontFamily: 'JetBrainsMono', fontSize: 38, fontWeight: FontWeight.w700,
@@ -824,7 +932,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
             Expanded(child: Padding(padding: EdgeInsets.only(right: i < 3 ? 8 : 0), child: _modeChip(modeLabels[i], i))),
         ]),
         const SizedBox(height: 10),
-        Text('Сами подберём лучший сервер и маршрут.', style: mono(12)),
+        Text('Авто-режим сам подберёт сервер и маршрут. Стрим · Игры · Прив. — скоро.', style: mono(12)),
         const SizedBox(height: 14),
         _card(child: Row(children: [
           Text(server.flag, style: const TextStyle(fontSize: 24)),
@@ -864,16 +972,16 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
           const Spacer(),
           Icon(Icons.language, size: 15, color: C.muted),
           const SizedBox(width: 6),
-          Text(connected ? '95.142.16.7' : 'IP скрыт', style: mono(12)),
+          Text(connected ? 'Demo: 95.142.16.7' : 'IP скрыт', style: mono(12)),
         ])),
         const SizedBox(height: 12),
         GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: toggle,
+          onTap: () { if (conn == 0) _pickServer(fastestServer); toggle(); },
           child: _card(child: Row(children: [
             _gIcon(Icons.bolt),
             const SizedBox(width: 13),
-            Text(connected ? 'Отключить' : 'Подключить быстрейший сервер', style: disp(15, w: FontWeight.w600)),
+            Text(connected ? 'Отключить' : 'Подключиться к быстрейшему серверу', style: disp(15, w: FontWeight.w600)),
           ])),
         ),
       ],
@@ -1038,26 +1146,18 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
 
   Widget _styleChip(int i) {
     final sel = btnStyle == i;
+    const previews = [Icons.settings, Icons.radio_button_unchecked, Icons.brightness_1, Icons.wifi_tethering];
     return GestureDetector(
       onTap: () { setState(() => btnStyle = i); _save(); },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
         decoration: BoxDecoration(color: sel ? C.accent.withOpacity(0.16) : C.fill,
           borderRadius: BorderRadius.circular(11), border: Border.all(color: sel ? C.accent : C.line)),
-        child: Text(btnStyleNames[i], style: disp(13, w: FontWeight.w600, c: sel ? C.accent : C.muted))),
-    );
-  }
-
-  Widget _themeChip(int i) {
-    const names = ['Тёмная', 'Светлая', 'Системная'];
-    final sel = themeMode == i;
-    return GestureDetector(
-      onTap: () { setState(() { themeMode = i; _applyThemeMode(); }); _save(); },
-      child: Container(
-        height: 40, alignment: Alignment.center,
-        decoration: BoxDecoration(color: sel ? C.accent.withOpacity(0.16) : C.fill,
-          borderRadius: BorderRadius.circular(11), border: Border.all(color: sel ? C.accent : C.line)),
-        child: Text(names[i], style: disp(12.5, w: FontWeight.w600, c: sel ? C.accent : C.muted))),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(previews[i], size: 15, color: sel ? C.accent : C.muted),
+          const SizedBox(width: 7),
+          Text(btnStyleNames[i], style: disp(13, w: FontWeight.w600, c: sel ? C.accent : C.muted)),
+        ])),
     );
   }
 
@@ -1077,7 +1177,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
           const SizedBox(height: 16),
           GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTap: () => _pickServer(ruServers[0]),
+            onTap: () => _pickServer(fastestServer),
             child: _card(strong: true, child: Row(children: [
               _gIcon(Icons.bolt),
               const SizedBox(width: 14),
@@ -1085,7 +1185,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
                 Row(children: [Text('Быстрый сервер', style: disp(16, w: FontWeight.w700)),
                   const SizedBox(width: 8), _badge('АВТО', C.accent)]),
                 const SizedBox(height: 3),
-                Text('Москва · 12 ms', style: mono(12)),
+                Text('${fastestServer.city} · ${fastestServer.ping} ms', style: mono(12)),
               ])),
               Icon(Icons.chevron_right, color: C.muted),
             ])),
@@ -1117,8 +1217,18 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     final q = _q.trim().toLowerCase();
     if (q.isNotEmpty) {
       final found = all.where((s) => s.city.toLowerCase().contains(q) || s.country.toLowerCase().contains(q)).toList();
+      if (found.isEmpty) {
+        return [
+          Padding(padding: const EdgeInsets.symmetric(vertical: 28), child: Column(children: [
+            Icon(Icons.travel_explore, size: 32, color: C.muted),
+            const SizedBox(height: 10),
+            Text('Ничего не найдено.\nПопробуй город — Москва, Амстердам —\nили страну, либо очисти поиск.',
+              textAlign: TextAlign.center, style: mono(12)),
+          ])),
+        ];
+      }
       return [
-        _kicker(found.isEmpty ? 'ничего не найдено' : 'результаты'),
+        _kicker('результаты'),
         const SizedBox(height: 10),
         for (final s in found) _serverRow(s),
       ];
@@ -1144,43 +1254,52 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
   Widget _serverRow(Server s) {
     final sel = s.id == server.id;
     final pingCol = s.ping < 60 ? C.ok : s.ping < 120 ? C.warn : C.danger;
-    return Opacity(
-      opacity: s.available ? 1 : 0.55,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () => _pickServer(s),
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 8),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-          decoration: BoxDecoration(color: C.fill,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: sel ? C.accent.withOpacity(0.5) : C.line)),
-          child: Row(children: [
-            Container(width: 40, height: 40, alignment: Alignment.center,
-              decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), borderRadius: BorderRadius.circular(12)),
-              child: Text(s.flag, style: const TextStyle(fontSize: 20))),
-            const SizedBox(width: 12),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                Flexible(child: Text(s.city, style: disp(15, w: FontWeight.w600), overflow: TextOverflow.ellipsis)),
-                if (s.premium) ...[const SizedBox(width: 6), _badge('PRO', C.accentSoft)],
-                if (!s.available) ...[const SizedBox(width: 6), _badge('Скоро', C.muted)],
+    final pingLabel = s.ping < 60 ? 'быстрый отклик' : s.ping < 120 ? 'средний отклик' : 'медленный отклик';
+    return IgnorePointer(
+      ignoring: !s.available,
+      child: Opacity(
+        opacity: s.available ? 1 : 0.55,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: s.available ? () => _pickServer(s) : null,
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+            decoration: BoxDecoration(color: C.fill,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: sel ? C.accent.withOpacity(0.5) : C.line)),
+            child: Row(children: [
+              Container(width: 40, height: 40, alignment: Alignment.center,
+                decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), borderRadius: BorderRadius.circular(12)),
+                child: Text(s.flag, style: const TextStyle(fontSize: 20))),
+              const SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  Flexible(child: Text(s.city, style: disp(15, w: FontWeight.w600), overflow: TextOverflow.ellipsis)),
+                  if (s.premium) ...[const SizedBox(width: 6), _badge('PRO', C.accentSoft)],
+                  if (!s.available) ...[const SizedBox(width: 6), _badge('Скоро', C.muted)],
+                ]),
+                const SizedBox(height: 2),
+                Text(s.country, style: mono(12)),
+              ])),
+              Tooltip(message: '$pingLabel · ${s.ping} ms',
+                child: Text('${s.ping} ms', style: mono(13, c: pingCol, w: FontWeight.w600))),
+              const SizedBox(width: 10),
+              Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.end, children: [
+                Text('${s.load}%', style: mono(10, c: C.muted)),
+                const SizedBox(height: 3),
+                SizedBox(width: 42, child: _loadBar(s.load)),
               ]),
-              const SizedBox(height: 2),
-              Text(s.country, style: mono(12)),
-            ])),
-            Text('${s.ping} ms', style: mono(13, c: pingCol, w: FontWeight.w600)),
-            const SizedBox(width: 10),
-            SizedBox(width: 42, child: _loadBar(s.load)),
-            const SizedBox(width: 8),
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () { setState(() => favs.contains(s.id) ? favs.remove(s.id) : favs.add(s.id)); _save(); },
-              child: Icon(favs.contains(s.id) ? Icons.star : Icons.star_border, size: 18,
-                color: favs.contains(s.id) ? C.accentSoft : C.muted)),
-            const SizedBox(width: 8),
-            Icon(sel ? Icons.check_circle : Icons.circle_outlined, size: 20, color: sel ? C.accent : C.muted),
-          ]),
+              const SizedBox(width: 8),
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () { setState(() => favs.contains(s.id) ? favs.remove(s.id) : favs.add(s.id)); _save(); },
+                child: Icon(favs.contains(s.id) ? Icons.star : Icons.star_border, size: 18,
+                  color: favs.contains(s.id) ? C.accentSoft : C.muted)),
+              const SizedBox(width: 8),
+              Icon(sel ? Icons.check_circle : Icons.circle_outlined, size: 20, color: sel ? C.accent : C.muted),
+            ]),
+          ),
         ),
       ),
     );
@@ -1228,7 +1347,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('B-box — VPN для всего дома', style: disp(16, w: FontWeight.w600)),
                 const SizedBox(height: 3),
-                Text('коробочка · 15 000 ₽', style: mono(12, c: C.accent)),
+                Text('устройство для дома · 15 000 ₽', style: mono(12, c: C.accent)),
               ])),
               Icon(Icons.chevron_right, color: C.muted),
             ])),
@@ -1267,7 +1386,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       );
 
   Widget _profileCard() {
-    final name = loggedIn ? ((subName != null && subName!.isNotEmpty) ? subName! : 'Аккаунт') : 'Демо-режим';
+    final name = loggedIn ? ((subName != null && subName!.isNotEmpty) ? subName! : 'Аккаунт (#$tgId)') : 'Демо-режим';
     final initial = name.isNotEmpty ? name.substring(0, 1).toUpperCase() : 'A';
     return _card(strong: true, child: Row(children: [
       Container(width: 60, height: 60, alignment: Alignment.center,
@@ -1277,7 +1396,9 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       const SizedBox(width: 14),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(name, style: disp(20, w: FontWeight.w700)),
-        const SizedBox(height: 4),
+        const SizedBox(height: 3),
+        Text(loggedIn ? 'Вход по ключу из бота' : 'Тестовый доступ к демо-серверу', style: mono(11)),
+        const SizedBox(height: 6),
         Row(children: loggedIn
             ? [_badge(subActive ? 'Активна' : 'Не активна', subActive ? C.ok : C.muted),
                if (subPlan != null) ...[const SizedBox(width: 6), _badge(subPlan!.toUpperCase(), C.accent)]]
@@ -1305,7 +1426,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
           decoration: BoxDecoration(color: C.field, borderRadius: BorderRadius.circular(10)),
           child: TextField(controller: _loginCtrl, maxLines: 2, style: mono(11, c: C.text), cursorColor: C.accent,
             decoration: InputDecoration(isDense: true, border: InputBorder.none, contentPadding: EdgeInsets.zero,
-              hintText: 'Вставь свой ключ vless://… из бота', hintStyle: mono(12, c: C.muted)))),
+              hintText: 'Вставь ключ vless://…@host:443 из бота @bitaps_vpn_auth_bot', hintStyle: mono(12, c: C.muted)))),
         const SizedBox(height: 10),
         Row(children: [
           Expanded(child: _btn('Войти', kind: 0, icon: Icons.login, onTap: _login)),
@@ -1327,10 +1448,10 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
           Text(_planLabel(subPlan), style: disp(20, w: FontWeight.w700, c: subActive ? C.accent : C.muted)),
           const SizedBox(height: 6),
           Row(children: [Icon(Icons.event, size: 14, color: C.muted), const SizedBox(width: 6),
-            Text(days != null ? (days > 0 ? 'осталось $days дн.' : 'истекла') : (subActive ? 'активна' : 'не активна'), style: mono(13))]),
+            Text(days != null ? (days > 0 ? 'осталось $days ${_pluralDays(days)}' : 'истекла') : (subActive ? 'активна' : 'не активна'), style: mono(13))]),
           const SizedBox(height: 4),
           Row(children: [Icon(Icons.devices, size: 14, color: C.muted), const SizedBox(width: 6),
-            Text('${devices.length} / ${subLimit ?? "?"} устройств', style: mono(13))]),
+            Text('${devices.length} / $_limitStr устройств', style: mono(13))]),
         ])),
       ]),
       const SizedBox(height: 16),
@@ -1350,7 +1471,8 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
         const SizedBox(height: 12),
         Container(padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(color: C.field, borderRadius: BorderRadius.circular(10)),
-          child: Text(keyStr, style: mono(11, c: C.text), maxLines: 2, overflow: TextOverflow.ellipsis)),
+          child: SingleChildScrollView(scrollDirection: Axis.horizontal,
+            child: Text(keyStr, style: mono(11, c: C.text), maxLines: 1, softWrap: false))),
         const SizedBox(height: 12),
         Row(children: [
           Expanded(child: _btn('Скопировать', kind: 1, icon: Icons.copy, onTap: () => _copy(keyStr, 'Ключ'))),
@@ -1363,7 +1485,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
 
   Widget _devicesCard() => _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [_gIcon(Icons.devices), const SizedBox(width: 12),
-          _kicker('устройства · ${devices.length}/${subLimit ?? "?"}'), const Spacer(),
+          _kicker('устройства · ${devices.length}/$_limitStr'), const Spacer(),
           GestureDetector(behavior: HitTestBehavior.opaque, onTap: () => _refreshSub(), child: Icon(Icons.refresh, size: 18, color: C.accent))]),
         const SizedBox(height: 8),
         if (devices.isEmpty)
@@ -1394,7 +1516,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       backgroundColor: C.bg2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
       title: Text('Удалить устройство?', style: disp(18, w: FontWeight.w700)),
-      content: Text('«$name» будет отвязано от подписки.', style: mono(13, c: C.muted)),
+      content: Text('«$name» будет удалено из подписки.', style: mono(13, c: C.muted)),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: Text('Отмена', style: mono(13, c: C.muted))),
         TextButton(onPressed: () { Navigator.pop(context); _refreshSub(del: id); }, child: Text('Удалить', style: mono(13, c: C.danger))),
@@ -1430,25 +1552,18 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
             Text('Кнопка подключения', style: disp(15, w: FontWeight.w600)),
             const SizedBox(height: 10),
             Wrap(spacing: 8, runSpacing: 8, children: [for (int i = 0; i < btnStyleNames.length; i++) _styleChip(i)]),
-            const SizedBox(height: 18),
-            Text('Тема', style: disp(15, w: FontWeight.w600)),
-            const SizedBox(height: 10),
-            Row(children: [
-              for (int i = 0; i < 3; i++)
-                Expanded(child: Padding(padding: EdgeInsets.only(right: i < 2 ? 8 : 0), child: _themeChip(i))),
-            ]),
           ])),
           const SizedBox(height: 22),
           _kicker('безопасность'),
           const SizedBox(height: 10),
           _card(child: Column(children: [
-            _toggle('Блокировка входа', 'Спрашивать Face ID / код при открытии', tgl1, (v) { setState(() => tgl1 = v); _save(); }),
+            _toggle('Блокировка входа', 'Спрашивать Face ID / код при открытии', tgl1, (v) { setState(() => tgl1 = v); _save(); }, soon: true),
             _divider(),
-            _toggle('Обрыв соединения', 'Уведомлять, если VPN отвалился', tgl2, (v) { setState(() => tgl2 = v); _save(); }),
+            _toggle('Обрыв соединения', 'Уведомлять, если VPN отвалился', tgl2, (v) { setState(() => tgl2 = v); _save(); }, soon: true),
             _divider(),
             _toggle('Подписка истекает', 'Напомнить за пару дней', tgl3, (v) { setState(() => tgl3 = v); _save(); }),
             _divider(),
-            _toggle('Лимит трафика', 'Сигнал при большом расходе', tgl4, (v) { setState(() => tgl4 = v); _save(); }),
+            _toggle('Лимит трафика', 'Сигнал при большом расходе', tgl4, (v) { setState(() => tgl4 = v); _save(); }, soon: true),
             _divider(),
             _toggle('Авто-подключение', 'Подключаться сразу при запуске', autoConnect, (v) { setState(() => autoConnect = v); _save(); }),
           ])),
@@ -1470,9 +1585,9 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
           _card(child: Column(children: [
             _radioRow('Авто', 0),
             _divider(),
-            _radioRow('VLESS + Reality', 1),
+            _radioRow('VLESS + Reality', 1, soon: true),
             _divider(),
-            _radioRow('WireGuard', 2),
+            _radioRow('WireGuard', 2, soon: true),
           ])),
           const SizedBox(height: 22),
           _btn('Выйти', kind: 1, icon: Icons.logout, onTap: _logout),
@@ -1496,7 +1611,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
         ),
       );
 
-  Widget _radioRow(String label, int idx) {
+  Widget _radioRow(String label, int idx, {bool soon = false}) {
     final sel = proto == idx;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -1505,6 +1620,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
         padding: const EdgeInsets.symmetric(vertical: 12),
         child: Row(children: [
           Text(label, style: disp(15, w: FontWeight.w500)),
+          if (soon) ...[const SizedBox(width: 8), _badge('скоро', C.muted)],
           const Spacer(),
           Icon(sel ? Icons.radio_button_checked : Icons.radio_button_off, size: 20, color: sel ? C.accent : C.muted),
         ]),
@@ -1512,11 +1628,14 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     );
   }
 
-  Widget _toggle(String title, String sub, bool v, ValueChanged<bool> onCh) => Padding(
+  Widget _toggle(String title, String sub, bool v, ValueChanged<bool> onCh, {bool soon = false}) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: Row(children: [
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title, style: disp(15, w: FontWeight.w600)),
+            Row(children: [
+              Flexible(child: Text(title, style: disp(15, w: FontWeight.w600))),
+              if (soon) ...[const SizedBox(width: 8), _badge('скоро', C.muted)],
+            ]),
             const SizedBox(height: 2),
             Text(sub, style: mono(11)),
           ])),
