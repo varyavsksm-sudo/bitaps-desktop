@@ -1044,7 +1044,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
           const Spacer(),
           Icon(Icons.language, size: 15, color: C.muted),
           const SizedBox(width: 6),
-          Text(connected ? 'Demo: 95.142.16.7' : 'IP скрыт', style: mono(12)),
+          Text(connected ? '95.142.16.7' : 'IP скрыт', style: mono(12)),
         ])),
         const SizedBox(height: 12),
         GestureDetector(
