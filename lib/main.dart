@@ -309,6 +309,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       C.accent = th.$2;
       C.accentSoft = th.$3;
       _applyThemeMode();
+      tab = loggedIn ? 0 : 2; // не вошёл → сразу экран входа (Кабинет), а не демо-главная
     });
     if (loggedIn) _refreshSub(silent: true);
     if (autoConnect && conn == 0) {
