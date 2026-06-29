@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -11,18 +12,21 @@ import 'package:window_manager/window_manager.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await windowManager.ensureInitialized();
-  final opts = WindowOptions(
-    size: const Size(440, 900),
-    minimumSize: const Size(390, 760),
-    center: true,
-    backgroundColor: C.bg,
-    title: 'bitaps VPN',
-  );
-  windowManager.waitUntilReadyToShow(opts, () async {
-    await windowManager.show();
-    await windowManager.focus();
-  });
+  // window_manager — только десктоп (на Android/iOS его нет → иначе краш на старте)
+  if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+    await windowManager.ensureInitialized();
+    final opts = WindowOptions(
+      size: const Size(440, 900),
+      minimumSize: const Size(390, 760),
+      center: true,
+      backgroundColor: C.bg,
+      title: 'bitaps VPN',
+    );
+    windowManager.waitUntilReadyToShow(opts, () async {
+      await windowManager.show();
+      await windowManager.focus();
+    });
+  }
   runApp(const BitApp());
 }
 
