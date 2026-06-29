@@ -525,7 +525,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
           headers: {'content-type': 'application/json', 'apikey': kApiKey},
           body: jsonEncode({'key': key}));
       final d = jsonDecode(r.body) as Map<String, dynamic>;
-      if (d['ok'] == true) {
+      if (d['ok'] == true && d['telegram_id'] is num) {
         setState(() {
           tgId = (d['telegram_id'] as num).toInt();
           appToken = d['app_token'] as String?;
