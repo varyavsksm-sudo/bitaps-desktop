@@ -90,3 +90,28 @@ jobs:
           tag_name: latest
           name: Последняя сборка
           files: bitaps-macos.dmg
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter --version
+      - run: flutter create --platforms=android --project-name bitaps_vpn .
+      - run: flutter pub get
+      - run: dart run flutter_launcher_icons
+      - run: yes | flutter doctor --android-licenses || true
+      - run: flutter build apk --release
+      - run: cp build/app/outputs/flutter-apk/app-release.apk bitaps.apk
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Последняя сборка
+          files: bitaps.apk
