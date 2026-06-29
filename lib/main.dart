@@ -1407,7 +1407,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
               Expanded(child: _miniStat('30', 'дней бонус')),
             ]),
             const SizedBox(height: 12),
-            _btn('Поделиться ссылкой', kind: 1, icon: Icons.share, onTap: () => _copy(kRef, 'Реферальная ссылка')),
+            _btn('Поделиться ссылкой', kind: 1, icon: Icons.share, onTap: () { if (loggedIn) { _copy('https://t.me/bitaps_vpn_auth_bot?start=ref$tgId', 'Реферальная ссылка'); } else { _toast('Войди, чтобы получить свою реферальную ссылку'); } }),
           ])),
           const SizedBox(height: 14),
           GestureDetector(
