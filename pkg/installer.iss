@@ -1,7 +1,7 @@
 ; Inno Setup — установщик bitaps VPN для Windows
 [Setup]
 AppName=bitaps VPN
-AppVersion=0.1.0
+AppVersion=1.0.0
 AppPublisher=bitaps
 DefaultDirName={autopf}\bitaps VPN
 DefaultGroupName=bitaps VPN

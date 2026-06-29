@@ -617,13 +617,16 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
 
   Future<void> _leakCheck() => _runTool('Проверка утечек', () async {
         final r = await http.get(Uri.parse('https://api.ipify.org?format=json'));
+        if (r.statusCode != 200) throw Exception('сервер вернул ${r.statusCode}');
         final ip = (jsonDecode(r.body) as Map)['ip'];
+        if (ip == null) throw Exception('IP не получен');
         return 'Твой текущий внешний IP:\n\n$ip\n\nС включённым VPN он сменится на адрес сервера — так видно, что трафик идёт через туннель.';
       });
 
   Future<void> _speedTest() => _runTool('Спид-тест', () async {
         final sw = Stopwatch()..start();
         final r = await http.get(Uri.parse('https://speed.cloudflare.com/__down?bytes=4000000'));
+        if (r.statusCode != 200) throw Exception('сервер вернул ${r.statusCode}');
         sw.stop();
         final secs = sw.elapsedMilliseconds / 1000.0;
         final mbps = r.bodyBytes.length * 8 / secs / 1e6;
@@ -949,7 +952,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
           RotationTransition(turns: _spin, child: AnimatedOpacity(
             duration: const Duration(milliseconds: 350), opacity: conn == 0 ? 0.85 : 1,
             child: CustomPaint(size: const Size(212, 212), painter: GearPainter(col)))),
-          Text('B', style: disp(60, w: FontWeight.w800, c: Colors.white)),
+          Text('B', style: disp(60, w: FontWeight.w800, c: C.light ? Colors.black : Colors.white)),
         ]);
     }
   }
@@ -1020,9 +1023,9 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
         width: 44, height: 44, alignment: Alignment.center,
         decoration: BoxDecoration(shape: BoxShape.circle,
           gradient: LinearGradient(colors: [th.$3, th.$2]),
-          border: Border.all(color: sel ? Colors.white : Colors.transparent, width: 3),
+          border: Border.all(color: sel ? (C.light ? Colors.black : Colors.white) : Colors.transparent, width: 3),
           boxShadow: [BoxShadow(color: th.$2.withOpacity(0.5), blurRadius: sel ? 14 : 6)]),
-        child: sel ? const Icon(Icons.check, size: 18, color: Colors.white) : null,
+        child: sel ? Icon(Icons.check, size: 18, color: C.light ? Colors.black : Colors.white) : null,
       ),
     );
   }
@@ -1358,8 +1361,11 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
           GestureDetector(behavior: HitTestBehavior.opaque, onTap: () => _refreshSub(), child: Icon(Icons.refresh, size: 18, color: C.accent))]),
         const SizedBox(height: 8),
         if (devices.isEmpty)
-          Padding(padding: const EdgeInsets.symmetric(vertical: 6),
-            child: Text('Пока нет привязанных устройств. Подключись с устройства — оно появится здесь.', style: mono(12)))
+          Padding(padding: const EdgeInsets.symmetric(vertical: 16), child: Column(children: [
+            Icon(Icons.devices_other, size: 30, color: C.muted),
+            const SizedBox(height: 8),
+            Text('Пока нет устройств.\nПодключись с устройства — оно появится здесь.', textAlign: TextAlign.center, style: mono(12)),
+          ]))
         else
           for (final d in devices) _deviceRow(d),
       ]));
