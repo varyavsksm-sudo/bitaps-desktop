@@ -72,6 +72,7 @@ const kApiKey = 'sb_publishable_X2CJWgjqeZtbNelAri9ofw_trbfWF9Z';
 const kDemoKey = 'vless://3a7c9f1e-0b2d-4e6f-9a1c-7b3e2f8d4c5a@vpn.bitaps.app:443?security=reality&type=tcp&sni=www.microsoft.com&fp=chrome&pbk=DEMObitapsPLACEHOLDERkey00000000000000000000000&sid=88#bitaps%20VPN';
 const kAppLogin = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/app-login';
 const kAppSub = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/app-sub';
+const kAppPair = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/app-pair';
 
 // Персонализация: акцентные темы (имя, основной, мягкий) + стили кнопки
 const List<(String, Color, Color)> accentThemes = [
@@ -571,8 +572,8 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
   String get _netErr => 'Нет связи с сервером — проверь интернет.';
   String _srvErr(int code) => 'Сервер недоступен ($code). Попробуй позже.';
 
-  Future<void> _login() async {
-    final key = _loginCtrl.text.trim();
+  Future<void> _login([String? presetKey]) async {
+    final key = (presetKey ?? _loginCtrl.text).trim();
     if (key.length < 12) {
       _toast('Вставь свой ключ из бота');
       return;
@@ -616,6 +617,76 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     } catch (e) {
       debugPrint('_login error: $e');
       _toast(_netErr);
+    }
+  }
+
+  // Авто-вход через бота: старт привязки → открыть бота → опрашивать, пока не подтвердит → войти.
+  Future<void> _pairLogin() async {
+    String token = '';
+    try {
+      final r = await http
+          .post(Uri.parse(kAppPair),
+              headers: {'content-type': 'application/json', 'apikey': kApiKey},
+              body: jsonEncode({'action': 'start'}))
+          .timeout(const Duration(seconds: 15));
+      final d = jsonDecode(r.body) as Map<String, dynamic>;
+      if (d['ok'] != true || d['url'] == null) {
+        _toast('Не удалось начать вход, попробуй ещё раз');
+        return;
+      }
+      token = d['token'] as String;
+      await _open(d['url'] as String);
+    } on TimeoutException {
+      _toast(_netErr);
+      return;
+    } catch (e) {
+      debugPrint('_pairLogin start: $e');
+      _toast(_netErr);
+      return;
+    }
+    if (!mounted) return;
+    bool cancelled = false;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dctx) => AlertDialog(
+        backgroundColor: C.bg2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(height: 6),
+          SizedBox(width: 34, height: 34, child: CircularProgressIndicator(color: C.accent, strokeWidth: 3)),
+          const SizedBox(height: 16),
+          Text('Подтверди вход в Telegram', style: disp(15, w: FontWeight.w700, c: C.text)),
+          const SizedBox(height: 6),
+          Text('Открылся бот — нажми «Запустить» (Start). Я войду сам, как подтвердишь.',
+              textAlign: TextAlign.center, style: mono(12, c: C.muted)),
+        ]),
+        actions: [
+          TextButton(onPressed: () { cancelled = true; Navigator.pop(dctx); }, child: Text('Отмена', style: mono(13, c: C.muted))),
+        ],
+      ),
+    );
+    String? key;
+    for (int i = 0; i < 40 && !cancelled; i++) {
+      await Future.delayed(const Duration(seconds: 3));
+      if (cancelled || !mounted) break;
+      try {
+        final cr = await http
+            .post(Uri.parse(kAppPair),
+                headers: {'content-type': 'application/json', 'apikey': kApiKey},
+                body: jsonEncode({'action': 'check', 'token': token}))
+            .timeout(const Duration(seconds: 10));
+        final cd = jsonDecode(cr.body) as Map<String, dynamic>;
+        if (cd['key'] != null) { key = cd['key'] as String; break; }
+        if (cd['pending'] != true && cd['ok'] != true) break; // истёк/ошибка
+      } catch (_) {/* сеть моргнула — продолжаем опрос */}
+    }
+    if (cancelled) return; // окно уже закрыто «Отменой»
+    if (mounted && Navigator.canPop(context)) Navigator.pop(context);
+    if (key != null) {
+      await _login(key);
+    } else if (mounted) {
+      _toast('Не дождался подтверждения. Открой бота и нажми «Запустить».');
     }
   }
 
@@ -1387,7 +1458,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       );
 
   Widget _profileCard() {
-    final name = loggedIn ? ((subName != null && subName!.isNotEmpty) ? subName! : 'Аккаунт (#$tgId)') : 'Демо-режим';
+    final name = loggedIn ? ((subName != null && subName!.isNotEmpty) ? subName! : 'Аккаунт (#$tgId)') : 'Вход не выполнен';
     final initial = name.isNotEmpty ? name.substring(0, 1).toUpperCase() : 'A';
     return _card(strong: true, child: Row(children: [
       Container(width: 60, height: 60, alignment: Alignment.center,
@@ -1398,12 +1469,12 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(name, style: disp(20, w: FontWeight.w700)),
         const SizedBox(height: 3),
-        Text(loggedIn ? 'Вход по ключу из бота' : 'Тестовый доступ к демо-серверу', style: mono(11)),
+        Text(loggedIn ? 'Вход по ключу из бота' : 'Войди через Telegram, чтобы активировать подписку', style: mono(11)),
         const SizedBox(height: 6),
         Row(children: loggedIn
             ? [_badge(subActive ? 'Активна' : 'Не активна', subActive ? C.ok : C.muted),
                if (subPlan != null) ...[const SizedBox(width: 6), _badge(subPlan!.toUpperCase(), C.accent)]]
-            : [_badge('Гость', C.muted), const SizedBox(width: 6), _badge('DEMO', C.muted)]),
+            : [_badge('Гость', C.muted)]),
       ])),
       if (loggedIn) GestureDetector(behavior: HitTestBehavior.opaque, onTap: _doLogout,
         child: Icon(Icons.logout, size: 20, color: C.muted)),
@@ -1421,16 +1492,20 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       return _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [_gIcon(Icons.login), const SizedBox(width: 12), _kicker('вход')]),
         const SizedBox(height: 10),
-        Text('Войди по своему ключу из бота — увидишь реальную подписку, ключ и устройства.', style: mono(12)),
+        Text('Войди через Telegram — приложение само подхватит твою подписку и ключ. Без ручного копирования.', style: mono(12)),
         const SizedBox(height: 12),
+        SizedBox(width: double.infinity, child: _btn('Войти через Telegram', kind: 0, icon: Icons.send, onTap: _pairLogin)),
+        const SizedBox(height: 14),
+        Text('или вставь ключ вручную:', style: mono(11, c: C.muted)),
+        const SizedBox(height: 8),
         Container(padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(color: C.field, borderRadius: BorderRadius.circular(10)),
           child: TextField(controller: _loginCtrl, maxLines: 2, style: mono(11, c: C.text), cursorColor: C.accent,
             decoration: InputDecoration(isDense: true, border: InputBorder.none, contentPadding: EdgeInsets.zero,
-              hintText: 'Вставь ключ vless://…@host:443 из бота @bitaps_vpn_auth_bot', hintStyle: mono(12, c: C.muted)))),
+              hintText: 'ключ vless://…@host:443 из бота', hintStyle: mono(12, c: C.muted)))),
         const SizedBox(height: 10),
         Row(children: [
-          Expanded(child: _btn('Войти', kind: 0, icon: Icons.login, onTap: _login)),
+          Expanded(child: _btn('Войти', kind: 1, icon: Icons.login, onTap: _login)),
           const SizedBox(width: 12),
           Expanded(child: _btn('Ключ в боте', kind: 1, icon: Icons.smart_toy, onTap: () => _open(kBot))),
         ]),
