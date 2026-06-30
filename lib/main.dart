@@ -289,9 +289,9 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // авто-замок при сворачивании. На ДЕСКТОПЕ окно уходит в hidden/inactive (не paused, как на
-    // мобильном) — реагируем на все эти состояния, иначе на целевой платформе замок не срабатывал.
-    final bg = state == AppLifecycleState.paused || state == AppLifecycleState.hidden || state == AppLifecycleState.inactive;
+    // авто-замок при сворачивании. paused (мобильный) + hidden (десктоп свёрнут). НЕ inactive —
+    // он срабатывает на ЛЮБУЮ потерю фокуса (в т.ч. открытие внешней ссылки) и ложно блокировал бы.
+    final bg = state == AppLifecycleState.paused || state == AppLifecycleState.hidden;
     if (bg && tgl1 && (appPin?.isNotEmpty ?? false) && !_locked) {
       setState(() => _locked = true);
     }
