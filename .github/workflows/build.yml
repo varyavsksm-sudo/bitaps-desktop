@@ -139,7 +139,8 @@ jobs:
         with:
           channel: stable
       - run: flutter --version
-      - run: flutter create --org com.bitapsvpn --platforms=ios --project-name bitaps_vpn .
+      # +android в платформах: flutter_launcher_icons с android:true падает без папки android/ (как в macos/windows-джобах)
+      - run: flutter create --org com.bitapsvpn --platforms=ios,android --project-name bitaps_vpn .
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       # сборка без подписи — для подписанного IPA нужен Apple Developer-сертификат (добавим при публикации в App Store)
