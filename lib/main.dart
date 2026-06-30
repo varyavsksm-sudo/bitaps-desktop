@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'vless.dart';
 import 'package:window_manager/window_manager.dart';
 
 Future<void> main() async {
@@ -67,6 +68,9 @@ const kBot = 'https://t.me/bitaps_vpn_auth_bot';
 const kSupport = 'https://t.me/bitapssupport';
 const kChannel = 'https://t.me/bitapsvpnofficial';
 const kRef = 'https://t.me/bitaps_vpn_auth_bot?start=ref_demo';
+// Боевой туннель: ВЫКЛ (демо). Когда у владельца появится VLESS-сервер + нативный движок
+// sing-box (TUN по платформам) — поставить true; конфиг для движка уже генерится (см. vless.dart).
+const bool kRealTunnel = false;
 const kNotify = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/notify';
 const kApiKey = 'sb_publishable_X2CJWgjqeZtbNelAri9ofw_trbfWF9Z';
 const kDemoKey = 'vless://3a7c9f1e-0b2d-4e6f-9a1c-7b3e2f8d4c5a@vpn.bitaps.app:443?security=reality&type=tcp&sni=www.microsoft.com&fp=chrome&pbk=DEMObitapsPLACEHOLDERkey00000000000000000000000&sid=88#bitaps%20VPN';
@@ -395,6 +399,12 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
   void toggle() {
     if (conn == 1) return;
     if (conn == 0) {
+      if (kRealTunnel && keyStr.startsWith('vless://')) {
+        // боевой режим: конфиг для движка готов; здесь запуск sing-box через нативный канал
+        // (нужен боевой сервер + нативная TUN-интеграция — на владельце). Пока kRealTunnel=false.
+        final cfg = singboxConfig(keyStr);
+        debugPrint('[bitaps] sing-box config ready (${cfg.length} секций) — движок будет запущен здесь');
+      }
       setState(() => conn = 1);
       _spin.duration = const Duration(milliseconds: 1400);
       _spin.stop();
