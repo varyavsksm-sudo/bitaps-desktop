@@ -215,7 +215,7 @@ class Shell extends StatefulWidget {
   State<Shell> createState() => _ShellState();
 }
 
-class _ShellState extends State<Shell> with TickerProviderStateMixin {
+class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBindingObserver {
   int tab = 0;
   int conn = 0; // 0 off, 1 connecting, 2 on
   int secs = 0;
@@ -259,11 +259,21 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // авто-замок: при сворачивании ставим блокировку, чтобы при возврате спросило PIN
+    if (state == AppLifecycleState.paused && tgl1 && (appPin?.isNotEmpty ?? false) && !_locked) {
+      setState(() => _locked = true);
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _spin.dispose();
     _wave.dispose();
@@ -303,7 +313,8 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       subLimit = p.getInt('subLimit');
       subActive = p.getBool('subActive') ?? false;
       try {
-        devices = ((jsonDecode(p.getString('devices') ?? '[]')) as List).cast<Map<String, dynamic>>();
+        final dl = jsonDecode(p.getString('devices') ?? '[]');
+        devices = (dl is List) ? dl.whereType<Map>().map((e) => e.cast<String, dynamic>()).toList() : [];
       } catch (e) {
         debugPrint('cached devices decode error: $e');
         devices = [];
@@ -317,6 +328,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       _applyThemeMode();
       tab = loggedIn ? 0 : 2; // не вошёл → сразу экран входа (Кабинет), а не демо-главная
       _locked = tgl1 && (appPin?.isNotEmpty ?? false);
+      server = serverForMode(mode); // сервер согласован с сохранённым режимом (без рассинхрона)
     });
     if (loggedIn) _refreshSub(silent: true);
     if (autoConnect && conn == 0) {
@@ -368,7 +380,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       _spin.stop();
       _spin.repeat();
       Future.delayed(const Duration(milliseconds: 1700), () {
-        if (!mounted) return;
+        if (!mounted || conn != 1) return;
         setState(() {
           conn = 2;
           secs = 0;
@@ -562,13 +574,14 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
 
   // ----- вход по ключу / реальная подписка / устройства -----
   void _applySub(Map<String, dynamic> d) {
-    subName = d['name'] as String?;
-    subPlan = d['plan'] as String?;
-    subExpires = d['expires_at'] as String?;
-    subLimit = (d['device_limit'] as num?)?.toInt();
+    subName = d['name']?.toString();
+    subPlan = d['plan']?.toString();
+    subExpires = d['expires_at']?.toString();
+    subLimit = (d['device_limit'] is num) ? (d['device_limit'] as num).toInt() : null;
     subActive = d['active'] == true;
     if (d['vpn_key'] is String) keyStr = d['vpn_key'] as String;
-    devices = ((d['devices'] as List?) ?? const []).map((e) => (e as Map).cast<String, dynamic>()).toList();
+    final dl = d['devices'];
+    devices = (dl is List) ? dl.whereType<Map>().map((e) => e.cast<String, dynamic>()).toList() : [];
   }
 
   int? _daysLeft() {
@@ -650,7 +663,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
               body: jsonEncode({'action': 'start'}))
           .timeout(const Duration(seconds: 15));
       final d = jsonDecode(r.body) as Map<String, dynamic>;
-      if (d['ok'] != true || d['url'] == null) {
+      if (d['ok'] != true || d['url'] == null || d['token'] is! String) {
         _toast('Не удалось начать вход, попробуй ещё раз');
         return;
       }
@@ -742,7 +755,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       if (!mounted) return;
       if (r.statusCode == 401 || r.statusCode == 403) {
         if (!silent) _toast('Сессия истекла — войди заново');
-        _doLogout();
+        _doLogout(silent: true);
         return;
       }
       if (r.statusCode >= 500) {
@@ -768,7 +781,8 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     }
   }
 
-  void _doLogout() {
+  void _doLogout({bool silent = false}) {
+    _timer?.cancel();
     setState(() {
       tgId = null;
       appToken = null;
@@ -779,9 +793,14 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       subActive = false;
       devices = [];
       keyStr = kDemoKey;
+      conn = 0;
+      secs = 0;
     });
+    _spin.duration = const Duration(seconds: 6);
+    _spin.stop();
+    _spin.repeat();
     _save();
-    _toast('Вышли из аккаунта');
+    if (!silent) _toast('Вышли из аккаунта');
   }
 
   Future<void> _sendSupport() async {
@@ -800,7 +819,9 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
             'email': '',
             'message': msg,
             'source': 'десктоп-приложение'
-          }));
+          }))
+          .timeout(const Duration(seconds: 20));
+      if (!mounted) return;
       if (r.statusCode >= 200 && r.statusCode < 300) {
         _support.clear();
         setState(() {});
@@ -815,7 +836,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
   }
 
   Future<void> _leakCheck() => _runTool('Проверка утечек', () async {
-        final r = await http.get(Uri.parse('https://api.ipify.org?format=json'));
+        final r = await http.get(Uri.parse('https://api.ipify.org?format=json')).timeout(const Duration(seconds: 15));
         if (r.statusCode != 200) throw Exception('сервер вернул ${r.statusCode}');
         final ip = (jsonDecode(r.body) as Map)['ip'];
         if (ip == null) throw Exception('IP не получен');
@@ -824,10 +845,10 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
 
   Future<void> _speedTest() => _runTool('Спид-тест', () async {
         final sw = Stopwatch()..start();
-        final r = await http.get(Uri.parse('https://speed.cloudflare.com/__down?bytes=4000000'));
+        final r = await http.get(Uri.parse('https://speed.cloudflare.com/__down?bytes=4000000')).timeout(const Duration(seconds: 25));
         if (r.statusCode != 200) throw Exception('сервер вернул ${r.statusCode}');
         sw.stop();
-        final secs = sw.elapsedMilliseconds / 1000.0;
+        final secs = (sw.elapsedMilliseconds / 1000.0).clamp(0.001, double.infinity);
         final mbps = r.bodyBytes.length * 8 / secs / 1e6;
         final mb = r.bodyBytes.length / 1048576;
         return 'Скорость загрузки: ${mbps.toStringAsFixed(1)} Mbps\n\nПолучено ${mb.toStringAsFixed(1)} MB за ${sw.elapsedMilliseconds} мс\n(реальный замер через Cloudflare)';
@@ -842,6 +863,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     final ctrl = TextEditingController(text: customCfg ?? '');
     showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (_) => AlertDialog(
         backgroundColor: C.bg2,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
@@ -981,7 +1003,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
   void _forgotPin() {
     _pinCtrl.clear();
     setState(() { appPin = null; tgl1 = false; _locked = false; });
-    _doLogout();
+    _doLogout(silent: true);
     _save();
     _toast('Блокировка сброшена');
   }
