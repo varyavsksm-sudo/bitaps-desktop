@@ -383,10 +383,11 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     await p.setString('key', keyStr);
     if (tgId != null) { await p.setInt('tgId', tgId!); } else { await p.remove('tgId'); }
     if (appToken != null) { await p.setString('appToken', appToken!); } else { await p.remove('appToken'); }
-    if (subPlan != null) await p.setString('subPlan', subPlan!);
-    if (subExpires != null) await p.setString('subExpires', subExpires!);
-    if (subName != null) await p.setString('subName', subName!);
-    if (subLimit != null) await p.setInt('subLimit', subLimit!);
+    // при null — УДАЛЯЕМ ключ (иначе после logout остаются данные прежней подписки в prefs)
+    if (subPlan != null) { await p.setString('subPlan', subPlan!); } else { await p.remove('subPlan'); }
+    if (subExpires != null) { await p.setString('subExpires', subExpires!); } else { await p.remove('subExpires'); }
+    if (subName != null) { await p.setString('subName', subName!); } else { await p.remove('subName'); }
+    if (subLimit != null) { await p.setInt('subLimit', subLimit!); } else { await p.remove('subLimit'); }
     await p.setBool('subActive', subActive);
     await p.setString('devices', jsonEncode(devices));
     if (importedHost != null) {
@@ -601,7 +602,9 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     if (subExpires == null) return null;
     final e = DateTime.tryParse(subExpires!);
     if (e == null) return null;
-    return e.toUtc().difference(DateTime.now().toUtc()).inHours ~/ 24;
+    // округляем ВВЕРХ по минутам: пока есть остаток времени — показываем ≥1 день,
+    // «истекла» (≤0) только когда срок реально вышел (раньше 1-23ч флорились в 0 = «истекла» на сутки раньше)
+    return (e.toUtc().difference(DateTime.now().toUtc()).inMinutes / 1440).ceil();
   }
 
   // Русские склонения дней: 1 день / 2-4 дня / 5+ дней
@@ -645,10 +648,10 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
         return;
       }
       final d = jsonDecode(r.body) as Map<String, dynamic>;
-      if (d['ok'] == true && d['telegram_id'] is num) {
+      if (d['ok'] == true && d['telegram_id'] is num && d['app_token'] is String) {
         setState(() {
           tgId = (d['telegram_id'] as num).toInt();
-          appToken = d['app_token'] as String?;
+          appToken = d['app_token'] as String;
           _applySub(d);
           _loginCtrl.clear();
         });
@@ -1591,12 +1594,8 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
             Row(children: [_gIcon(Icons.card_giftcard), const SizedBox(width: 12),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 _kicker('пригласи друзей'), const SizedBox(height: 3), Text('Приглашай — получай бонусные дни', style: mono(11))]))]),
-            const SizedBox(height: 14),
-            Row(children: [
-              Expanded(child: _miniStat('3', 'позвал')),
-              Expanded(child: _miniStat('2', 'оформили')),
-              Expanded(child: _miniStat('30', 'дней бонус')),
-            ]),
+            const SizedBox(height: 10),
+            Text('▸ +14 дней за каждого друга, кто оформит первую подписку\n▸ начисляем автоматически', style: mono(12, c: C.muted)),
             const SizedBox(height: 12),
             _btn('Поделиться ссылкой', kind: 1, icon: Icons.share, onTap: () { if (loggedIn) { _copy('https://t.me/bitaps_vpn_auth_bot?start=ref$tgId', 'Реферальная ссылка'); } else { _toast('Войди, чтобы получить свою реферальную ссылку'); } }),
           ])),
@@ -1667,7 +1666,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
                if (subPlan != null) ...[const SizedBox(width: 6), _badge(_planShort(subPlan!), C.accent)]]
             : [_badge('Гость', C.muted)]),
       ])),
-      if (loggedIn) GestureDetector(behavior: HitTestBehavior.opaque, onTap: _doLogout,
+      if (loggedIn) GestureDetector(behavior: HitTestBehavior.opaque, onTap: _logout,
         child: Icon(Icons.logout, size: 20, color: C.muted)),
     ]));
   }
@@ -1891,7 +1890,8 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     final sel = proto == idx;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () { setState(() => proto = idx); _save(); },
+      // «скоро» — не выбираем (функция ещё не работает), показываем тост вместо ложного переключения
+      onTap: soon ? () => _toast('Скоро 🙌') : () { setState(() => proto = idx); _save(); },
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
         child: Row(children: [
@@ -1915,7 +1915,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
             const SizedBox(height: 2),
             Text(sub, style: mono(11)),
           ])),
-          Switch(value: v, onChanged: onCh, activeColor: C.accent),
+          Switch(value: soon ? false : v, onChanged: soon ? null : onCh, activeColor: C.accent),
         ]),
       );
 
@@ -1978,11 +1978,6 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
         Text(label, style: mono(11)),
       ]));
 
-  Widget _miniStat(String val, String label) => Column(children: [
-        Text(val, style: disp(20, w: FontWeight.w800, c: C.accent)),
-        const SizedBox(height: 2),
-        Text(label, style: mono(11)),
-      ]);
 
   Widget _ring(int days, int max) => SizedBox(
         width: 78, height: 78,
