@@ -928,19 +928,13 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
-              _timer?.cancel();
+              // полный teardown через _doLogout: сбрасывает keyStr=demo (закрывает утечку ключа
+              // прошлого аккаунта), conn, spin, и _save() перезаписывает pref 'key' демо-ключом
+              _doLogout();
+              // явный выход дополнительно чистит импортированный ключ/хост и их prefs
               final p = await SharedPreferences.getInstance();
-              for (final k in ['tgId', 'appToken', 'subPlan', 'subExpires', 'subName', 'subLimit', 'subActive', 'devices', 'cfg', 'host']) {
-                await p.remove(k);
-              }
-              if (!mounted) return;
-              setState(() {
-                conn = 0; secs = 0;
-                customCfg = null; importedHost = null;
-                tgId = null; appToken = null; subPlan = null; subExpires = null;
-                subName = null; subLimit = null; subActive = false; devices = [];
-              });
-              _toast('Вышли из аккаунта');
+              await p.remove('cfg'); await p.remove('host');
+              if (mounted) setState(() { customCfg = null; importedHost = null; });
             },
             child: Text('Выйти', style: mono(13, c: C.danger)),
           ),
@@ -1546,10 +1540,14 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
 
   // ---------------- ACCOUNT ----------------
   // баннер-напоминание при близком/истёкшем сроке (тумблер «Подписка истекает»)
+  // веб-аккаунт (отрицательный telegram_id из app-login по веб-ключу) не может продлить через бота —
+  // ведём его на сайт; обычный (положительный) id — в бота
+  String get _renewUrl => (tgId != null && tgId! < 0) ? 'https://bitapsvpn.com/pay.html' : kBot;
+
   Widget _expiryBanner(int days) {
     final expired = days <= 0;
     return GestureDetector(
-      onTap: () => _open(kBot),
+      onTap: () => _open(_renewUrl),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(color: C.warn.withOpacity(0.12), borderRadius: BorderRadius.circular(14),
@@ -1597,7 +1595,11 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
             const SizedBox(height: 10),
             Text('▸ +14 дней за каждого друга, кто оформит первую подписку\n▸ начисляем автоматически', style: mono(12, c: C.muted)),
             const SizedBox(height: 12),
-            _btn('Поделиться ссылкой', kind: 1, icon: Icons.share, onTap: () { if (loggedIn) { _copy('https://t.me/bitaps_vpn_auth_bot?start=ref$tgId', 'Реферальная ссылка'); } else { _toast('Войди, чтобы получить свою реферальную ссылку'); } }),
+            _btn('Поделиться ссылкой', kind: 1, icon: Icons.share, onTap: () {
+              if (!loggedIn) { _toast('Войди, чтобы получить свою реферальную ссылку'); return; }
+              if (tgId != null && tgId! < 0) { _toast('Рефералы — через нашего Telegram-бота'); _open(kBot); return; } // веб-аккаунт: реф работает только в Telegram
+              _copy('https://t.me/bitaps_vpn_auth_bot?start=ref$tgId', 'Реферальная ссылка');
+            }),
           ])),
           const SizedBox(height: 14),
           GestureDetector(
@@ -1679,6 +1681,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
   static const Map<String, String> _planShorts = {
     'mo': '1 МЕС', 'q': '3 МЕС', 'h': '6 МЕС', 'yr': '1 ГОД', 'trial': 'ТРИАЛ',
   };
+  static const Map<String, int> _planTotalDays = {'mo': 30, 'q': 90, 'h': 180, 'yr': 365, 'trial': 3};
   String _planLabel(String? p) {
     if (p == null) return 'Нет подписки';
     if (p == 'trial') return 'Пробный период';
@@ -1711,13 +1714,15 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
       ]));
     }
     final days = _daysLeft();
-    final ringVal = (days ?? 0).clamp(0, 30).toInt();
+    final dleft = (days ?? 0).clamp(0, 100000).toInt();
+    final total = _planTotalDays[subPlan] ?? 30;
+    final ringFrac = total > 0 ? (dleft / total).clamp(0.0, 1.0) : 0.0;
     return _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [_gIcon(Icons.workspace_premium), const SizedBox(width: 12), _kicker('подписка'), const Spacer(),
         GestureDetector(behavior: HitTestBehavior.opaque, onTap: () => _refreshSub(), child: Icon(Icons.refresh, size: 18, color: C.accent))]),
       const SizedBox(height: 16),
       Row(children: [
-        _ring(ringVal, 30),
+        _ring(dleft, ringFrac),
         const SizedBox(width: 20),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(_planLabel(subPlan), style: disp(20, w: FontWeight.w700, c: subActive ? C.accent : C.muted)),
@@ -1731,7 +1736,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
       ]),
       const SizedBox(height: 16),
       Row(children: [
-        Expanded(child: _btn('Продлить', kind: 0, icon: Icons.bolt, onTap: () => _open(kBot))),
+        Expanded(child: _btn('Продлить', kind: 0, icon: Icons.bolt, onTap: () => _open(_renewUrl))),
         const SizedBox(width: 12),
         Expanded(child: _btn('Обновить', kind: 1, icon: Icons.refresh, onTap: () => _refreshSub())),
       ]),
@@ -1979,11 +1984,11 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
       ]));
 
 
-  Widget _ring(int days, int max) => SizedBox(
+  Widget _ring(int days, double frac) => SizedBox(
         width: 78, height: 78,
         child: Stack(alignment: Alignment.center, children: [
           SizedBox(width: 78, height: 78, child: CircularProgressIndicator(
-            value: days / max, strokeWidth: 7, backgroundColor: C.line, color: C.accent)),
+            value: frac, strokeWidth: 7, backgroundColor: C.line, color: C.accent)),
           Column(mainAxisSize: MainAxisSize.min, children: [
             Text('$days', style: disp(24, w: FontWeight.w800)),
             Text('дн.', style: mono(10)),
