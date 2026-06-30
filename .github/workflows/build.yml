@@ -21,7 +21,7 @@ jobs:
       - run: flutter create --org com.bitapsvpn --platforms=windows,android --project-name bitaps_vpn .
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
-      - run: flutter build windows --release
+      - run: flutter build windows --release --dart-define=BUILD_NUMBER=${{ github.run_number }}
       - name: Portable zip
         run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath bitaps-windows-x64.zip -Force
       - name: Installer (Inno Setup)
@@ -48,11 +48,13 @@ jobs:
       - run: flutter config --enable-linux-desktop
       - run: flutter create --org com.bitapsvpn --platforms=linux --project-name bitaps_vpn .
       - run: flutter pub get
-      - run: flutter build linux --release
+      - run: flutter build linux --release --dart-define=BUILD_NUMBER=${{ github.run_number }}
       - name: Portable tar.gz
         run: tar -czf bitaps-linux-x64.tar.gz -C build/linux/x64/release/bundle .
       - name: AppImage
         run: bash pkg/build-appimage.sh
+      - name: build_number.txt (для авто-проверки обновлений в приложении)
+        run: echo "${{ github.run_number }}" > build_number.txt
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
@@ -61,6 +63,7 @@ jobs:
           files: |
             bitaps-x86_64.AppImage
             bitaps-linux-x64.tar.gz
+            build_number.txt
 
   macos:
     runs-on: macos-latest
@@ -80,7 +83,7 @@ jobs:
           grep -q "network.client" macos/Runner/Release.entitlements && echo "network.client ok" || (echo "ENTITLEMENT MISSING" && exit 1)
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
-      - run: flutter build macos --release
+      - run: flutter build macos --release --dart-define=BUILD_NUMBER=${{ github.run_number }}
       - name: Package DMG
         run: |
           set -e
@@ -119,7 +122,7 @@ jobs:
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: yes | flutter doctor --android-licenses || true
-      - run: flutter build apk --release
+      - run: flutter build apk --release --dart-define=BUILD_NUMBER=${{ github.run_number }}
       - run: cp build/app/outputs/flutter-apk/app-release.apk bitaps.apk
       - name: Release
         uses: softprops/action-gh-release@v2

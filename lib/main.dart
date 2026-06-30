@@ -73,6 +73,11 @@ const kDemoKey = 'vless://3a7c9f1e-0b2d-4e6f-9a1c-7b3e2f8d4c5a@vpn.bitaps.app:44
 const kAppLogin = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/app-login';
 const kAppSub = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/app-sub';
 const kAppPair = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/app-pair';
+// Авто-проверка обновлений: CI вшивает номер сборки через --dart-define и кладёт build_number.txt в релиз.
+// Локальная/дев-сборка → 0 (проверку не делаем, чтобы не звать «обновись» в дебаге).
+const int kBuildNumber = int.fromEnvironment('BUILD_NUMBER', defaultValue: 0);
+const kBuildNumberUrl = 'https://github.com/varyavsksm-sudo/bitaps-desktop/releases/latest/download/build_number.txt';
+const kDownloadUrl = 'https://bitapsvpn.com/app.html';
 
 // Персонализация: акцентные темы (имя, основной, мягкий) + стили кнопки
 const List<(String, Color, Color)> accentThemes = [
@@ -256,11 +261,26 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
   late final AnimationController _twinkle =
       AnimationController(vsync: this, duration: const Duration(seconds: 4))..repeat();
 
+  bool _updateAvail = false; // доступна новая сборка (build_number из релиза > вшитого)
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _load();
+    _checkUpdate();
+  }
+
+  // Авто-проверка обновлений: сравниваем номер вшитой сборки с номером последнего релиза.
+  // Тихо: любой сбой/таймаут/дев-сборка (kBuildNumber==0) — просто не показываем баннер.
+  Future<void> _checkUpdate() async {
+    if (kBuildNumber == 0) return;
+    try {
+      final r = await http.get(Uri.parse(kBuildNumberUrl)).timeout(const Duration(seconds: 10));
+      if (r.statusCode != 200) return;
+      final latest = int.tryParse(r.body.trim()) ?? 0;
+      if (latest > kBuildNumber && mounted) setState(() => _updateAvail = true);
+    } catch (_) {/* тихо */}
   }
 
   @override
@@ -1084,11 +1104,35 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
   }
 
   // ---------------- HOME ----------------
+  Widget _updateBanner() => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _open(kDownloadUrl),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: C.accent.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: C.accent.withOpacity(0.5)),
+          ),
+          child: Row(children: [
+            Icon(Icons.system_update, size: 18, color: C.accent),
+            const SizedBox(width: 10),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Доступна новая версия', style: disp(13, w: FontWeight.w700, c: C.accent)),
+              const SizedBox(height: 2),
+              Text('Нажми, чтобы скачать обновление', style: mono(11, c: C.muted)),
+            ])),
+            Icon(Icons.download, size: 18, color: C.accent),
+          ]),
+        ),
+      );
+
   Widget _home() {
     final connected = conn == 2;
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
       children: [
+        if (_updateAvail) ...[_updateBanner(), const SizedBox(height: 12)],
         Row(children: [_logo(), const Spacer(), _shieldPill(connected)]),
         const SizedBox(height: 10),
         Center(child: _powerButton()),
