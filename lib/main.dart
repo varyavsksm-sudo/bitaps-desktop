@@ -225,6 +225,9 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
   Timer? _timer;
   Server server = ruServers[0];
   bool tgl1 = false, tgl2 = true, tgl3 = true, tgl4 = false;
+  String? appPin; // PIN блокировки приложения
+  bool _locked = false;
+  final TextEditingController _pinCtrl = TextEditingController();
   int accentIdx = 0, btnStyle = 0, down = 0, up = 0;
   int themeMode = 0; // тема всегда тёмная (выбор темы убран); ключ хранится для совместимости
   bool autoConnect = false;
@@ -268,6 +271,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     _search.dispose();
     _support.dispose();
     _loginCtrl.dispose();
+    _pinCtrl.dispose();
     super.dispose();
   }
 
@@ -283,6 +287,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       themeMode = 0; // тема всегда тёмная — выбор темы убран
       autoConnect = p.getBool('autoConnect') ?? false;
       tgl1 = p.getBool('tgl1') ?? false;
+      appPin = p.getString('appPin');
       tgl2 = p.getBool('tgl2') ?? true;
       tgl3 = p.getBool('tgl3') ?? true;
       tgl4 = p.getBool('tgl4') ?? false;
@@ -311,6 +316,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
       C.accentSoft = th.$3;
       _applyThemeMode();
       tab = loggedIn ? 0 : 2; // не вошёл → сразу экран входа (Кабинет), а не демо-главная
+      _locked = tgl1 && (appPin?.isNotEmpty ?? false);
     });
     if (loggedIn) _refreshSub(silent: true);
     if (autoConnect && conn == 0) {
@@ -331,6 +337,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     await p.setInt('themeMode', themeMode);
     await p.setBool('autoConnect', autoConnect);
     await p.setBool('tgl1', tgl1);
+    if (appPin != null && appPin!.isNotEmpty) { await p.setString('appPin', appPin!); } else { await p.remove('appPin'); }
     await p.setBool('tgl2', tgl2);
     await p.setBool('tgl3', tgl3);
     await p.setBool('tgl4', tgl4);
@@ -930,8 +937,87 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     _toast('Сервер: ${s.city}');
   }
 
+  // ---------------- APP-LOCK (PIN) ----------------
+  Widget _lockScreen() {
+    return Scaffold(
+      backgroundColor: C.bg,
+      body: Center(child: SingleChildScrollView(child: Padding(padding: const EdgeInsets.all(28),
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Container(width: 72, height: 72, alignment: Alignment.center,
+            decoration: BoxDecoration(shape: BoxShape.circle, gradient: accentGrad,
+              boxShadow: [BoxShadow(color: C.accent.withOpacity(0.4), blurRadius: 20)]),
+            child: const Icon(Icons.lock_outline, size: 34, color: Colors.white)),
+          const SizedBox(height: 20),
+          Text('bitaps заблокирован', style: disp(20, w: FontWeight.w700)),
+          const SizedBox(height: 6),
+          Text('Введите PIN, чтобы продолжить', style: mono(12), textAlign: TextAlign.center),
+          const SizedBox(height: 22),
+          SizedBox(width: 210, child: TextField(controller: _pinCtrl, obscureText: true, keyboardType: TextInputType.number,
+            textAlign: TextAlign.center, maxLength: 8, style: disp(22, w: FontWeight.w700, c: C.text), cursorColor: C.accent, autofocus: true,
+            decoration: InputDecoration(counterText: '', hintText: '••••', hintStyle: disp(22, c: C.muted),
+              enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: C.line)),
+              focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: C.accent))),
+            onSubmitted: (_) => _tryUnlock())),
+          const SizedBox(height: 18),
+          SizedBox(width: 210, child: _btn('Разблокировать', kind: 0, icon: Icons.lock_open, onTap: _tryUnlock)),
+          const SizedBox(height: 16),
+          GestureDetector(behavior: HitTestBehavior.opaque, onTap: _forgotPin,
+            child: Text('Не помню PIN — выйти', style: mono(12, c: C.muted))),
+        ]))),
+      ),
+    );
+  }
+
+  void _tryUnlock() {
+    if (_pinCtrl.text.trim() == appPin) {
+      setState(() => _locked = false);
+      _pinCtrl.clear();
+    } else {
+      _toast('Неверный PIN');
+      _pinCtrl.clear();
+    }
+  }
+
+  void _forgotPin() {
+    _pinCtrl.clear();
+    setState(() { appPin = null; tgl1 = false; _locked = false; });
+    _doLogout();
+    _save();
+    _toast('Блокировка сброшена');
+  }
+
+  Future<void> _enableLock() async {
+    final c1 = TextEditingController(), c2 = TextEditingController();
+    final ok = await showDialog<bool>(context: context, builder: (dctx) => AlertDialog(
+      backgroundColor: C.bg2, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      title: Text('Задай PIN для входа', style: disp(16, w: FontWeight.w700, c: C.text)),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(controller: c1, obscureText: true, keyboardType: TextInputType.number, maxLength: 8,
+          style: mono(15, c: C.text), cursorColor: C.accent,
+          decoration: InputDecoration(counterText: '', hintText: 'PIN (4–8 цифр)', hintStyle: mono(12, c: C.muted))),
+        TextField(controller: c2, obscureText: true, keyboardType: TextInputType.number, maxLength: 8,
+          style: mono(15, c: C.text), cursorColor: C.accent,
+          decoration: InputDecoration(counterText: '', hintText: 'Повтори PIN', hintStyle: mono(12, c: C.muted))),
+      ]),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(dctx, false), child: Text('Отмена', style: mono(13, c: C.muted))),
+        TextButton(onPressed: () {
+          final p1 = c1.text.trim(), p2 = c2.text.trim();
+          if (p1.length < 4) { _toast('PIN — минимум 4 цифры'); return; }
+          if (p1 != p2) { _toast('PIN не совпадает'); return; }
+          appPin = p1;
+          Navigator.pop(dctx, true);
+        }, child: Text('Включить', style: mono(13, c: C.accent))),
+      ],
+    ));
+    c1.dispose(); c2.dispose();
+    setState(() => tgl1 = (ok == true));
+    _save();
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_locked) return _lockScreen();
     final screens = [_home(), _servers(), _account(), _settings()];
     return Scaffold(
       backgroundColor: C.bg,
@@ -1646,7 +1732,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
           _kicker('безопасность'),
           const SizedBox(height: 10),
           _card(child: Column(children: [
-            _toggle('Блокировка входа', 'Спрашивать Face ID / код при открытии', tgl1, (v) { setState(() => tgl1 = v); _save(); }, soon: true),
+            _toggle('Блокировка входа', 'PIN при открытии приложения', tgl1, (v) { if (v) { _enableLock(); } else { setState(() { tgl1 = false; appPin = null; }); _save(); } }),
             _divider(),
             _toggle('Обрыв соединения', 'Уведомлять, если VPN отвалился', tgl2, (v) { setState(() => tgl2 = v); _save(); }, soon: true),
             _divider(),
