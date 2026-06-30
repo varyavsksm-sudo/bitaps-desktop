@@ -130,3 +130,29 @@ jobs:
           tag_name: latest
           name: Последняя сборка
           files: bitaps.apk
+
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter --version
+      - run: flutter create --org com.bitapsvpn --platforms=ios --project-name bitaps_vpn .
+      - run: flutter pub get
+      - run: dart run flutter_launcher_icons
+      # сборка без подписи — для подписанного IPA нужен Apple Developer-сертификат (добавим при публикации в App Store)
+      - run: flutter build ios --release --no-codesign --dart-define=BUILD_NUMBER=${{ github.run_number }}
+      - name: Package unsigned .app
+        run: |
+          set -e
+          APP=$(ls -d build/ios/iphoneos/*.app | head -1)
+          echo "app: $APP"
+          cd build/ios/iphoneos && zip -r -q "$GITHUB_WORKSPACE/bitaps-ios-unsigned.zip" "$(basename "$APP")"
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Последняя сборка
+          files: bitaps-ios-unsigned.zip

@@ -1,5 +1,5 @@
 name: bitaps_vpn
-description: bitaps VPN — десктоп-клиент (Windows/Linux)
+description: bitaps VPN — единый клиент на все ОС (iOS/Android/macOS/Windows/Linux)
 publish_to: 'none'
 version: 1.0.0+1
 
