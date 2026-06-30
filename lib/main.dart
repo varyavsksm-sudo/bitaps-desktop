@@ -691,7 +691,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
           const SizedBox(height: 16),
           Text('Подтверди вход в Telegram', style: disp(15, w: FontWeight.w700, c: C.text)),
           const SizedBox(height: 6),
-          Text('Открылся бот — нажми «Запустить» (Start). Я войду сам, как подтвердишь.',
+          Text('Открылся бот — нажми «Запустить», затем «✅ Да, это я». Войду сам, как подтвердишь.',
               textAlign: TextAlign.center, style: mono(12, c: C.muted)),
         ]),
         actions: [
