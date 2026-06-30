@@ -1627,7 +1627,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
         const SizedBox(height: 6),
         Row(children: loggedIn
             ? [_badge(subActive ? 'Активна' : 'Не активна', subActive ? C.ok : C.muted),
-               if (subPlan != null) ...[const SizedBox(width: 6), _badge(subPlan!.toUpperCase(), C.accent)]]
+               if (subPlan != null) ...[const SizedBox(width: 6), _badge(_planShort(subPlan!), C.accent)]]
             : [_badge('Гость', C.muted)]),
       ])),
       if (loggedIn) GestureDetector(behavior: HitTestBehavior.opaque, onTap: _doLogout,
@@ -1635,11 +1635,20 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     ]));
   }
 
+  // коды тарифов из бэкенда (mo/q/h/yr/trial) → человекочитаемые названия,
+  // чтобы в кабинете не светился сырой код («Тариф «mo»» / бейдж «MO»)
+  static const Map<String, String> _planNames = {
+    'mo': '1 месяц', 'q': '3 месяца', 'h': '6 месяцев', 'yr': '12 месяцев', 'trial': 'Пробный период',
+  };
+  static const Map<String, String> _planShorts = {
+    'mo': '1 МЕС', 'q': '3 МЕС', 'h': '6 МЕС', 'yr': '1 ГОД', 'trial': 'ТРИАЛ',
+  };
   String _planLabel(String? p) {
     if (p == null) return 'Нет подписки';
     if (p == 'trial') return 'Пробный период';
-    return 'Тариф «$p»';
+    return _planNames[p] != null ? 'Тариф «${_planNames[p]}»' : 'Тариф «$p»';
   }
+  String _planShort(String p) => _planShorts[p] ?? p.toUpperCase();
 
   Widget _subCard() {
     if (!loggedIn) {
