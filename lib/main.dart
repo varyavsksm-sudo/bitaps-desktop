@@ -502,14 +502,6 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     _toast('$label · скопировано в буфер');
   }
 
-  String _uuid() {
-    String h(int n) => List.generate(n, (_) => '0123456789abcdef'[_rnd.nextInt(16)]).join();
-    return '${h(8)}-${h(4)}-4${h(3)}-${'89ab'[_rnd.nextInt(4)]}${h(3)}-${h(12)}';
-  }
-
-  String _demoKey() =>
-      'vless://${_uuid()}@vpn.bitaps.app:443?security=reality&type=tcp&sni=www.microsoft.com&fp=chrome&pbk=DEMObitapsPLACEHOLDERkey00000000000000000000000&sid=88#bitaps%20VPN';
-
   String? _hostOf(String key) {
     try {
       if (key.startsWith('vless://')) {
@@ -525,15 +517,6 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     return null;
   }
 
-  // «Обновить» = перевыпуск ключа (новый UUID в реальном формате bitaps)
-  void _rotateKey() {
-    setState(() {
-      keyStr = _demoKey();
-      importedHost = null;
-    });
-    _save();
-    _toast('Ключ перевыпущен — новый UUID ✓');
-  }
 
   // Импорт своего ключа/подписки из буфера (модель Happ)
   Future<void> _importKey() async {
