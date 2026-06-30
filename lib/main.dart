@@ -289,8 +289,10 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // авто-замок: при сворачивании ставим блокировку, чтобы при возврате спросило PIN
-    if (state == AppLifecycleState.paused && tgl1 && (appPin?.isNotEmpty ?? false) && !_locked) {
+    // авто-замок при сворачивании. На ДЕСКТОПЕ окно уходит в hidden/inactive (не paused, как на
+    // мобильном) — реагируем на все эти состояния, иначе на целевой платформе замок не срабатывал.
+    final bg = state == AppLifecycleState.paused || state == AppLifecycleState.hidden || state == AppLifecycleState.inactive;
+    if (bg && tgl1 && (appPin?.isNotEmpty ?? false) && !_locked) {
       setState(() => _locked = true);
     }
   }
@@ -647,6 +649,10 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
         _loginError('Этот ключ не подошёл. Возьми актуальный ключ в боте.');
         return;
       }
+      if (r.statusCode == 429) {
+        _loginError('Слишком много попыток. Подожди минуту и попробуй снова.');
+        return;
+      }
       final d = jsonDecode(r.body) as Map<String, dynamic>;
       if (d['ok'] == true && d['telegram_id'] is num && d['app_token'] is String) {
         setState(() {
@@ -716,8 +722,9 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
       ),
     );
     String? key;
-    for (int i = 0; i < 40 && !cancelled; i++) {
-      await Future.delayed(const Duration(seconds: 3));
+    // опрашиваем до серверного TTL привязки (~15 мин), чтобы позднее подтверждение не терялось
+    for (int i = 0; i < 180 && !cancelled; i++) {
+      await Future.delayed(const Duration(seconds: 5));
       if (cancelled || !mounted) break;
       try {
         final cr = await http
