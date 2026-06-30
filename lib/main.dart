@@ -406,6 +406,19 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
     return avail.first;
   }
 
+  // режим реально подбирает сервер: Стрим→мин.нагрузка, Игры/Авто→мин.пинг, Прив→зарубежный (иначе лучший)
+  Server serverForMode(int m) {
+    final avail = [...ruServers, ...intlServers].where((s) => s.available).toList();
+    if (avail.isEmpty) return ruServers[0];
+    if (m == 1) { avail.sort((a, b) => a.load.compareTo(b.load)); return avail.first; }
+    if (m == 3) {
+      final intl = avail.where((s) => s.country != 'Россия').toList();
+      if (intl.isNotEmpty) { intl.sort((a, b) => a.ping.compareTo(b.ping)); return intl.first; }
+    }
+    avail.sort((a, b) => a.ping.compareTo(b.ping));
+    return avail.first;
+  }
+
   // ----- реальные действия -----
   void _toast(String m) {
     ScaffoldMessenger.of(context)
@@ -1157,7 +1170,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin {
   Widget _modeChip(String label, int i) {
     final sel = mode == i;
     return GestureDetector(
-      onTap: () { setState(() => mode = i); _save(); },
+      onTap: () { setState(() { mode = i; if (conn == 0) server = serverForMode(i); }); _save(); },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         height: 40, alignment: Alignment.center,
