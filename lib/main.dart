@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'vless.dart';
 import 'package:window_manager/window_manager.dart';
@@ -78,6 +79,37 @@ const kAppLogin = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/app-log
 const kAppSub = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/app-sub';
 const kAppPair = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/app-pair';
 const kRotateSecret = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/rotate-secret';
+
+// Секреты (vpn_key/appToken/loginSecret/appPin) храним в зашифрованном хранилище ОС
+// (Keychain / DPAPI / libsecret), а не в plaintext SharedPreferences. Defensive: если secure storage
+// недоступно (напр. нет libsecret на Linux) — падаем на prefs (как раньше), без локаута/потери сессии.
+const _secure = FlutterSecureStorage(aOptions: AndroidOptions(encryptedSharedPreferences: true));
+
+// Чтение секрета: secure → если пусто, миграция старого plaintext prefs в secure → иначе prefs-фолбэк.
+Future<String?> _secRead(SharedPreferences p, String k) async {
+  try {
+    final v = await _secure.read(key: k);
+    if (v != null && v.isNotEmpty) return v;
+    final old = p.getString(k); // было в plaintext (старая версия) → перенести и стереть
+    if (old != null && old.isNotEmpty) {
+      try { await _secure.write(key: k, value: old); await p.remove(k); } catch (_) {}
+      return old;
+    }
+    return null;
+  } catch (_) {
+    return p.getString(k); // secure недоступно → как раньше
+  }
+}
+
+// Запись секрета: в secure + удаляем plaintext-копию из prefs. Сбой secure → пишем в prefs (не теряем сессию).
+Future<void> _secWrite(SharedPreferences p, String k, String? v) async {
+  try {
+    if (v != null && v.isNotEmpty) { await _secure.write(key: k, value: v); } else { await _secure.delete(key: k); }
+    await p.remove(k);
+  } catch (_) {
+    if (v != null && v.isNotEmpty) { await p.setString(k, v); } else { await p.remove(k); }
+  }
+}
 // Авто-проверка обновлений: CI вшивает номер сборки через --dart-define и кладёт build_number.txt в релиз.
 // Локальная/дев-сборка → 0 (проверку не делаем, чтобы не звать «обновись» в дебаге).
 const int kBuildNumber = int.fromEnvironment('BUILD_NUMBER', defaultValue: 0);
@@ -317,6 +349,11 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
   // ----- persistence: настройки реально сохраняются между запусками -----
   Future<void> _load() async {
     final p = await SharedPreferences.getInstance();
+    // секреты читаем из secure storage ДО setState (там нельзя await); с миграцией/фолбэком внутри
+    final secPin = await _secRead(p, 'appPin');
+    final secKey = await _secRead(p, 'key');
+    final secToken = await _secRead(p, 'appToken');
+    final secLogin = await _secRead(p, 'loginSecret');
     if (!mounted) return;
     setState(() {
       accentIdx = (p.getInt('accent') ?? 0).clamp(0, accentThemes.length - 1);
@@ -326,17 +363,17 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
       themeMode = 0; // тема всегда тёмная — выбор темы убран
       autoConnect = p.getBool('autoConnect') ?? false;
       tgl1 = p.getBool('tgl1') ?? false;
-      appPin = p.getString('appPin');
+      appPin = secPin;
       tgl2 = p.getBool('tgl2') ?? true;
       tgl3 = p.getBool('tgl3') ?? true;
       tgl4 = p.getBool('tgl4') ?? false;
       sessions = p.getInt('sessions') ?? 0;
       customCfg = p.getString('cfg');
-      keyStr = p.getString('key') ?? kDemoKey;
+      keyStr = secKey ?? kDemoKey;
       importedHost = p.getString('host');
       tgId = p.getInt('tgId');
-      appToken = p.getString('appToken');
-      loginSecret = p.getString('loginSecret');
+      appToken = secToken;
+      loginSecret = secLogin;
       subPlan = p.getString('subPlan');
       subExpires = p.getString('subExpires');
       subName = p.getString('subName');
@@ -379,17 +416,17 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     await p.setInt('themeMode', themeMode);
     await p.setBool('autoConnect', autoConnect);
     await p.setBool('tgl1', tgl1);
-    if (appPin != null && appPin!.isNotEmpty) { await p.setString('appPin', appPin!); } else { await p.remove('appPin'); }
+    await _secWrite(p, 'appPin', appPin);
     await p.setBool('tgl2', tgl2);
     await p.setBool('tgl3', tgl3);
     await p.setBool('tgl4', tgl4);
     await p.setInt('sessions', sessions);
     await p.setStringList('favs', favs.toList());
     if (customCfg != null) { await p.setString('cfg', customCfg!); } else { await p.remove('cfg'); }
-    await p.setString('key', keyStr);
+    await _secWrite(p, 'key', keyStr);
     if (tgId != null) { await p.setInt('tgId', tgId!); } else { await p.remove('tgId'); }
-    if (appToken != null) { await p.setString('appToken', appToken!); } else { await p.remove('appToken'); }
-    if (loginSecret != null) { await p.setString('loginSecret', loginSecret!); } else { await p.remove('loginSecret'); }
+    await _secWrite(p, 'appToken', appToken);
+    await _secWrite(p, 'loginSecret', loginSecret);
     // при null — УДАЛЯЕМ ключ (иначе после logout остаются данные прежней подписки в prefs)
     if (subPlan != null) { await p.setString('subPlan', subPlan!); } else { await p.remove('subPlan'); }
     if (subExpires != null) { await p.setString('subExpires', subExpires!); } else { await p.remove('subExpires'); }
