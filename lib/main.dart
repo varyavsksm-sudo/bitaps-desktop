@@ -227,6 +227,7 @@ class Shell extends StatefulWidget {
 class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBindingObserver {
   int tab = 0;
   int conn = 0; // 0 off, 1 connecting, 2 on
+  int _connGen = 0; // поколение подключения: отменяет «поздние» отложенные коллбэки (отмена/реконнект)
   int secs = 0;
   int mode = 0;
   int proto = 0;
@@ -251,6 +252,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
   // вход / подписка / устройства (реальные данные из Supabase)
   int? tgId;
   String? appToken, subPlan, subExpires, subName;
+  String? loginSecret; // код входа (отдельный от vpn_key credential) — для входа в приложение/кабинет
   int? subLimit;
   bool subActive = false;
   bool _subLoading = false;
@@ -333,6 +335,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
       importedHost = p.getString('host');
       tgId = p.getInt('tgId');
       appToken = p.getString('appToken');
+      loginSecret = p.getString('loginSecret');
       subPlan = p.getString('subPlan');
       subExpires = p.getString('subExpires');
       subName = p.getString('subName');
@@ -385,6 +388,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     await p.setString('key', keyStr);
     if (tgId != null) { await p.setInt('tgId', tgId!); } else { await p.remove('tgId'); }
     if (appToken != null) { await p.setString('appToken', appToken!); } else { await p.remove('appToken'); }
+    if (loginSecret != null) { await p.setString('loginSecret', loginSecret!); } else { await p.remove('loginSecret'); }
     // при null — УДАЛЯЕМ ключ (иначе после logout остаются данные прежней подписки в prefs)
     if (subPlan != null) { await p.setString('subPlan', subPlan!); } else { await p.remove('subPlan'); }
     if (subExpires != null) { await p.setString('subExpires', subExpires!); } else { await p.remove('subExpires'); }
@@ -400,20 +404,34 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
   }
 
   void toggle() {
-    if (conn == 1) return;
+    if (conn == 1) {
+      // отмена во время «Подключение…»: инвалидируем поколение → отложенный коллбэк отвалится
+      _connGen++;
+      _spin.duration = const Duration(seconds: 6);
+      _spin.stop();
+      _spin.repeat();
+      setState(() => conn = 0);
+      return;
+    }
     if (conn == 0) {
       if (kRealTunnel && keyStr.startsWith('vless://')) {
         // боевой режим: конфиг для движка готов; здесь запуск sing-box через нативный канал
         // (нужен боевой сервер + нативная TUN-интеграция — на владельце). Пока kRealTunnel=false.
-        final cfg = singboxConfig(keyStr);
-        debugPrint('[bitaps] sing-box config ready (${cfg.length} секций) — движок будет запущен здесь');
+        try {
+          final cfg = singboxConfig(keyStr);
+          debugPrint('[bitaps] sing-box config ready (${cfg.length} секций) — движок будет запущен здесь');
+        } catch (e) {
+          _toast('Ключ повреждён: $e');
+          return;
+        }
       }
+      final gen = ++_connGen; // это конкретное подключение; отмена/реконнект сменят _connGen
       setState(() => conn = 1);
       _spin.duration = const Duration(milliseconds: 1400);
       _spin.stop();
       _spin.repeat();
       Future.delayed(const Duration(milliseconds: 1700), () {
-        if (!mounted || conn != 1) return;
+        if (!mounted || gen != _connGen) return; // «поздний» коллбэк отменённой попытки — игнор
         setState(() {
           conn = 2;
           secs = 0;
@@ -427,6 +445,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
         });
       });
     } else {
+      _connGen++; // отключение инвалидирует любое незавершённое поколение
       _timer?.cancel();
       _spin.duration = const Duration(seconds: 6);
       _spin.stop();
@@ -595,7 +614,9 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     subExpires = d['expires_at']?.toString();
     subLimit = (d['device_limit'] is num) ? (d['device_limit'] as num).toInt() : null;
     subActive = d['active'] == true;
-    if (d['vpn_key'] is String) keyStr = d['vpn_key'] as String;
+    // не перетираем вручную импортированный ключ (чужой хост) авто-рефрешем подписки
+    if (d['vpn_key'] is String && importedHost == null) keyStr = d['vpn_key'] as String;
+    if (d['login_secret'] is String) loginSecret = d['login_secret'] as String;
     final dl = d['devices'];
     devices = (dl is List) ? dl.whereType<Map>().map((e) => e.cast<String, dynamic>()).toList() : [];
   }
@@ -624,6 +645,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
   String _srvErr(int code) => 'Сервер недоступен ($code). Попробуй позже.';
 
   Future<void> _login([String? presetKey]) async {
+    if (!mounted) return; // _pairLogin может звать после закрытия экрана
     final key = (presetKey ?? _loginCtrl.text).trim();
     if (key.length < 12) {
       _toast('Вставь свой ключ из бота');
@@ -809,6 +831,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     setState(() {
       tgId = null;
       appToken = null;
+      loginSecret = null;
       subPlan = null;
       subExpires = null;
       subName = null;
@@ -1768,6 +1791,21 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
               ? _btn('Обновить', kind: 2, icon: Icons.refresh, onTap: () => _refreshSub())
               : _btn('Вставить', kind: 2, icon: Icons.content_paste, onTap: _importKey)),
         ]),
+        if (loggedIn && loginSecret != null) ...[
+          const SizedBox(height: 16),
+          Divider(color: C.line, height: 1),
+          const SizedBox(height: 14),
+          Row(children: [_gIcon(Icons.lock_outline), const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              _kicker('код входа'), const SizedBox(height: 3),
+              Text('для входа в приложение — не вставляй в VPN-клиенты', style: mono(11))]))]),
+          const SizedBox(height: 10),
+          Container(padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: C.field, borderRadius: BorderRadius.circular(10)),
+            child: Text(loginSecret!, style: mono(11, c: C.text), maxLines: 1, overflow: TextOverflow.ellipsis)),
+          const SizedBox(height: 10),
+          _btn('Скопировать код', kind: 1, icon: Icons.copy, onTap: () => _copy(loginSecret!, 'Код входа')),
+        ],
       ]));
 
   Widget _devicesCard() => _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

@@ -5,15 +5,29 @@
 
 /// Парсит vless:// ключ в outbound-секцию sing-box (reality/tls, tcp/ws/grpc).
 Map<String, dynamic> vlessOutbound(String key) {
-  final u = Uri.parse(key.trim());
+  final Uri u;
+  try {
+    u = Uri.parse(key.trim());
+  } catch (_) {
+    throw const FormatException('не удалось разобрать ключ');
+  }
   if (u.scheme != 'vless') throw const FormatException('not a vless key');
+  if (u.host.isEmpty) throw const FormatException('в ключе нет адреса сервера');
+  // uuid в userInfo может быть percent-encoded; битый encoding не должен ронять весь импорт
+  String uuid;
+  try {
+    uuid = Uri.decodeComponent(u.userInfo);
+  } catch (_) {
+    uuid = u.userInfo;
+  }
+  if (uuid.isEmpty) throw const FormatException('в ключе нет UUID');
   final q = u.queryParameters;
   final cfg = <String, dynamic>{
     'type': 'vless',
     'tag': 'proxy',
     'server': u.host,
     'server_port': u.hasPort ? u.port : 443,
-    'uuid': Uri.decodeComponent(u.userInfo),
+    'uuid': uuid,
     'packet_encoding': 'xudp',
   };
   final flow = q['flow'] ?? '';
@@ -26,7 +40,9 @@ Map<String, dynamic> vlessOutbound(String key) {
       'utls': {'enabled': true, 'fingerprint': q['fp'] ?? 'chrome'},
     };
     if (sec == 'reality') {
-      tls['reality'] = {'enabled': true, 'public_key': q['pbk'] ?? '', 'short_id': q['sid'] ?? ''};
+      final pbk = q['pbk'] ?? '';
+      if (pbk.isEmpty) throw const FormatException('reality-ключ без public_key (pbk)');
+      tls['reality'] = {'enabled': true, 'public_key': pbk, 'short_id': q['sid'] ?? ''};
     }
     cfg['tls'] = tls;
   }
