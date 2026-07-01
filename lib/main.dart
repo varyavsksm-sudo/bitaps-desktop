@@ -354,6 +354,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     final secKey = await _secRead(p, 'key');
     final secToken = await _secRead(p, 'appToken');
     final secLogin = await _secRead(p, 'loginSecret');
+    final secCfg = await _secRead(p, 'cfg'); // «Свой конфиг» может нести vless-ключ → тоже в secure storage
     if (!mounted) return;
     setState(() {
       accentIdx = (p.getInt('accent') ?? 0).clamp(0, accentThemes.length - 1);
@@ -368,7 +369,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
       tgl3 = p.getBool('tgl3') ?? true;
       tgl4 = p.getBool('tgl4') ?? false;
       sessions = p.getInt('sessions') ?? 0;
-      customCfg = p.getString('cfg');
+      customCfg = secCfg;
       keyStr = secKey ?? kDemoKey;
       importedHost = p.getString('host');
       tgId = p.getInt('tgId');
@@ -422,7 +423,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     await p.setBool('tgl4', tgl4);
     await p.setInt('sessions', sessions);
     await p.setStringList('favs', favs.toList());
-    if (customCfg != null) { await p.setString('cfg', customCfg!); } else { await p.remove('cfg'); }
+    await _secWrite(p, 'cfg', customCfg); // secure storage (может нести vless-ключ), не plaintext
     await _secWrite(p, 'key', keyStr);
     if (tgId != null) { await p.setInt('tgId', tgId!); } else { await p.remove('tgId'); }
     await _secWrite(p, 'appToken', appToken);
