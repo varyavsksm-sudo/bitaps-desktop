@@ -688,11 +688,14 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     if (!mounted) return; // _pairLogin может звать после закрытия экрана
     final key = (presetKey ?? _loginCtrl.text).trim();
     if (key.length < 12) {
-      _toast('Вставь свой ключ из бота');
+      _toast('Вставь ключ из бота или Код входа');
       return;
     }
-    if (!(key.startsWith('vless://') || key.startsWith('http://') || key.startsWith('https://'))) {
-      _toast('Ключ должен начинаться с vless:// или https://');
+    // vless://… / https://… → VPN-ключ (шлём как key); иначе (UUID) — «Код входа»/login_secret (как secret).
+    // Готовит вход по login_secret на будущее, когда вход по vpn_key отключат. keyStr берётся из ответа, не отсюда.
+    final isKey = key.startsWith('vless://') || key.startsWith('http://') || key.startsWith('https://');
+    if (!isKey && key.contains(RegExp(r'\s'))) {
+      _toast('Вставь ключ (vless://…) или Код входа');
       return;
     }
     _toast('Вхожу…');
@@ -700,7 +703,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
       final r = await http
           .post(Uri.parse(kAppLogin),
               headers: {'content-type': 'application/json', 'apikey': kApiKey},
-              body: jsonEncode({'key': key}))
+              body: jsonEncode(isKey ? {'key': key} : {'secret': key}))
           .timeout(const Duration(seconds: 20));
       if (!mounted) return;
       if (r.statusCode >= 500) {
