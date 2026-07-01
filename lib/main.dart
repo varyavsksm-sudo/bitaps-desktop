@@ -556,15 +556,15 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     _toast('$label · скопировано в буфер');
   }
 
+  // Хост берём ТЕМ ЖЕ парсером (Uri.parse().host), что и реальное подключение в vless.dart —
+  // иначе проверка доверенного хоста и фактический коннект расходятся: напр.
+  //   vless://u@bitaps.app:443@evil.com  →  ручной indexOf дал бы «bitaps.app» (первый @),
+  //   а Uri.parse даёт «evil.com» (userinfo до ПОСЛЕДНЕГО @) — юзеру показали бы доверенное имя,
+  //   а трафик ушёл бы на злой хост. Uri.parse также корректно отдаёт хост для ключа без :порта.
   String? _hostOf(String key) {
     try {
-      if (key.startsWith('vless://')) {
-        final at = key.indexOf('@');
-        final colon = key.indexOf(':', at);
-        if (at > 0 && colon > at) return key.substring(at + 1, colon);
-      } else {
-        return Uri.parse(key).host;
-      }
+      final h = Uri.parse(key.trim()).host;
+      if (h.isNotEmpty) return h;
     } catch (e) {
       debugPrint('_hostOf error: $e');
     }
@@ -592,8 +592,9 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
       return;
     }
     final host = _hostOf(t);
-    if (host != null && !_isTrustedHost(host)) {
-      final ok = await _confirmForeignHost(host);
+    // null/непарсящийся хост = НЕ доверенный → предупреждаем (раньше null молча проходил мимо гейта)
+    if (host == null || !_isTrustedHost(host)) {
+      final ok = await _confirmForeignHost(host ?? 'неизвестный хост');
       if (ok != true) return;
     }
     setState(() {
