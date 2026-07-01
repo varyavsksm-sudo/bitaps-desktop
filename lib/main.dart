@@ -385,7 +385,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     await p.setBool('tgl4', tgl4);
     await p.setInt('sessions', sessions);
     await p.setStringList('favs', favs.toList());
-    if (customCfg != null) await p.setString('cfg', customCfg!);
+    if (customCfg != null) { await p.setString('cfg', customCfg!); } else { await p.remove('cfg'); }
     await p.setString('key', keyStr);
     if (tgId != null) { await p.setInt('tgId', tgId!); } else { await p.remove('tgId'); }
     if (appToken != null) { await p.setString('appToken', appToken!); } else { await p.remove('appToken'); }
@@ -853,6 +853,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
   }
 
   void _doLogout({bool silent = false}) {
+    _connGen++; // инвалидируем поколение: отложенный коллбэк подключения не «переподключит» после выхода
     _timer?.cancel();
     setState(() {
       tgId = null;
@@ -865,6 +866,10 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
       subActive = false;
       devices = [];
       keyStr = kDemoKey;
+      // сбрасываем импортированный ключ/конфиг — иначе _applySub (гард importedHost==null)
+      // не подхватит ключ следующего аккаунта после «тихого» логаута по истечению сессии
+      importedHost = null;
+      customCfg = null;
       conn = 0;
       secs = 0;
     });
