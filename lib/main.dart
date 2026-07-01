@@ -493,6 +493,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
 
   // ----- реальные действия -----
   void _toast(String m) {
+    if (!mounted) return; // из catch/таймаут-веток может прийти после размонтирования — не падаем
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(
@@ -633,6 +634,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
               body: jsonEncode({'telegram_id': tgId, 'token': appToken}))
           .timeout(const Duration(seconds: 20));
       if (!mounted) return;
+      if (r.statusCode == 401 || r.statusCode == 403) { _doLogout(); _toast('Сессия истекла — войди снова'); return; }
       final d = jsonDecode(r.body) as Map<String, dynamic>;
       if (d['ok'] == true && d['login_secret'] is String) {
         setState(() => loginSecret = d['login_secret'] as String);
