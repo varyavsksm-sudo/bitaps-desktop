@@ -571,6 +571,17 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     return null;
   }
 
+  // Доверенный хост = точный домен bitaps, а не любая строка с подстрокой 'bitaps'
+  // (иначе bitaps.attacker.com / evil-bitaps.io прошли бы без предупреждения).
+  bool _isTrustedHost(String host) {
+    final h = host.toLowerCase();
+    const domains = ['bitaps.app', 'bitapsvpn.com'];
+    for (final d in domains) {
+      if (h == d || h.endsWith('.$d')) return true;
+    }
+    return false;
+  }
+
 
   // Импорт своего ключа/подписки из буфера (модель Happ)
   Future<void> _importKey() async {
@@ -581,7 +592,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
       return;
     }
     final host = _hostOf(t);
-    if (host != null && !host.toLowerCase().contains('bitaps')) {
+    if (host != null && !_isTrustedHost(host)) {
       final ok = await _confirmForeignHost(host);
       if (ok != true) return;
     }
