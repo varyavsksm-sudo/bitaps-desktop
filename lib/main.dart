@@ -77,6 +77,7 @@ const kDemoKey = 'vless://3a7c9f1e-0b2d-4e6f-9a1c-7b3e2f8d4c5a@vpn.bitaps.app:44
 const kAppLogin = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/app-login';
 const kAppSub = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/app-sub';
 const kAppPair = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/app-pair';
+const kRotateSecret = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/rotate-secret';
 // Авто-проверка обновлений: CI вшивает номер сборки через --dart-define и кладёт build_number.txt в релиз.
 // Локальная/дев-сборка → 0 (проверку не делаем, чтобы не звать «обновись» в дебаге).
 const int kBuildNumber = int.fromEnvironment('BUILD_NUMBER', defaultValue: 0);
@@ -619,6 +620,31 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     if (d['login_secret'] is String) loginSecret = d['login_secret'] as String;
     final dl = d['devices'];
     devices = (dl is List) ? dl.whereType<Map>().map((e) => e.cast<String, dynamic>()).toList() : [];
+  }
+
+  // Ротация кода входа: старый код перестаёт работать, показываем новый.
+  Future<void> _rotateSecret() async {
+    if (tgId == null || appToken == null) { _toast('Сначала войди'); return; }
+    _toast('Меняю код…');
+    try {
+      final r = await http
+          .post(Uri.parse(kRotateSecret),
+              headers: {'content-type': 'application/json', 'apikey': kApiKey},
+              body: jsonEncode({'telegram_id': tgId, 'token': appToken}))
+          .timeout(const Duration(seconds: 20));
+      if (!mounted) return;
+      final d = jsonDecode(r.body) as Map<String, dynamic>;
+      if (d['ok'] == true && d['login_secret'] is String) {
+        setState(() => loginSecret = d['login_secret'] as String);
+        _save();
+        _toast('Код входа обновлён ✓');
+      } else {
+        _toast('Не удалось сменить код');
+      }
+    } catch (e) {
+      debugPrint('_rotateSecret error: $e');
+      if (mounted) _toast(_netErr);
+    }
   }
 
   int? _daysLeft() {
@@ -1804,7 +1830,11 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
             decoration: BoxDecoration(color: C.field, borderRadius: BorderRadius.circular(10)),
             child: Text(loginSecret!, style: mono(11, c: C.text), maxLines: 1, overflow: TextOverflow.ellipsis)),
           const SizedBox(height: 10),
-          _btn('Скопировать код', kind: 1, icon: Icons.copy, onTap: () => _copy(loginSecret!, 'Код входа')),
+          Row(children: [
+            Expanded(child: _btn('Скопировать', kind: 1, icon: Icons.copy, onTap: () => _copy(loginSecret!, 'Код входа'))),
+            const SizedBox(width: 12),
+            Expanded(child: _btn('Сменить', kind: 2, icon: Icons.refresh, onTap: _rotateSecret)),
+          ]),
         ],
       ]));
 
