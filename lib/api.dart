@@ -51,7 +51,10 @@ extension ShellApi on _ShellState {
   }
 
   // ----- вход по ключу / реальная подписка / устройства -----
-  void _applySub(Map<String, dynamic> d) {
+  void _applySub(Map<String, dynamic> d, {bool fresh = false}) {
+    // явный вход в аккаунт (fresh) сбрасывает ранее импортированный чужой ключ — ключ аккаунта
+    // должен применяться; авто-рефреш (fresh=false) НЕ перетирает вручную импортированный ключ
+    if (fresh) { importedHost = null; customCfg = null; }
     subName = d['name']?.toString();
     subPlan = d['plan']?.toString();
     subExpires = d['expires_at']?.toString();
@@ -129,7 +132,7 @@ extension ShellApi on _ShellState {
         setState(() {
           tgId = (d['telegram_id'] as num).toInt();
           appToken = d['app_token'] as String;
-          _applySub(d);
+          _applySub(d, fresh: true);
           _loginCtrl.clear();
         });
         _save();
