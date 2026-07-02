@@ -17,9 +17,9 @@ extension ShellHome on _ShellState {
             Icon(Icons.system_update, size: 18, color: C.accent),
             const SizedBox(width: 10),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Доступна новая версия', style: disp(13, w: FontWeight.w700, c: C.accent)),
+              Text(tr('Доступна новая версия'), style: disp(13, w: FontWeight.w700, c: C.accent)),
               const SizedBox(height: 2),
-              Text('Нажми, чтобы скачать обновление', style: mono(11, c: C.muted)),
+              Text(tr('Нажми, чтобы скачать обновление'), style: mono(11, c: C.muted)),
             ])),
             Icon(Icons.download, size: 18, color: C.accent),
           ]),
@@ -37,21 +37,21 @@ extension ShellHome on _ShellState {
         Center(child: _powerButton()),
         const SizedBox(height: 4),
         Center(child: Text(
-          conn == 0 ? 'Отключено' : conn == 1 ? 'Подключение…' : 'Подключено',
+          conn == 0 ? tr('Отключено') : conn == 1 ? tr('Подключение…') : tr('Подключено'),
           style: disp(22, w: FontWeight.w700, c: connected ? C.accent : (conn == 1 ? C.warn : C.text)))),
         const SizedBox(height: 6),
         Center(child: Text(connected ? hms : '00:00:00',
           style: TextStyle(fontFamily: 'JetBrainsMono', fontSize: 38, fontWeight: FontWeight.w700,
             color: connected ? C.accentSoft : C.muted, letterSpacing: 2))),
         const SizedBox(height: 4),
-        Center(child: Text(connected ? 'под защитой' : 'нажми на кнопку', style: mono(12))),
+        Center(child: Text(connected ? tr('под защитой') : tr('нажми на кнопку'), style: mono(12))),
         const SizedBox(height: 20),
         Row(children: [
           for (int i = 0; i < 4; i++)
             Expanded(child: Padding(padding: EdgeInsets.only(right: i < 3 ? 8 : 0), child: _modeChip(modeLabels[i], i))),
         ]),
         const SizedBox(height: 10),
-        Text('Авто-режим сам подберёт сервер и маршрут. Стрим · Игры · Прив. — скоро.', style: mono(12)),
+        Text(tr('Режим подбирает сервер: Авто/Игры — минимальный пинг, Стрим — наименьшая нагрузка, Прив. — зарубежный сервер.'), style: mono(12)),
         const SizedBox(height: 14),
         _card(child: Row(children: [
           Text(server.flag, style: const TextStyle(fontSize: 24)),
@@ -67,13 +67,13 @@ extension ShellHome on _ShellState {
             child: Row(children: [
               Icon(Icons.swap_horiz, size: 17, color: C.accent),
               const SizedBox(width: 5),
-              Text('сменить', style: disp(13, w: FontWeight.w700, c: C.accent)),
+              Text(tr('сменить'), style: disp(13, w: FontWeight.w700, c: C.accent)),
             ]),
           ),
         ])),
         const SizedBox(height: 10),
         Row(children: [
-          Text('ещё:', style: mono(12)),
+          Text(tr('ещё:'), style: mono(12)),
           const SizedBox(width: 8),
           Expanded(child: SizedBox(height: 32, child: ListView(
             scrollDirection: Axis.horizontal,
@@ -92,12 +92,12 @@ extension ShellHome on _ShellState {
             const Spacer(),
             Icon(Icons.language, size: 15, color: C.muted),
             const SizedBox(width: 6),
-            Text(connected ? '95.142.16.7' : 'IP скрыт', style: mono(12)),
+            Text(connected ? '95.142.16.7' : tr('IP скрыт'), style: mono(12)),
           ]),
           // Честно: без боевого туннеля скорость/трафик/IP — демонстрационные.
           if (connected && !kRealTunnel) ...[
             const SizedBox(height: 8),
-            Text('Демо-режим — скорость и IP показаны для примера', style: mono(10, c: C.muted)),
+            Text(tr('Демо-режим — скорость и IP показаны для примера'), style: mono(10, c: C.muted)),
           ],
         ])),
         const SizedBox(height: 12),
@@ -107,7 +107,7 @@ extension ShellHome on _ShellState {
           child: _card(child: Row(children: [
             _gIcon(Icons.bolt),
             const SizedBox(width: 13),
-            Text(connected ? 'Отключить' : 'Подключиться к быстрейшему серверу', style: disp(15, w: FontWeight.w600)),
+            Text(connected ? tr('Отключить') : tr('Подключиться к быстрейшему серверу'), style: disp(15, w: FontWeight.w600)),
           ])),
         ),
       ],
@@ -220,7 +220,7 @@ extension ShellHome on _ShellState {
           borderRadius: BorderRadius.circular(11),
           border: Border.all(color: sel ? C.accent : C.line),
         ),
-        child: Text(label, style: disp(13, w: FontWeight.w700, c: sel ? C.accent : C.muted)),
+        child: Text(tr(label), style: disp(13, w: FontWeight.w700, c: sel ? C.accent : C.muted)),
       ),
     );
   }

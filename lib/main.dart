@@ -9,13 +9,16 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'vless.dart';
+import 'singbox_config.dart';
+import 'native_tunnel.dart';
 import 'package:window_manager/window_manager.dart';
 
 // Приложение разбито на модули; все они — части одной библиотеки (part/part of),
 // чтобы приватные имена (_ShellState, _secRead и т.п.) оставались доступны между файлами.
+part 'i18n.dart';        // локализация RU/EN
 part 'theme.dart';       // тема/токены/шрифты
 part 'models.dart';      // модели, константы/эндпоинты, токены+secure storage
+part 'connection.dart';  // ConnectionController — жизненный цикл VPN-туннеля (вынесен из god-object)
 part 'widgets.dart';     // painters + общие виджеты-строители
 part 'api.dart';         // сетевые вызовы к edge-функциям + сетевые инструменты
 part 'screens/home.dart';
@@ -72,25 +75,19 @@ class Shell extends StatefulWidget {
 
 class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBindingObserver {
   int tab = 0;
-  int conn = 0; // 0 off, 1 connecting, 2 on
-  int _connGen = 0; // поколение подключения: отменяет «поздние» отложенные коллбэки (отмена/реконнект)
-  int secs = 0;
   int mode = 0;
   int proto = 0;
-  int sessions = 0;
-  Timer? _timer;
   Server server = ruServers[0];
   bool tgl1 = false, tgl2 = true, tgl3 = true, tgl4 = false;
   String? appPin; // PIN блокировки приложения
   bool _locked = false;
   final TextEditingController _pinCtrl = TextEditingController();
-  int accentIdx = 0, btnStyle = 0, down = 0, up = 0;
-  int themeMode = 0; // тема всегда тёмная (выбор темы убран); ключ хранится для совместимости
+  int accentIdx = 0, btnStyle = 0;
+  int themeMode = 0; // 0 тёмная · 1 светлая · 2 системная
   bool autoConnect = false;
   String keyStr = kDemoKey;
   String? customCfg;
   String? importedHost;
-  final math.Random _rnd = math.Random();
   final TextEditingController _search = TextEditingController();
   final TextEditingController _support = TextEditingController();
   String _q = '';
@@ -106,6 +103,16 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
   final TextEditingController _loginCtrl = TextEditingController();
   bool get loggedIn => tgId != null && appToken != null;
 
+  // Подключение вынесено в ConnectionController (см. connection.dart) — состояние и логика туннеля
+  // больше не живут в _ShellState. Ниже тонкие прокси, чтобы экраны читали conn/hms/скорость как раньше.
+  late final ConnectionController _conn;
+  int get conn => _conn.conn;
+  String get hms => _conn.hms;
+  int get down => _conn.down;
+  int get up => _conn.up;
+  int get sessions => _conn.sessions;
+  void toggle() => _conn.toggle();
+
   late final AnimationController _spin =
       AnimationController(vsync: this, duration: const Duration(seconds: 6))..repeat();
   late final AnimationController _wave =
@@ -119,8 +126,25 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _conn = ConnectionController(
+      keyOf: () => keyStr,
+      serverOf: () => server,
+      dropAlertOn: () => tgl2,
+      trafWarnOn: () => tgl4,
+      onToast: _toast,
+      onPersist: _save,
+      onSpin: _spinConn,
+    );
+    _conn.addListener(() { if (mounted) setState(() {}); });
     _load();
     _checkUpdate();
+  }
+
+  // крутить кнопку-шестерёнку: быстро во время коннекта, спокойно в покое/при обрыве
+  void _spinConn(bool fast) {
+    _spin.duration = Duration(milliseconds: fast ? 1400 : 6000);
+    _spin.stop();
+    _spin.repeat();
   }
 
   @override
@@ -136,7 +160,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _timer?.cancel();
+    _conn.dispose();
     _spin.dispose();
     _wave.dispose();
     _twinkle.dispose();
@@ -157,19 +181,23 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     final secLogin = await _secRead(p, 'loginSecret');
     final secCfg = await _secRead(p, 'cfg'); // «Свой конфиг» может нести vless-ключ → тоже в secure storage
     if (!mounted) return;
+    // язык: сохранённый выбор, иначе автоопределение по системной локали (ru → ru, иначе en)
+    final savedLang = p.getString('lang');
+    appLang = savedLang ??
+        (WidgetsBinding.instance.platformDispatcher.locale.languageCode == 'ru' ? 'ru' : 'en');
     setState(() {
       accentIdx = (p.getInt('accent') ?? 0).clamp(0, accentThemes.length - 1);
       btnStyle = (p.getInt('btnStyle') ?? 0).clamp(0, btnStyleNames.length - 1);
       mode = (p.getInt('mode') ?? 0).clamp(0, modeLabels.length - 1);
       proto = (p.getInt('proto') ?? 0).clamp(0, 2);
-      themeMode = 0; // тема всегда тёмная — выбор темы убран
+      themeMode = (p.getInt('themeMode') ?? 0).clamp(0, 2);
       autoConnect = p.getBool('autoConnect') ?? false;
       tgl1 = p.getBool('tgl1') ?? false;
       appPin = secPin;
       tgl2 = p.getBool('tgl2') ?? true;
       tgl3 = p.getBool('tgl3') ?? true;
       tgl4 = p.getBool('tgl4') ?? false;
-      sessions = p.getInt('sessions') ?? 0;
+      _conn.sessions = p.getInt('sessions') ?? 0;
       customCfg = secCfg;
       keyStr = secKey ?? kDemoKey;
       importedHost = p.getString('host');
@@ -205,8 +233,18 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     }
   }
 
+  // тема: 0 тёмная · 1 светлая · 2 системная (следует за настройкой ОС)
   void _applyThemeMode() {
-    C.applyTheme(false); // премиум-тема всегда тёмная
+    final light = themeMode == 1 ||
+        (themeMode == 2 &&
+            WidgetsBinding.instance.platformDispatcher.platformBrightness == Brightness.light);
+    C.applyTheme(light);
+  }
+
+  @override
+  void didChangePlatformBrightness() {
+    // системная тема сменилась в ОС — подхватываем на лету, если выбран режим «Системная»
+    if (themeMode == 2 && mounted) setState(_applyThemeMode);
   }
 
   Future<void> _save() async {
@@ -216,6 +254,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     await p.setInt('mode', mode);
     await p.setInt('proto', proto);
     await p.setInt('themeMode', themeMode);
+    await p.setString('lang', appLang);
     await p.setBool('autoConnect', autoConnect);
     await p.setBool('tgl1', tgl1);
     await _secWrite(p, 'appPin', appPin);
@@ -241,72 +280,6 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     } else {
       await p.remove('host');
     }
-  }
-
-  void toggle() {
-    if (conn == 1) {
-      // отмена во время «Подключение…»: инвалидируем поколение → отложенный коллбэк отвалится
-      _connGen++;
-      _spin.duration = const Duration(seconds: 6);
-      _spin.stop();
-      _spin.repeat();
-      setState(() => conn = 0);
-      return;
-    }
-    if (conn == 0) {
-      if (kRealTunnel && keyStr.startsWith('vless://')) {
-        // боевой режим: конфиг для движка готов; здесь запуск sing-box через нативный канал
-        // (нужен боевой сервер + нативная TUN-интеграция — на владельце). Пока kRealTunnel=false.
-        try {
-          final cfg = singboxConfig(keyStr);
-          debugPrint('[bitaps] sing-box config ready (${cfg.length} секций) — движок будет запущен здесь');
-        } catch (e) {
-          _toast('Ключ повреждён: $e');
-          return;
-        }
-      }
-      final gen = ++_connGen; // это конкретное подключение; отмена/реконнект сменят _connGen
-      setState(() => conn = 1);
-      _spin.duration = const Duration(milliseconds: 1400);
-      _spin.stop();
-      _spin.repeat();
-      Future.delayed(const Duration(milliseconds: 1700), () {
-        if (!mounted || gen != _connGen) return; // «поздний» коллбэк отменённой попытки — игнор
-        setState(() {
-          conn = 2;
-          secs = 0;
-          down = 84;
-          up = 13;
-          sessions++;
-        });
-        _save();
-        _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-          if (mounted) setState(() { secs++; down = 60 + _rnd.nextInt(70); up = 8 + _rnd.nextInt(20); });
-        });
-      });
-    } else {
-      _connGen++; // отключение инвалидирует любое незавершённое поколение
-      _timer?.cancel();
-      _spin.duration = const Duration(seconds: 6);
-      _spin.stop();
-      _spin.repeat();
-      setState(() {
-        conn = 0;
-        secs = 0;
-      });
-    }
-  }
-
-  String get hms {
-    if (secs >= 86400) {
-      final d = secs ~/ 86400;
-      final h = (secs % 86400) ~/ 3600;
-      return '${d}d ${h}h';
-    }
-    final h = (secs ~/ 3600).toString().padLeft(2, '0');
-    final m = ((secs % 3600) ~/ 60).toString().padLeft(2, '0');
-    final s = (secs % 60).toString().padLeft(2, '0');
-    return '$h:$m:$s';
   }
 
   // Быстрейший доступный сервер (минимальный пинг среди ru+intl) — единый источник для Главной и Серверов
@@ -354,18 +327,18 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
   Future<void> _open(String url) async {
     try {
       final ok = await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-      if (!ok) _toast('Не удалось открыть ссылку');
+      if (!ok) _toast(tr('Не удалось открыть ссылку'));
     } catch (_) {
-      _toast('Не удалось открыть ссылку');
+      _toast(tr('Не удалось открыть ссылку'));
     }
   }
 
   void _copy(String text, String label) {
     Clipboard.setData(ClipboardData(text: text));
-    _toast('$label · скопировано в буфер');
+    _toast(appLang == 'en' ? '$label · copied to clipboard' : '$label · скопировано в буфер');
   }
 
-  // Хост берём ТЕМ ЖЕ парсером (Uri.parse().host), что и реальное подключение в vless.dart —
+  // Хост берём ТЕМ ЖЕ парсером (Uri.parse().host), что и реальное подключение в singbox_config.dart —
   // иначе проверка доверенного хоста и фактический коннект расходятся: напр.
   //   vless://u@bitaps.app:443@evil.com  →  ручной indexOf дал бы «bitaps.app» (первый @),
   //   а Uri.parse даёт «evil.com» (userinfo до ПОСЛЕДНЕГО @) — юзеру показали бы доверенное имя,
@@ -397,22 +370,28 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
       builder: (_) => AlertDialog(
         backgroundColor: C.bg2,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
-        title: Text('Не сервер bitaps', style: disp(18, w: FontWeight.w700)),
-        content: Text('$host — это не официальный сервер bitaps. Импортировать ключ всё равно?', style: mono(13, c: C.muted)),
+        title: Text(tr('Не сервер bitaps'), style: disp(18, w: FontWeight.w700)),
+        content: Text(
+            appLang == 'en'
+                ? '$host is not an official bitaps server. Import the key anyway?'
+                : '$host — это не официальный сервер bitaps. Импортировать ключ всё равно?',
+            style: mono(13, c: C.muted)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: Text('Отмена', style: mono(13, c: C.muted))),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: Text('Импортировать', style: mono(13, c: C.accent))),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Отмена'), style: mono(13, c: C.muted))),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Импортировать'), style: mono(13, c: C.accent))),
         ],
       ),
     );
   }
 
-  String get _netErr => 'Нет связи с сервером — проверь интернет.';
-  String _srvErr(int code) => 'Сервер недоступен ($code). Попробуй позже.';
+  String get _netErr => tr('Нет связи с сервером — проверь интернет.');
+  String _srvErr(int code) =>
+      appLang == 'en' ? 'Server unavailable ($code). Try again later.' : 'Сервер недоступен ($code). Попробуй позже.';
 
   void _doLogout({bool silent = false}) {
-    _connGen++; // инвалидируем поколение: отложенный коллбэк подключения не «переподключит» после выхода
-    _timer?.cancel();
+    // сброс подключения (гасит поколение/таймеры/статус + возвращает кнопку в покой) — в контроллере,
+    // чтобы отложенный коллбэк подключения не «переподключил» после выхода
+    _conn.reset();
     setState(() {
       tgId = null;
       appToken = null;
@@ -428,14 +407,9 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
       // не подхватит ключ следующего аккаунта после «тихого» логаута по истечению сессии
       importedHost = null;
       customCfg = null;
-      conn = 0;
-      secs = 0;
     });
-    _spin.duration = const Duration(seconds: 6);
-    _spin.stop();
-    _spin.repeat();
     _save();
-    if (!silent) _toast('Вышли из аккаунта');
+    if (!silent) _toast(tr('Вышли из аккаунта'));
   }
 
   void _logout() {
@@ -444,10 +418,10 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
       builder: (_) => AlertDialog(
         backgroundColor: C.bg2,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
-        title: Text('Выйти?', style: disp(18, w: FontWeight.w700)),
-        content: Text('Выйдешь из аккаунта на этом устройстве. Подключение отключится, персональные настройки сохранятся.', style: mono(13, c: C.muted)),
+        title: Text(tr('Выйти?'), style: disp(18, w: FontWeight.w700)),
+        content: Text(tr('Выйдешь из аккаунта на этом устройстве. Подключение отключится, персональные настройки сохранятся.'), style: mono(13, c: C.muted)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text('Отмена', style: mono(13, c: C.muted))),
+          TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Отмена'), style: mono(13, c: C.muted))),
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
@@ -459,7 +433,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
               await p.remove('cfg'); await p.remove('host');
               if (mounted) setState(() { customCfg = null; importedHost = null; });
             },
-            child: Text('Выйти', style: mono(13, c: C.danger)),
+            child: Text(tr('Выйти'), style: mono(13, c: C.danger)),
           ),
         ],
       ),
@@ -474,22 +448,22 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
         title: Text(title, style: disp(18, w: FontWeight.w700)),
         content: Text(body, style: mono(13, c: C.text)),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text('Ок', style: mono(13, c: C.accent)))],
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Ок'), style: mono(13, c: C.accent)))],
       ),
     );
   }
 
   void _pickServer(Server s) {
     if (conn == 2) {
-      _toast('Отключитесь, чтобы сменить сервер');
+      _toast(tr('Отключитесь, чтобы сменить сервер'));
       return;
     }
     if (!s.available) {
-      _toast('${s.city} — скоро');
+      _toast(appLang == 'en' ? '${s.city} — soon' : '${s.city} — скоро');
       return;
     }
     setState(() => server = s);
-    _toast('Сервер: ${s.city}');
+    _toast(appLang == 'en' ? 'Server: ${s.city}' : 'Сервер: ${s.city}');
   }
 
   @override
@@ -520,11 +494,11 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
 
   // ---------------- BOTTOM NAV ----------------
   Widget _bottomBar() {
-    const items = [
-      ('Главная', Icons.power_settings_new),
-      ('Серверы', Icons.public),
-      ('Кабинет', Icons.person_outline),
-      ('Настройки', Icons.settings_outlined),
+    final items = [
+      (tr('Главная'), Icons.power_settings_new),
+      (tr('Серверы'), Icons.public),
+      (tr('Кабинет'), Icons.person_outline),
+      (tr('Настройки'), Icons.settings_outlined),
     ];
     return ClipRect(child: BackdropFilter(
       filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),

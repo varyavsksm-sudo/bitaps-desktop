@@ -5,14 +5,14 @@ extension ShellServers on _ShellState {
   Widget _servers() => ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          Text('Серверы', style: disp(26, w: FontWeight.w800)),
+          Text(tr('Серверы'), style: disp(26, w: FontWeight.w800)),
           const SizedBox(height: 18),
           Row(children: [
-            Expanded(child: _infoTile('32', 'серверов\nонлайн')),
+            Expanded(child: _infoTile('32', tr('серверов\nонлайн'))),
             const SizedBox(width: 12),
-            Expanded(child: _infoTile('12', 'локаций')),
+            Expanded(child: _infoTile('12', tr('локаций'))),
             const SizedBox(width: 12),
-            Expanded(child: _infoTile('99.9%', 'аптайм')),
+            Expanded(child: _infoTile('99.9%', tr('аптайм'))),
           ]),
           const SizedBox(height: 16),
           GestureDetector(
@@ -22,8 +22,8 @@ extension ShellServers on _ShellState {
               _gIcon(Icons.bolt),
               const SizedBox(width: 14),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Row(children: [Text('Быстрый сервер', style: disp(16, w: FontWeight.w700)),
-                  const SizedBox(width: 8), _badge('АВТО', C.accent)]),
+                Row(children: [Text(tr('Быстрый сервер'), style: disp(16, w: FontWeight.w700)),
+                  const SizedBox(width: 8), _badge(tr('АВТО'), C.accent)]),
                 const SizedBox(height: 3),
                 Text('${fastestServer.city} · ${fastestServer.ping} ms', style: mono(12)),
               ])),
@@ -40,7 +40,7 @@ extension ShellServers on _ShellState {
               style: mono(13, c: C.text),
               cursorColor: C.accent,
               decoration: InputDecoration(isDense: true, border: InputBorder.none,
-                contentPadding: EdgeInsets.zero, hintText: 'Поиск города или страны', hintStyle: mono(13, c: C.muted)),
+                contentPadding: EdgeInsets.zero, hintText: tr('Поиск города или страны'), hintStyle: mono(13, c: C.muted)),
             )),
             if (_q.isNotEmpty) GestureDetector(
               behavior: HitTestBehavior.opaque,
@@ -62,13 +62,13 @@ extension ShellServers on _ShellState {
           Padding(padding: const EdgeInsets.symmetric(vertical: 28), child: Column(children: [
             Icon(Icons.travel_explore, size: 32, color: C.muted),
             const SizedBox(height: 10),
-            Text('Ничего не найдено.\nПопробуй город — Москва, Амстердам —\nили страну, либо очисти поиск.',
+            Text(tr('Ничего не найдено.\nПопробуй город — Москва, Амстердам —\nили страну, либо очисти поиск.'),
               textAlign: TextAlign.center, style: mono(12)),
           ])),
         ];
       }
       return [
-        _kicker('результаты'),
+        _kicker(tr('результаты')),
         const SizedBox(height: 10),
         for (final s in found) _serverRow(s),
       ];
@@ -76,16 +76,16 @@ extension ShellServers on _ShellState {
     final favList = all.where((s) => favs.contains(s.id)).toList();
     return [
       if (favList.isNotEmpty) ...[
-        _kicker('⭐ избранное'),
+        _kicker(tr('⭐ избранное')),
         const SizedBox(height: 10),
         for (final s in favList) _serverRow(s),
         const SizedBox(height: 22),
       ],
-      _kicker('🇷🇺 Россия'),
+      _kicker(tr('🇷🇺 Россия')),
       const SizedBox(height: 10),
       for (final s in ruServers) _serverRow(s),
       const SizedBox(height: 22),
-      _kicker('🌍 Зарубежные · скоро'),
+      _kicker(tr('🌍 Зарубежные · скоро')),
       const SizedBox(height: 10),
       for (final s in intlServers) _serverRow(s),
     ];
@@ -94,7 +94,7 @@ extension ShellServers on _ShellState {
   Widget _serverRow(Server s) {
     final sel = s.id == server.id;
     final pingCol = s.ping < 60 ? C.ok : s.ping < 120 ? C.warn : C.danger;
-    final pingLabel = s.ping < 60 ? 'быстрый отклик' : s.ping < 120 ? 'средний отклик' : 'медленный отклик';
+    final pingLabel = s.ping < 60 ? tr('быстрый отклик') : s.ping < 120 ? tr('средний отклик') : tr('медленный отклик');
     return IgnorePointer(
       ignoring: !s.available,
       child: Opacity(
@@ -117,7 +117,7 @@ extension ShellServers on _ShellState {
                 Row(children: [
                   Flexible(child: Text(s.city, style: disp(15, w: FontWeight.w600), overflow: TextOverflow.ellipsis)),
                   if (s.premium) ...[const SizedBox(width: 6), _badge('PRO', C.accentSoft)],
-                  if (!s.available) ...[const SizedBox(width: 6), _badge('Скоро', C.muted)],
+                  if (!s.available) ...[const SizedBox(width: 6), _badge(tr('Скоро'), C.muted)],
                 ]),
                 const SizedBox(height: 2),
                 Text(s.country, style: mono(12)),

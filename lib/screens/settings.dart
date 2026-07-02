@@ -38,14 +38,48 @@ extension ShellSettings on _ShellState {
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(previews[i], size: 15, color: sel ? C.accent : C.muted),
           const SizedBox(width: 7),
-          Text(btnStyleNames[i], style: disp(13, w: FontWeight.w600, c: sel ? C.accent : C.muted)),
+          Text(tr(btnStyleNames[i]), style: disp(13, w: FontWeight.w600, c: sel ? C.accent : C.muted)),
         ])),
     );
   }
 
+  Widget _themeChip(int i) {
+    const names = ['Тёмная', 'Светлая', 'Системная'];
+    const icons = [Icons.dark_mode_outlined, Icons.light_mode_outlined, Icons.brightness_auto_outlined];
+    final sel = themeMode == i;
+    return GestureDetector(
+      onTap: () { setState(() { themeMode = i; _applyThemeMode(); }); _save(); },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+        decoration: BoxDecoration(color: sel ? C.accent.withOpacity(0.16) : C.fill,
+          borderRadius: BorderRadius.circular(11), border: Border.all(color: sel ? C.accent : C.line)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icons[i], size: 15, color: sel ? C.accent : C.muted),
+          const SizedBox(width: 7),
+          Text(tr(names[i]), style: disp(13, w: FontWeight.w600, c: sel ? C.accent : C.muted)),
+        ])),
+    );
+  }
+
+  // переключатель языка RU/EN — по образцу _themeChip
+  Widget _langChip(String code, String label) {
+    final sel = appLang == code;
+    return GestureDetector(
+      onTap: () { setState(() { appLang = code; }); _save(); },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+        decoration: BoxDecoration(color: sel ? C.accent.withOpacity(0.16) : C.fill,
+          borderRadius: BorderRadius.circular(11), border: Border.all(color: sel ? C.accent : C.line)),
+        child: Text(label, style: disp(13, w: FontWeight.w600, c: sel ? C.accent : C.muted)),
+      ),
+    );
+  }
+
   void _showStats() {
-    _dialog('Статистика',
-        'Сессий запущено: $sessions\nТекущая сессия: ${conn == 2 ? hms : "не подключено"}\nСервер: ${server.city}\nРежим: ${modeLabels[mode]}\nИзбранных серверов: ${favs.length}');
+    _dialog(tr('Статистика'),
+        appLang == 'en'
+            ? 'Sessions started: $sessions\nCurrent session: ${conn == 2 ? hms : "not connected"}\nServer: ${server.city}\nMode: ${tr(modeLabels[mode])}\nFavorite servers: ${favs.length}'
+            : 'Сессий запущено: $sessions\nТекущая сессия: ${conn == 2 ? hms : "не подключено"}\nСервер: ${server.city}\nРежим: ${modeLabels[mode]}\nИзбранных серверов: ${favs.length}');
   }
 
   void _customConfig() {
@@ -56,16 +90,16 @@ extension ShellSettings on _ShellState {
       builder: (_) => AlertDialog(
         backgroundColor: C.bg2,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
-        title: Text('Свой конфиг', style: disp(18, w: FontWeight.w700)),
+        title: Text(tr('Свой конфиг'), style: disp(18, w: FontWeight.w700)),
         content: TextField(
           controller: ctrl,
           maxLines: 4,
           style: mono(12, c: C.text),
           cursorColor: C.accent,
-          decoration: InputDecoration(hintText: 'Вставь vless:// или другой конфиг', hintStyle: mono(12, c: C.muted)),
+          decoration: InputDecoration(hintText: tr('Вставь vless:// или другой конфиг'), hintStyle: mono(12, c: C.muted)),
         ),
         actions: [
-          TextButton(onPressed: () { ctrl.dispose(); Navigator.pop(context); }, child: Text('Отмена', style: mono(13, c: C.muted))),
+          TextButton(onPressed: () { ctrl.dispose(); Navigator.pop(context); }, child: Text(tr('Отмена'), style: mono(13, c: C.muted))),
           TextButton(
             onPressed: () async {
               final t = ctrl.text.trim();
@@ -76,19 +110,21 @@ extension ShellSettings on _ShellState {
                 // обходил защиту и при kRealTunnel=true трафик молча ушёл бы на хост атакующего.
                 final host = _hostOf(t);
                 if (host == null || !_isTrustedHost(host)) {
-                  final ok = await _confirmForeignHost(host ?? 'неизвестный хост');
+                  final ok = await _confirmForeignHost(host ?? tr('неизвестный хост'));
                   if (ok != true) return;
                 }
                 setState(() { keyStr = t; importedHost = host; customCfg = t; });
                 _save();
-                _toast(host != null ? 'Ключ заменён на $host ✓' : 'Ключ заменён ✓');
+                _toast(host != null
+                    ? (appLang == 'en' ? 'Key replaced with $host ✓' : 'Ключ заменён на $host ✓')
+                    : tr('Ключ заменён ✓'));
               } else {
                 setState(() => customCfg = t.isEmpty ? null : t);
                 _save();
-                _toast(t.isEmpty ? 'Конфиг очищен' : 'Конфиг сохранён ✓');
+                _toast(t.isEmpty ? tr('Конфиг очищен') : tr('Конфиг сохранён ✓'));
               }
             },
-            child: Text('Сохранить', style: mono(13, c: C.accent)),
+            child: Text(tr('Сохранить'), style: mono(13, c: C.accent)),
           ),
         ],
       ),
@@ -98,57 +134,68 @@ extension ShellSettings on _ShellState {
   Widget _settings() => ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          Text('Настройки', style: disp(26, w: FontWeight.w800)),
+          Text(tr('Настройки'), style: disp(26, w: FontWeight.w800)),
           const SizedBox(height: 18),
-          _kicker('персонализация'),
+          _kicker(tr('персонализация')),
           const SizedBox(height: 10),
           _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Цвет акцента', style: disp(15, w: FontWeight.w600)),
+            Text(tr('Цвет акцента'), style: disp(15, w: FontWeight.w600)),
             const SizedBox(height: 12),
             Row(children: [for (int i = 0; i < accentThemes.length; i++) _accentSwatch(i)]),
             const SizedBox(height: 18),
-            Text('Кнопка подключения', style: disp(15, w: FontWeight.w600)),
+            Text(tr('Кнопка подключения'), style: disp(15, w: FontWeight.w600)),
             const SizedBox(height: 10),
             Wrap(spacing: 8, runSpacing: 8, children: [for (int i = 0; i < btnStyleNames.length; i++) _styleChip(i)]),
+            const SizedBox(height: 18),
+            Text(tr('Тема'), style: disp(15, w: FontWeight.w600)),
+            const SizedBox(height: 10),
+            Wrap(spacing: 8, runSpacing: 8, children: [for (int i = 0; i < 3; i++) _themeChip(i)]),
+            const SizedBox(height: 18),
+            Text(tr('Язык'), style: disp(15, w: FontWeight.w600)),
+            const SizedBox(height: 10),
+            Wrap(spacing: 8, runSpacing: 8, children: [_langChip('ru', 'RU'), _langChip('en', 'EN')]),
           ])),
           const SizedBox(height: 22),
-          _kicker('безопасность'),
+          _kicker(tr('безопасность')),
           const SizedBox(height: 10),
           _card(child: Column(children: [
-            _toggle('Блокировка входа', 'PIN при открытии приложения', tgl1, (v) { if (v) { _enableLock(); } else { setState(() { tgl1 = false; appPin = null; }); _save(); } }),
+            _toggle(tr('Блокировка входа'), tr('PIN при открытии приложения'), tgl1, (v) { if (v) { _enableLock(); } else { setState(() { tgl1 = false; appPin = null; }); _save(); } }),
             _divider(),
-            _toggle('Обрыв соединения', 'Уведомлять, если VPN отвалился', tgl2, (v) { setState(() => tgl2 = v); _save(); }, soon: true),
+            _toggle(tr('Обрыв соединения'), tr('Уведомлять, если VPN отвалился'), tgl2, (v) { setState(() => tgl2 = v); _save(); }),
             _divider(),
-            _toggle('Подписка истекает', 'Напомнить за пару дней', tgl3, (v) { setState(() => tgl3 = v); _save(); }),
+            _toggle(tr('Подписка истекает'), tr('Напомнить за пару дней'), tgl3, (v) { setState(() => tgl3 = v); _save(); }),
             _divider(),
-            _toggle('Лимит трафика', 'Сигнал при большом расходе', tgl4, (v) { setState(() => tgl4 = v); _save(); }, soon: true),
+            _toggle(tr('Лимит трафика'), tr('Сигнал при расходе от 5 ГБ за сессию'), tgl4, (v) { setState(() => tgl4 = v); _save(); }),
             _divider(),
-            _toggle('Авто-подключение', 'Подключаться сразу при запуске', autoConnect, (v) { setState(() => autoConnect = v); _save(); }),
+            _toggle(tr('Авто-подключение'), tr('Подключаться сразу при запуске'), autoConnect, (v) { setState(() => autoConnect = v); _save(); }),
           ])),
           const SizedBox(height: 22),
-          _kicker('инструменты'),
+          _kicker(tr('инструменты')),
           const SizedBox(height: 10),
           _card(padding: 6, child: Column(children: [
-            _navRow(Icons.speed, 'Спид-тест', _speedTest),
+            _navRow(Icons.speed, tr('Спид-тест'), _speedTest),
             _divider(),
-            _navRow(Icons.bar_chart, 'Статистика', _showStats),
+            _navRow(Icons.bar_chart, tr('Статистика'), _showStats),
             _divider(),
-            _navRow(Icons.shield, 'Проверка утечек', _leakCheck),
+            _navRow(Icons.shield, tr('Проверка утечек'), _leakCheck),
             _divider(),
-            _navRow(Icons.upload_file, customCfg == null ? 'Свой конфиг' : 'Свой конфиг ✓', _customConfig),
+            _navRow(Icons.upload_file, customCfg == null ? tr('Свой конфиг') : tr('Свой конфиг ✓'), _customConfig),
           ])),
           const SizedBox(height: 22),
-          _kicker('подключение'),
+          _kicker(tr('подключение')),
           const SizedBox(height: 10),
           _card(child: Column(children: [
-            _radioRow('Авто', 0),
+            _radioRow(tr('Авто'), 0),
             _divider(),
-            _radioRow('VLESS + Reality', 1, soon: true),
+            _radioRow('VLESS + Reality', 1),
             _divider(),
-            _radioRow('WireGuard', 2, soon: true),
+            _radioRow('WireGuard', 2),
           ])),
+          const SizedBox(height: 8),
+          Text(tr('«Авто» и VLESS + Reality работают на наших серверах. WireGuard — если у тебя WG-ключ. Протокол применяется при подключении.'),
+              style: mono(11, c: C.muted)),
           const SizedBox(height: 22),
-          _btn('Выйти', kind: 1, icon: Icons.logout, onTap: _logout),
+          _btn(tr('Выйти'), kind: 1, icon: Icons.logout, onTap: _logout),
           const SizedBox(height: 16),
           Center(child: Text('bitaps vpn · v1.0', style: mono(11, c: C.muted))),
         ],
@@ -174,12 +221,12 @@ extension ShellSettings on _ShellState {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       // «скоро» — не выбираем (функция ещё не работает), показываем тост вместо ложного переключения
-      onTap: soon ? () => _toast('Скоро 🙌') : () { setState(() => proto = idx); _save(); },
+      onTap: soon ? () => _toast(tr('Скоро 🙌')) : () { setState(() => proto = idx); _save(); },
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
         child: Row(children: [
           Text(label, style: disp(15, w: FontWeight.w500)),
-          if (soon) ...[const SizedBox(width: 8), _badge('скоро', C.muted)],
+          if (soon) ...[const SizedBox(width: 8), _badge(tr('скоро'), C.muted)],
           const Spacer(),
           Icon(sel ? Icons.radio_button_checked : Icons.radio_button_off, size: 20, color: sel ? C.accent : C.muted),
         ]),
@@ -193,7 +240,7 @@ extension ShellSettings on _ShellState {
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               Flexible(child: Text(title, style: disp(15, w: FontWeight.w600))),
-              if (soon) ...[const SizedBox(width: 8), _badge('скоро', C.muted)],
+              if (soon) ...[const SizedBox(width: 8), _badge(tr('скоро'), C.muted)],
             ]),
             const SizedBox(height: 2),
             Text(sub, style: mono(11)),

@@ -117,7 +117,7 @@ extension ShellWidgets on _ShellState {
           Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: on ? C.ok : C.muted,
             boxShadow: on ? [BoxShadow(color: C.ok.withOpacity(0.6), blurRadius: 8)] : null)),
           const SizedBox(width: 7),
-          Text(on ? 'защищено' : 'не защищено', style: mono(12, c: on ? C.ok : C.muted, w: FontWeight.w600)),
+          Text(on ? tr('защищено') : tr('не защищено'), style: mono(12, c: on ? C.ok : C.muted, w: FontWeight.w600)),
         ]),
       );
 
@@ -134,7 +134,7 @@ extension ShellWidgets on _ShellState {
             value: frac, strokeWidth: 7, backgroundColor: C.line, color: C.accent)),
           Column(mainAxisSize: MainAxisSize.min, children: [
             Text('$days', style: disp(24, w: FontWeight.w800)),
-            Text('дн.', style: mono(10)),
+            Text(tr('дн.'), style: mono(10)),
           ]),
         ]),
       );

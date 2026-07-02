@@ -6,8 +6,11 @@ const kBot = 'https://t.me/bitaps_vpn_auth_bot';
 const kSupport = 'https://t.me/bitapssupport';
 const kChannel = 'https://t.me/bitapsvpnofficial';
 const kRef = 'https://t.me/bitaps_vpn_auth_bot?start=ref_demo';
-// Боевой туннель: ВЫКЛ (демо). Когда у владельца появится VLESS-сервер + нативный движок
-// sing-box (TUN по платформам) — поставить true; конфиг для движка уже генерится (см. vless.dart).
+// Боевой туннель: ВЫКЛ (демо). Мост к нативному движку уже есть (native_tunnel.dart:
+// MethodChannel app.bitaps.vpn/control) и toggle() в боевом режиме реально зовёт sing-box.
+// Ставить true, когда на платформе подключена нативная сторона (Apple: PacketTunnelProvider +
+// Libbox.xcframework; Android: VpnService + libbox). См. TUNNEL.md. При true без нативной
+// стороны connect() честно бросит TunnelUnavailable — фейкового «Подключено» не будет.
 const bool kRealTunnel = false;
 const kNotify = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/notify';
 const kApiKey = 'sb_publishable_X2CJWgjqeZtbNelAri9ofw_trbfWF9Z';
@@ -32,6 +35,8 @@ const List<(String, Color, Color)> accentThemes = [
   ('Crimson', Color(0xFFFF4D6D), Color(0xFFFF9BAD)),
 ];
 const btnStyleNames = ['Шестерёнка', 'Кольцо', 'Орб', 'Пульс'];
+// Порог разового предупреждения о большом расходе за сессию (тумблер «Лимит трафика»)
+const double kTrafficWarnMB = 5120; // 5 ГБ
 
 // ============================ TOKENS / SECURE STORAGE ============================
 // Секреты (vpn_key/appToken/loginSecret/appPin) храним в зашифрованном хранилище ОС
