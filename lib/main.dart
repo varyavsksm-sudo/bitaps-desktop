@@ -1010,14 +1010,21 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
         actions: [
           TextButton(onPressed: () { ctrl.dispose(); Navigator.pop(context); }, child: Text('Отмена', style: mono(13, c: C.muted))),
           TextButton(
-            onPressed: () {
+            onPressed: () async {
               final t = ctrl.text.trim();
               ctrl.dispose();
               Navigator.pop(context);
               if (t.startsWith('vless://') || t.startsWith('http://') || t.startsWith('https://')) {
-                setState(() { keyStr = t; importedHost = _hostOf(t); customCfg = t; });
+                // ТОТ ЖE trusted-host гейт, что и в _importKey: без него «вставь это в Свой конфиг»
+                // обходил защиту и при kRealTunnel=true трафик молча ушёл бы на хост атакующего.
+                final host = _hostOf(t);
+                if (host == null || !_isTrustedHost(host)) {
+                  final ok = await _confirmForeignHost(host ?? 'неизвестный хост');
+                  if (ok != true) return;
+                }
+                setState(() { keyStr = t; importedHost = host; customCfg = t; });
                 _save();
-                _toast(importedHost != null ? 'Ключ заменён на $importedHost ✓' : 'Ключ заменён ✓');
+                _toast(host != null ? 'Ключ заменён на $host ✓' : 'Ключ заменён ✓');
               } else {
                 setState(() => customCfg = t.isEmpty ? null : t);
                 _save();
