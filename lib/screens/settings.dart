@@ -113,6 +113,7 @@ extension ShellSettings on _ShellState {
                   final ok = await _confirmForeignHost(host ?? tr('неизвестный хост'));
                   if (ok != true) return;
                 }
+                if (!mounted) return;
                 setState(() { keyStr = t; importedHost = host; customCfg = t; });
                 _save();
                 _toast(host != null
