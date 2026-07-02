@@ -1,0 +1,345 @@
+part of '../main.dart';
+
+// ============================ ACCOUNT (Кабинет: вход, подписка, ключ, устройства) ============================
+// Экран «вход» отдельного виджета не имеет — форма входа встроена в _subCard() при !loggedIn.
+
+// коды тарифов из бэкенда (mo/q/h/yr/trial) → человекочитаемые названия,
+// чтобы в кабинете не светился сырой код («Тариф «mo»» / бейдж «MO»)
+const Map<String, String> _planNames = {
+  'mo': '1 месяц', 'q': '3 месяца', 'h': '6 месяцев', 'yr': '12 месяцев', 'trial': 'Пробный период',
+};
+const Map<String, String> _planShorts = {
+  'mo': '1 МЕС', 'q': '3 МЕС', 'h': '6 МЕС', 'yr': '1 ГОД', 'trial': 'ТРИАЛ',
+};
+const Map<String, int> _planTotalDays = {'mo': 30, 'q': 90, 'h': 180, 'yr': 365, 'trial': 3};
+
+extension ShellAccount on _ShellState {
+  // Импорт своего ключа/подписки из буфера (модель Happ)
+  Future<void> _importKey() async {
+    final data = await Clipboard.getData('text/plain');
+    final t = (data?.text ?? '').trim();
+    if (!(t.startsWith('vless://') || t.startsWith('http://') || t.startsWith('https://'))) {
+      _toast('В буфере нет vless:// или ссылки-подписки');
+      return;
+    }
+    final host = _hostOf(t);
+    // null/непарсящийся хост = НЕ доверенный → предупреждаем (раньше null молча проходил мимо гейта)
+    if (host == null || !_isTrustedHost(host)) {
+      final ok = await _confirmForeignHost(host ?? 'неизвестный хост');
+      if (ok != true) return;
+    }
+    setState(() {
+      keyStr = t;
+      importedHost = host;
+    });
+    _save();
+    _toast(host != null ? 'Ключ заменён на $host ✓' : 'Ключ заменён ✓');
+  }
+
+  int? _daysLeft() {
+    if (subExpires == null) return null;
+    final e = DateTime.tryParse(subExpires!);
+    if (e == null) return null;
+    // округляем ВВЕРХ по минутам: пока есть остаток времени — показываем ≥1 день,
+    // «истекла» (≤0) только когда срок реально вышел (раньше 1-23ч флорились в 0 = «истекла» на сутки раньше)
+    return (e.toUtc().difference(DateTime.now().toUtc()).inMinutes / 1440).ceil();
+  }
+
+  // Русские склонения дней: 1 день / 2-4 дня / 5+ дней
+  String _pluralDays(int n) {
+    final n10 = n % 10, n100 = n % 100;
+    if (n10 == 1 && n100 != 11) return 'день';
+    if (n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14)) return 'дня';
+    return 'дней';
+  }
+
+  // Лимит устройств: число, либо «…» при загрузке, либо «—» если неизвестно
+  String get _limitStr => subLimit != null ? '$subLimit' : (_subLoading ? '…' : '—');
+
+  // баннер-напоминание при близком/истёкшем сроке (тумблер «Подписка истекает»)
+  // веб-аккаунт (отрицательный telegram_id из app-login по веб-ключу) не может продлить через бота —
+  // ведём его на сайт; обычный (положительный) id — в бота
+  String get _renewUrl => (tgId != null && tgId! < 0) ? 'https://bitapsvpn.com/pay.html' : kBot;
+
+  Widget _expiryBanner(int days) {
+    final expired = days <= 0;
+    return GestureDetector(
+      onTap: () => _open(_renewUrl),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(color: C.warn.withOpacity(0.12), borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: C.warn.withOpacity(0.5))),
+        child: Row(children: [
+          Icon(Icons.notifications_active, color: C.warn, size: 20),
+          const SizedBox(width: 12),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(expired ? 'Подписка истекла' : 'Подписка истекает', style: disp(14, w: FontWeight.w700, c: C.warn)),
+            const SizedBox(height: 2),
+            Text(expired ? 'Продли, чтобы вернуть доступ' : 'Осталось $days ${_dayWord(days)} — продли заранее',
+              style: mono(11, c: C.muted)),
+          ])),
+          const SizedBox(width: 8),
+          Text('Продлить →', style: mono(12, c: C.accent)),
+        ]),
+      ),
+    );
+  }
+
+  String _dayWord(int d) {
+    final m10 = d % 10, m100 = d % 100;
+    if (m10 == 1 && m100 != 11) return 'день';
+    if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return 'дня';
+    return 'дней';
+  }
+
+  Widget _account() => ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          Text('Кабинет', style: disp(26, w: FontWeight.w800)),
+          const SizedBox(height: 18),
+          _profileCard(),
+          const SizedBox(height: 14),
+          if (loggedIn && tgl3 && _daysLeft() != null && _daysLeft()! <= 3) ...[_expiryBanner(_daysLeft()!), const SizedBox(height: 14)],
+          _subCard(),
+          const SizedBox(height: 14),
+          _keyCard(),
+          if (loggedIn) ...[const SizedBox(height: 14), _devicesCard()],
+          const SizedBox(height: 14),
+          _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [_gIcon(Icons.card_giftcard), const SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                _kicker('пригласи друзей'), const SizedBox(height: 3), Text('Приглашай — получай бонусные дни', style: mono(11))]))]),
+            const SizedBox(height: 10),
+            Text('▸ +14 дней за каждого друга, кто оформит первую подписку\n▸ начисляем автоматически', style: mono(12, c: C.muted)),
+            const SizedBox(height: 12),
+            _btn('Поделиться ссылкой', kind: 1, icon: Icons.share, onTap: () {
+              if (!loggedIn) { _toast('Войди, чтобы получить свою реферальную ссылку'); return; }
+              if (tgId != null && tgId! < 0) { _toast('Рефералы — через нашего Telegram-бота'); _open(kBot); return; } // веб-аккаунт: реф работает только в Telegram
+              _copy('https://t.me/bitaps_vpn_auth_bot?start=ref$tgId', 'Реферальная ссылка');
+            }),
+          ])),
+          const SizedBox(height: 14),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => _open(kBot),
+            child: _card(strong: true, child: Row(children: [
+              _gIcon(Icons.router),
+              const SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('B-box — VPN для всего дома', style: disp(16, w: FontWeight.w600)),
+                const SizedBox(height: 3),
+                Text('устройство для дома · 15 000 ₽', style: mono(12, c: C.accent)),
+              ])),
+              Icon(Icons.chevron_right, color: C.muted),
+            ])),
+          ),
+          const SizedBox(height: 14),
+          _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [_gIcon(Icons.forum), const SizedBox(width: 12), _kicker('поддержка')]),
+            const SizedBox(height: 12),
+            Container(padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: C.field, borderRadius: BorderRadius.circular(10)),
+              child: TextField(
+                controller: _support,
+                maxLines: 3,
+                style: mono(13, c: C.text),
+                cursorColor: C.accent,
+                decoration: InputDecoration(isDense: true, border: InputBorder.none,
+                  contentPadding: EdgeInsets.zero, hintText: 'Опиши проблему…', hintStyle: mono(13, c: C.muted)),
+              )),
+            const SizedBox(height: 12),
+            _btn('Отправить', kind: 0, icon: Icons.send, onTap: _sendSupport),
+            const SizedBox(height: 10),
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _open(kSupport),
+              child: Center(child: Text('или напиши @bitapssupport', style: mono(12, c: C.accent)))),
+          ])),
+          const SizedBox(height: 14),
+          _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [_gIcon(Icons.help), const SizedBox(width: 12), _kicker('частые вопросы')]),
+            const SizedBox(height: 8),
+            for (final f in faqs) _faqRow(f),
+          ])),
+          const SizedBox(height: 18),
+          Center(child: Text('bitaps vpn · v1.0', style: mono(11, c: C.muted))),
+        ],
+      );
+
+  Widget _profileCard() {
+    final name = loggedIn ? ((subName != null && subName!.isNotEmpty) ? subName! : 'Аккаунт (#$tgId)') : 'Вход не выполнен';
+    final initial = name.isNotEmpty ? name.substring(0, 1).toUpperCase() : 'A';
+    return _card(strong: true, child: Row(children: [
+      Container(width: 60, height: 60, alignment: Alignment.center,
+        decoration: BoxDecoration(shape: BoxShape.circle, gradient: accentGrad,
+          boxShadow: [BoxShadow(color: C.accent.withOpacity(0.4), blurRadius: 18)]),
+        child: Text(initial, style: disp(26, w: FontWeight.w800, c: C.bg))),
+      const SizedBox(width: 14),
+      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(name, style: disp(20, w: FontWeight.w700)),
+        const SizedBox(height: 3),
+        Text(loggedIn ? 'Вход по ключу из бота' : 'Войди через Telegram, чтобы активировать подписку', style: mono(11)),
+        const SizedBox(height: 6),
+        Row(children: loggedIn
+            ? [_badge(subActive ? 'Активна' : 'Не активна', subActive ? C.ok : C.muted),
+               if (subPlan != null) ...[const SizedBox(width: 6), _badge(_planShort(subPlan!), C.accent)]]
+            : [_badge('Гость', C.muted)]),
+      ])),
+      if (loggedIn) GestureDetector(behavior: HitTestBehavior.opaque, onTap: _logout,
+        child: Icon(Icons.logout, size: 20, color: C.muted)),
+    ]));
+  }
+
+  String _planLabel(String? p) {
+    if (p == null) return 'Нет подписки';
+    if (p == 'trial') return 'Пробный период';
+    return _planNames[p] != null ? 'Тариф «${_planNames[p]}»' : 'Тариф «$p»';
+  }
+  String _planShort(String p) => _planShorts[p] ?? p.toUpperCase();
+
+  Widget _subCard() {
+    if (!loggedIn) {
+      return _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [_gIcon(Icons.login), const SizedBox(width: 12), _kicker('вход')]),
+        const SizedBox(height: 10),
+        Text('Войди через Telegram — приложение само подхватит твою подписку и ключ. Без ручного копирования.', style: mono(12)),
+        const SizedBox(height: 12),
+        SizedBox(width: double.infinity, child: _btn('Войти через Telegram', kind: 0, icon: Icons.send, onTap: _pairLogin)),
+        const SizedBox(height: 14),
+        Text('или вставь ключ вручную:', style: mono(11, c: C.muted)),
+        const SizedBox(height: 8),
+        Container(padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(color: C.field, borderRadius: BorderRadius.circular(10)),
+          child: TextField(controller: _loginCtrl, maxLines: 2, style: mono(11, c: C.text), cursorColor: C.accent,
+            decoration: InputDecoration(isDense: true, border: InputBorder.none, contentPadding: EdgeInsets.zero,
+              hintText: 'ключ vless://…@host:443 из бота', hintStyle: mono(12, c: C.muted)))),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(child: _btn('Войти', kind: 1, icon: Icons.login, onTap: _login)),
+          const SizedBox(width: 12),
+          Expanded(child: _btn('Ключ в боте', kind: 1, icon: Icons.smart_toy, onTap: () => _open(kBot))),
+        ]),
+      ]));
+    }
+    final days = _daysLeft();
+    final dleft = (days ?? 0).clamp(0, 100000).toInt();
+    final total = _planTotalDays[subPlan] ?? 30;
+    final ringFrac = total > 0 ? (dleft / total).clamp(0.0, 1.0) : 0.0;
+    return _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [_gIcon(Icons.workspace_premium), const SizedBox(width: 12), _kicker('подписка'), const Spacer(),
+        GestureDetector(behavior: HitTestBehavior.opaque, onTap: () => _refreshSub(), child: Icon(Icons.refresh, size: 18, color: C.accent))]),
+      const SizedBox(height: 16),
+      Row(children: [
+        _ring(dleft, ringFrac),
+        const SizedBox(width: 20),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(_planLabel(subPlan), style: disp(20, w: FontWeight.w700, c: subActive ? C.accent : C.muted)),
+          const SizedBox(height: 6),
+          Row(children: [Icon(Icons.event, size: 14, color: C.muted), const SizedBox(width: 6),
+            Text(days != null ? (days > 0 ? 'осталось $days ${_pluralDays(days)}' : 'истекла') : (subActive ? 'активна' : 'не активна'), style: mono(13))]),
+          const SizedBox(height: 4),
+          Row(children: [Icon(Icons.devices, size: 14, color: C.muted), const SizedBox(width: 6),
+            Text('${devices.length} / $_limitStr устройств', style: mono(13))]),
+        ])),
+      ]),
+      const SizedBox(height: 16),
+      Row(children: [
+        Expanded(child: _btn('Продлить', kind: 0, icon: Icons.bolt, onTap: () => _open(_renewUrl))),
+        const SizedBox(width: 12),
+        Expanded(child: _btn('Обновить', kind: 1, icon: Icons.refresh, onTap: () => _refreshSub())),
+      ]),
+    ]));
+  }
+
+  Widget _keyCard() => _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [_gIcon(Icons.qr_code_2), const SizedBox(width: 12),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _kicker('ключ доступа'), const SizedBox(height: 3),
+            Text(loggedIn ? 'твой ключ из аккаунта' : 'для роутера и ручной настройки', style: mono(11))]))]),
+        const SizedBox(height: 12),
+        Container(padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(color: C.field, borderRadius: BorderRadius.circular(10)),
+          child: SingleChildScrollView(scrollDirection: Axis.horizontal,
+            child: Text(keyStr, style: mono(11, c: C.text), maxLines: 1, softWrap: false))),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(child: _btn('Скопировать', kind: 1, icon: Icons.copy, onTap: () => _copy(keyStr, 'Ключ'))),
+          const SizedBox(width: 12),
+          Expanded(child: loggedIn
+              ? _btn('Обновить', kind: 2, icon: Icons.refresh, onTap: () => _refreshSub())
+              : _btn('Вставить', kind: 2, icon: Icons.content_paste, onTap: _importKey)),
+        ]),
+        if (loggedIn && loginSecret != null) ...[
+          const SizedBox(height: 16),
+          Divider(color: C.line, height: 1),
+          const SizedBox(height: 14),
+          Row(children: [_gIcon(Icons.lock_outline), const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              _kicker('код входа'), const SizedBox(height: 3),
+              Text('для входа в приложение — не вставляй в VPN-клиенты', style: mono(11))]))]),
+          const SizedBox(height: 10),
+          Container(padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: C.field, borderRadius: BorderRadius.circular(10)),
+            child: Text(loginSecret!, style: mono(11, c: C.text), maxLines: 1, overflow: TextOverflow.ellipsis)),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(child: _btn('Скопировать', kind: 1, icon: Icons.copy, onTap: () => _copy(loginSecret!, 'Код входа'))),
+            const SizedBox(width: 12),
+            Expanded(child: _btn('Сменить', kind: 2, icon: Icons.refresh, onTap: _rotateSecret)),
+          ]),
+        ],
+      ]));
+
+  Widget _devicesCard() => _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [_gIcon(Icons.devices), const SizedBox(width: 12),
+          _kicker('устройства · ${devices.length}/$_limitStr'), const Spacer(),
+          GestureDetector(behavior: HitTestBehavior.opaque, onTap: () => _refreshSub(), child: Icon(Icons.refresh, size: 18, color: C.accent))]),
+        const SizedBox(height: 8),
+        if (devices.isEmpty)
+          Padding(padding: const EdgeInsets.symmetric(vertical: 16), child: Column(children: [
+            Icon(Icons.devices_other, size: 30, color: C.muted),
+            const SizedBox(height: 8),
+            Text('Пока нет устройств.\nПодключись с устройства — оно появится здесь.', textAlign: TextAlign.center, style: mono(12)),
+          ]))
+        else
+          for (final d in devices) _deviceRow(d),
+      ]));
+
+  Widget _deviceRow(Map<String, dynamic> d) {
+    final name = (d['name'] as String?) ?? 'Устройство';
+    final id = d['id'] as String?;
+    return Padding(padding: const EdgeInsets.symmetric(vertical: 7), child: Row(children: [
+      Icon(Icons.smartphone, size: 18, color: C.muted),
+      const SizedBox(width: 10),
+      Expanded(child: Text(name, style: disp(14, w: FontWeight.w600), overflow: TextOverflow.ellipsis)),
+      GestureDetector(behavior: HitTestBehavior.opaque,
+        onTap: id == null ? null : () => _confirmDelDevice(id, name),
+        child: Icon(Icons.delete_outline, size: 19, color: C.danger)),
+    ]));
+  }
+
+  void _confirmDelDevice(String id, String name) {
+    showDialog(context: context, builder: (_) => AlertDialog(
+      backgroundColor: C.bg2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
+      title: Text('Удалить устройство?', style: disp(18, w: FontWeight.w700)),
+      content: Text('«$name» будет удалено из подписки.', style: mono(13, c: C.muted)),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: Text('Отмена', style: mono(13, c: C.muted))),
+        TextButton(onPressed: () { Navigator.pop(context); _refreshSub(del: id); }, child: Text('Удалить', style: mono(13, c: C.danger))),
+      ],
+    ));
+  }
+
+  Widget _faqRow(Faq f) => Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          childrenPadding: const EdgeInsets.only(bottom: 12),
+          iconColor: C.accent,
+          collapsedIconColor: C.muted,
+          title: Text(f.q, style: disp(14, w: FontWeight.w600)),
+          children: [Align(alignment: Alignment.centerLeft, child: Text(f.a, style: mono(13)))],
+        ),
+      );
+}

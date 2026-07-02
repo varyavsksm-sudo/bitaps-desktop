@@ -1,5 +1,5 @@
 name: bitaps_vpn
-description: bitaps VPN — единый клиент на все ОС (iOS/Android/macOS/Windows/Linux)
+description: bitaps VPN — десктоп/мобильный клиент (Windows/Linux/Android)
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -39,9 +39,6 @@ flutter_launcher_icons:
   min_sdk_android: 24
   adaptive_icon_background: "#0C0A14"
   adaptive_icon_foreground: "assets/icon_fg.png"
-  macos:
-    generate: true
-    image_path: "assets/icon.png"
   windows:
     generate: true
     image_path: "assets/icon.png"
