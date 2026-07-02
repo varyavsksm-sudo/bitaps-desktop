@@ -107,10 +107,10 @@ extension ShellServers on _ShellState {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
             decoration: BoxDecoration(color: C.fill,
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: sel ? C.accent.withOpacity(0.5) : C.line)),
+              border: Border.all(color: sel ? C.accent.withValues(alpha: 0.5) : C.line)),
             child: Row(children: [
               Container(width: 40, height: 40, alignment: Alignment.center,
-                decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), borderRadius: BorderRadius.circular(12)),
+                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(12)),
                 child: Text(s.flag, style: const TextStyle(fontSize: 20))),
               const SizedBox(width: 12),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

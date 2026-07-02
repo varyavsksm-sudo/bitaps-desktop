@@ -69,10 +69,10 @@ extension ShellAccount on _ShellState {
       onTap: () => _open(_renewUrl),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(color: C.warn.withOpacity(0.12), borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: C.warn.withOpacity(0.5))),
+        decoration: BoxDecoration(color: C.warn.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: C.warn.withValues(alpha: 0.5))),
         child: Row(children: [
-          Icon(Icons.notifications_active, color: C.warn, size: 20),
+          const Icon(Icons.notifications_active, color: C.warn, size: 20),
           const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(expired ? tr('Подписка истекла') : tr('Подписка истекает'), style: disp(14, w: FontWeight.w700, c: C.warn)),
@@ -82,7 +82,7 @@ extension ShellAccount on _ShellState {
                   ? tr('Продли, чтобы вернуть доступ')
                   : (appLang == 'en'
                       ? '$days ${days == 1 ? 'day' : 'days'} left — renew early'
-                      : 'Осталось $days ${_dayWord(days)} — продли заранее'),
+                      : 'Осталось $days ${_pluralDays(days)} — продли заранее'),
               style: mono(11, c: C.muted)),
           ])),
           const SizedBox(width: 8),
@@ -92,21 +92,16 @@ extension ShellAccount on _ShellState {
     );
   }
 
-  String _dayWord(int d) {
-    final m10 = d % 10, m100 = d % 100;
-    if (m10 == 1 && m100 != 11) return 'день';
-    if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return 'дня';
-    return 'дней';
-  }
-
-  Widget _account() => ListView(
+  Widget _account() {
+    final daysLeft = _daysLeft(); // считаем один раз за билд (tryParse+арифметика), переиспользуем ниже
+    return ListView(
         padding: const EdgeInsets.all(20),
         children: [
           Text(tr('Кабинет'), style: disp(26, w: FontWeight.w800)),
           const SizedBox(height: 18),
           _profileCard(),
           const SizedBox(height: 14),
-          if (loggedIn && tgl3 && _daysLeft() != null && _daysLeft()! <= 3) ...[_expiryBanner(_daysLeft()!), const SizedBox(height: 14)],
+          if (loggedIn && tgl3 && daysLeft != null && daysLeft <= 3) ...[_expiryBanner(daysLeft), const SizedBox(height: 14)],
           _subCard(),
           const SizedBox(height: 14),
           _keyCard(),
@@ -172,6 +167,7 @@ extension ShellAccount on _ShellState {
           Center(child: Text('bitaps vpn · v1.0', style: mono(11, c: C.muted))),
         ],
       );
+  }
 
   Widget _profileCard() {
     final name = loggedIn
@@ -183,7 +179,7 @@ extension ShellAccount on _ShellState {
     return _card(strong: true, child: Row(children: [
       Container(width: 60, height: 60, alignment: Alignment.center,
         decoration: BoxDecoration(shape: BoxShape.circle, gradient: accentGrad,
-          boxShadow: [BoxShadow(color: C.accent.withOpacity(0.4), blurRadius: 18)]),
+          boxShadow: [BoxShadow(color: C.accent.withValues(alpha: 0.4), blurRadius: 18)]),
         child: Text(initial, style: disp(26, w: FontWeight.w800, c: C.bg))),
       const SizedBox(width: 14),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -332,7 +328,7 @@ extension ShellAccount on _ShellState {
       Expanded(child: Text(name, style: disp(14, w: FontWeight.w600), overflow: TextOverflow.ellipsis)),
       GestureDetector(behavior: HitTestBehavior.opaque,
         onTap: id == null ? null : () => _confirmDelDevice(id, name),
-        child: Icon(Icons.delete_outline, size: 19, color: C.danger)),
+        child: const Icon(Icons.delete_outline, size: 19, color: C.danger)),
     ]));
   }
 

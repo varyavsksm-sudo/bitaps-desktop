@@ -145,7 +145,9 @@ class ConnectionController extends ChangeNotifier {
 
   // накопление расхода за сессию + разовое предупреждение при большом расходе («Лимит трафика»)
   void _accTraffic() {
-    _sessMB += (down + up) / 1024.0; // текущие ↓/↑ (КБ/с) → МБ за секунду
+    // Движок шлёт down/up в kbps (килобитах/с) — см. NativeTunnel.events() контракт.
+    // kbps → МБ за 1 сек: делим на 8 (бит→байт) и на 1024 (КБ→МБ). Без /8 расход завышался в 8 раз.
+    _sessMB += (down + up) / (8 * 1024.0);
     if (trafWarnOn() && !_trafWarned && _sessMB >= kTrafficWarnMB) {
       _trafWarned = true;
       onToast(appLang == 'en'

@@ -228,9 +228,17 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
       server = serverForMode(mode); // сервер согласован с сохранённым режимом (без рассинхрона)
     });
     if (loggedIn) _refreshSub(silent: true);
-    if (autoConnect && conn == 0) {
-      Future.delayed(const Duration(milliseconds: 500), () { if (mounted && conn == 0) toggle(); });
-    }
+    // Авто-коннект НЕ должен подниматься сквозь блокировку или без логина: если экран заблокирован
+    // (_locked) — стартуем после разблокировки (см. _tryUnlock), иначе пробуем сразу.
+    if (!_locked) _maybeAutoConnect();
+  }
+
+  // Поднять авто-коннект, только если он включён, туннель выключен, экран разблокирован и есть логин.
+  void _maybeAutoConnect() {
+    if (!autoConnect || conn != 0 || _locked || !loggedIn) return;
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (mounted && autoConnect && conn == 0 && !_locked && loggedIn) toggle();
+    });
   }
 
   // тема: 0 тёмная · 1 светлая · 2 системная (следует за настройкой ОС)
@@ -319,7 +327,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 18),
         elevation: 10,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14), side: BorderSide(color: C.accent.withOpacity(0.45))),
+          borderRadius: BorderRadius.circular(14), side: BorderSide(color: C.accent.withValues(alpha: 0.45))),
         duration: const Duration(seconds: 3),
       ));
   }
@@ -480,7 +488,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
         )),
         Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(
           gradient: RadialGradient(center: const Alignment(0, -0.95), radius: 0.95,
-            colors: [C.accent.withOpacity(C.light ? 0.16 : 0.17), C.accent.withOpacity(0)])))),
+            colors: [C.accent.withValues(alpha: C.light ? 0.16 : 0.17), C.accent.withValues(alpha: 0)])))),
         if (!C.light) const Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(
           gradient: RadialGradient(center: Alignment(1.0, -0.9), radius: 0.8,
             colors: [Color(0x1A2D8BFF), Color(0x002D8BFF)])))),
@@ -503,7 +511,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     return ClipRect(child: BackdropFilter(
       filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
       child: Container(
-        decoration: BoxDecoration(color: C.bg2.withOpacity(0.7), border: Border(top: BorderSide(color: C.line))),
+        decoration: BoxDecoration(color: C.bg2.withValues(alpha: 0.7), border: Border(top: BorderSide(color: C.line))),
         child: SafeArea(top: false, child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 9),
           child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround,

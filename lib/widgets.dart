@@ -24,7 +24,7 @@ class StarPainter extends CustomPainter {
     for (int i = 0; i < _stars.length; i++) {
       final s = _stars[i];
       final twinkle = 0.7 + 0.3 * math.sin(t * 0.8 + i * 1.7);
-      final col = (s.accent ? C.accent : Colors.white).withOpacity((s.o * twinkle).clamp(0, 1));
+      final col = (s.accent ? C.accent : Colors.white).withValues(alpha: (s.o * twinkle).clamp(0, 1));
       canvas.drawCircle(Offset(s.x * size.width, s.y * size.height), s.r, Paint()..color = col);
     }
   }
@@ -58,7 +58,7 @@ class GearPainter extends CustomPainter {
     canvas.drawCircle(c, r * 0.72, p);
     canvas.drawCircle(c, r * 0.50, Paint()..color = const Color(0xFF0C0A14)); // тёмный медальон в обеих темах
     canvas.drawCircle(c, r * 0.50,
-      Paint()..style = PaintingStyle.stroke..strokeWidth = 2..color = col.withOpacity(0.45));
+      Paint()..style = PaintingStyle.stroke..strokeWidth = 2..color = col.withValues(alpha: 0.45));
   }
 
   @override
@@ -74,7 +74,7 @@ extension ShellWidgets on _ShellState {
     final lt = C.light;
     return Container(
       decoration: BoxDecoration(borderRadius: r,
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(lt ? 0.10 : 0.44), blurRadius: lt ? 26 : 20, offset: Offset(0, lt ? 8 : 12))]),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: lt ? 0.10 : 0.44), blurRadius: lt ? 26 : 20, offset: Offset(0, lt ? 8 : 12))]),
       child: ClipRRect(
         borderRadius: r,
         child: BackdropFilter(
@@ -84,11 +84,11 @@ extension ShellWidgets on _ShellState {
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: lt
-                    ? (strong ? [Colors.white, Colors.white] : [Colors.white, Colors.white.withOpacity(0.96)])
-                    : (strong ? [Colors.white.withOpacity(0.13), Colors.white.withOpacity(0.05)] : [Colors.white.withOpacity(0.08), Colors.white.withOpacity(0.025)]),
+                    ? (strong ? [Colors.white, Colors.white] : [Colors.white, Colors.white.withValues(alpha: 0.96)])
+                    : (strong ? [Colors.white.withValues(alpha: 0.13), Colors.white.withValues(alpha: 0.05)] : [Colors.white.withValues(alpha: 0.08), Colors.white.withValues(alpha: 0.025)]),
                 begin: Alignment.topLeft, end: Alignment.bottomRight),
               borderRadius: r,
-              border: Border.all(color: lt ? Colors.black.withOpacity(0.07) : Colors.white.withOpacity(0.14)),
+              border: Border.all(color: lt ? Colors.black.withValues(alpha: 0.07) : Colors.white.withValues(alpha: 0.14)),
             ),
             child: child,
           ),
@@ -98,24 +98,24 @@ extension ShellWidgets on _ShellState {
   }
 
   Widget _gIcon(IconData ic) => Container(width: 42, height: 42, alignment: Alignment.center,
-        decoration: BoxDecoration(color: C.accent.withOpacity(0.12), borderRadius: BorderRadius.circular(13),
-          border: Border.all(color: C.accent.withOpacity(0.30))),
+        decoration: BoxDecoration(color: C.accent.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(13),
+          border: Border.all(color: C.accent.withValues(alpha: 0.30))),
         child: Icon(ic, size: 19, color: C.accent));
 
   Widget _kicker(String t) => Text('// $t', style: mono(12, c: C.accent, w: FontWeight.w600));
 
   Widget _badge(String t, Color col) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(color: col.withOpacity(0.16), borderRadius: BorderRadius.circular(20)),
+        decoration: BoxDecoration(color: col.withValues(alpha: 0.16), borderRadius: BorderRadius.circular(20)),
         child: Text(t, style: mono(11, c: col, w: FontWeight.w600)),
       );
 
   Widget _shieldPill(bool on) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        decoration: BoxDecoration(color: (on ? C.ok : C.muted).withOpacity(0.12), borderRadius: BorderRadius.circular(20)),
+        decoration: BoxDecoration(color: (on ? C.ok : C.muted).withValues(alpha: 0.12), borderRadius: BorderRadius.circular(20)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: on ? C.ok : C.muted,
-            boxShadow: on ? [BoxShadow(color: C.ok.withOpacity(0.6), blurRadius: 8)] : null)),
+            boxShadow: on ? [BoxShadow(color: C.ok.withValues(alpha: 0.6), blurRadius: 8)] : null)),
           const SizedBox(width: 7),
           Text(on ? tr('защищено') : tr('не защищено'), style: mono(12, c: on ? C.ok : C.muted, w: FontWeight.w600)),
         ]),
@@ -159,10 +159,10 @@ extension ShellWidgets on _ShellState {
         alignment: Alignment.center,
         decoration: BoxDecoration(
           gradient: solid ? accentGrad : null,
-          color: solid ? null : (line ? Colors.transparent : Colors.white.withOpacity(0.05)),
+          color: solid ? null : (line ? Colors.transparent : Colors.white.withValues(alpha: 0.05)),
           borderRadius: BorderRadius.circular(12),
           border: line ? Border.all(color: C.line) : null,
-          boxShadow: solid ? [BoxShadow(color: C.accent.withOpacity(0.45), blurRadius: 22)] : null,
+          boxShadow: solid ? [BoxShadow(color: C.accent.withValues(alpha: 0.45), blurRadius: 22)] : null,
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           if (icon != null) ...[Icon(icon, size: 17, color: solid ? C.bg : C.text), const SizedBox(width: 8)],

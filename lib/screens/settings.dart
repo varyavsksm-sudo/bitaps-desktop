@@ -20,7 +20,7 @@ extension ShellSettings on _ShellState {
         decoration: BoxDecoration(shape: BoxShape.circle,
           gradient: LinearGradient(colors: [th.$3, th.$2]),
           border: Border.all(color: sel ? (C.light ? Colors.black : Colors.white) : Colors.transparent, width: 3),
-          boxShadow: [BoxShadow(color: th.$2.withOpacity(0.5), blurRadius: sel ? 14 : 6)]),
+          boxShadow: [BoxShadow(color: th.$2.withValues(alpha: 0.5), blurRadius: sel ? 14 : 6)]),
         child: sel ? Icon(Icons.check, size: 18, color: C.light ? Colors.black : Colors.white) : null,
       ),
     );
@@ -33,7 +33,7 @@ extension ShellSettings on _ShellState {
       onTap: () { setState(() => btnStyle = i); _save(); },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-        decoration: BoxDecoration(color: sel ? C.accent.withOpacity(0.16) : C.fill,
+        decoration: BoxDecoration(color: sel ? C.accent.withValues(alpha: 0.16) : C.fill,
           borderRadius: BorderRadius.circular(11), border: Border.all(color: sel ? C.accent : C.line)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(previews[i], size: 15, color: sel ? C.accent : C.muted),
@@ -51,7 +51,7 @@ extension ShellSettings on _ShellState {
       onTap: () { setState(() { themeMode = i; _applyThemeMode(); }); _save(); },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-        decoration: BoxDecoration(color: sel ? C.accent.withOpacity(0.16) : C.fill,
+        decoration: BoxDecoration(color: sel ? C.accent.withValues(alpha: 0.16) : C.fill,
           borderRadius: BorderRadius.circular(11), border: Border.all(color: sel ? C.accent : C.line)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(icons[i], size: 15, color: sel ? C.accent : C.muted),
@@ -68,7 +68,7 @@ extension ShellSettings on _ShellState {
       onTap: () { setState(() { appLang = code; }); _save(); },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-        decoration: BoxDecoration(color: sel ? C.accent.withOpacity(0.16) : C.fill,
+        decoration: BoxDecoration(color: sel ? C.accent.withValues(alpha: 0.16) : C.fill,
           borderRadius: BorderRadius.circular(11), border: Border.all(color: sel ? C.accent : C.line)),
         child: Text(label, style: disp(13, w: FontWeight.w600, c: sel ? C.accent : C.muted)),
       ),
@@ -245,7 +245,7 @@ extension ShellSettings on _ShellState {
             const SizedBox(height: 2),
             Text(sub, style: mono(11)),
           ])),
-          Switch(value: soon ? false : v, onChanged: soon ? null : onCh, activeColor: C.accent),
+          Switch(value: soon ? false : v, onChanged: soon ? null : onCh, activeThumbColor: C.accent),
         ]),
       );
 }

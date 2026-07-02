@@ -9,9 +9,9 @@ extension ShellHome on _ShellState {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            color: C.accent.withOpacity(0.12),
+            color: C.accent.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: C.accent.withOpacity(0.5)),
+            border: Border.all(color: C.accent.withValues(alpha: 0.5)),
           ),
           child: Row(children: [
             Icon(Icons.system_update, size: 18, color: C.accent),
@@ -103,7 +103,7 @@ extension ShellHome on _ShellState {
         const SizedBox(height: 12),
         GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: () { if (conn == 0) _pickServer(fastestServer); toggle(); },
+          onTap: () { if (conn == 0) setState(() => server = fastestServer); toggle(); },
           child: _card(child: Row(children: [
             _gIcon(Icons.bolt),
             const SizedBox(width: 13),
@@ -117,7 +117,7 @@ extension ShellHome on _ShellState {
   Widget _logo() => Row(children: [
         Container(width: 30, height: 30, alignment: Alignment.center,
           decoration: BoxDecoration(gradient: accentGrad, borderRadius: BorderRadius.circular(9),
-            boxShadow: [BoxShadow(color: C.accent.withOpacity(0.5), blurRadius: 12)]),
+            boxShadow: [BoxShadow(color: C.accent.withValues(alpha: 0.5), blurRadius: 12)]),
           child: Text('₿', style: disp(17, w: FontWeight.w900, c: C.bg))),
         const SizedBox(width: 9),
         Text('bit', style: disp(22, w: FontWeight.w800)),
@@ -147,7 +147,7 @@ extension ShellHome on _ShellState {
             duration: const Duration(milliseconds: 450),
             width: 270, height: 270,
             decoration: BoxDecoration(shape: BoxShape.circle, gradient: RadialGradient(
-              colors: [C.accent.withOpacity(glow), C.accent.withOpacity(0)], stops: const [0.25, 1.0])),
+              colors: [C.accent.withValues(alpha: glow), C.accent.withValues(alpha: 0)], stops: const [0.25, 1.0])),
           ),
           _powerInner(col),
         ]),
@@ -163,7 +163,7 @@ extension ShellHome on _ShellState {
           Container(width: 214, height: 214,
             decoration: BoxDecoration(shape: BoxShape.circle,
               border: Border.all(color: col, width: 10),
-              boxShadow: [BoxShadow(color: col.withOpacity(on ? 0.5 : 0.14), blurRadius: 22)])),
+              boxShadow: [BoxShadow(color: col.withValues(alpha: on ? 0.5 : 0.14), blurRadius: 22)])),
           Container(width: 150, height: 150,
             decoration: BoxDecoration(shape: BoxShape.circle, color: C.bg2, border: Border.all(color: C.line))),
           Icon(Icons.power_settings_new, size: 60, color: col),
@@ -172,23 +172,23 @@ extension ShellHome on _ShellState {
         return Container(width: 192, height: 192, alignment: Alignment.center,
           decoration: BoxDecoration(shape: BoxShape.circle,
             gradient: RadialGradient(center: const Alignment(-0.4, -0.4),
-              colors: on ? [C.accentSoft, C.accent, C.accent.withOpacity(0.55)] : const [Color(0xFF1A1728), Color(0xFF12101C)]),
-            boxShadow: [BoxShadow(color: col.withOpacity(on ? 0.55 : 0.14), blurRadius: 36)]),
-          child: Icon(Icons.power_settings_new, size: 62, color: on ? Colors.black.withOpacity(0.85) : col));
+              colors: on ? [C.accentSoft, C.accent, C.accent.withValues(alpha: 0.55)] : const [Color(0xFF1A1728), Color(0xFF12101C)]),
+            boxShadow: [BoxShadow(color: col.withValues(alpha: on ? 0.55 : 0.14), blurRadius: 36)]),
+          child: Icon(Icons.power_settings_new, size: 62, color: on ? Colors.black.withValues(alpha: 0.85) : col));
       case 3: // пульс — концентрические кольца от ядра
         return Stack(alignment: Alignment.center, children: [
           for (final r in const [220.0, 178.0, 136.0])
             Container(width: r, height: r,
-              decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: col.withOpacity(0.22), width: 1.5))),
+              decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: col.withValues(alpha: 0.22), width: 1.5))),
           Container(width: 96, height: 96, alignment: Alignment.center,
             decoration: BoxDecoration(shape: BoxShape.circle, color: C.bg2, border: Border.all(color: col, width: 2),
-              boxShadow: [BoxShadow(color: col.withOpacity(on ? 0.5 : 0.1), blurRadius: 20)]),
+              boxShadow: [BoxShadow(color: col.withValues(alpha: on ? 0.5 : 0.1), blurRadius: 20)]),
             child: Icon(Icons.power_settings_new, size: 44, color: col)),
         ]);
       default: // шестерёнка
         return Stack(alignment: Alignment.center, children: [
           Container(width: 250, height: 250, decoration: BoxDecoration(shape: BoxShape.circle,
-            gradient: RadialGradient(colors: [col.withOpacity(C.light ? 0.20 : 0.0), col.withOpacity(0)]))),
+            gradient: RadialGradient(colors: [col.withValues(alpha: C.light ? 0.20 : 0.0), col.withValues(alpha: 0)]))),
           RotationTransition(turns: _spin, child: AnimatedOpacity(
             duration: const Duration(milliseconds: 350), opacity: conn == 0 ? 0.85 : 1,
             child: CustomPaint(size: const Size(212, 212), painter: GearPainter(col)))),
@@ -203,7 +203,7 @@ extension ShellHome on _ShellState {
       child: Container(
         width: 150 + v * 110, height: 150 + v * 110,
         decoration: BoxDecoration(shape: BoxShape.circle,
-          border: Border.all(color: C.accent.withOpacity(0.5), width: 2)),
+          border: Border.all(color: C.accent.withValues(alpha: 0.5), width: 2)),
       ),
     );
   }
@@ -216,7 +216,7 @@ extension ShellHome on _ShellState {
         duration: const Duration(milliseconds: 200),
         height: 40, alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: sel ? C.accent.withOpacity(0.16) : C.fill,
+          color: sel ? C.accent.withValues(alpha: 0.16) : C.fill,
           borderRadius: BorderRadius.circular(11),
           border: Border.all(color: sel ? C.accent : C.line),
         ),
@@ -234,7 +234,7 @@ extension ShellHome on _ShellState {
             padding: const EdgeInsets.symmetric(horizontal: 12),
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: server.id == s.id ? C.accent.withOpacity(0.16) : C.fill,
+              color: server.id == s.id ? C.accent.withValues(alpha: 0.16) : C.fill,
               borderRadius: BorderRadius.circular(20),
               border: Border.all(color: server.id == s.id ? C.accent : C.line)),
             child: Row(mainAxisSize: MainAxisSize.min, children: [

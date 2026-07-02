@@ -9,7 +9,7 @@ extension ShellLock on _ShellState {
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Container(width: 72, height: 72, alignment: Alignment.center,
             decoration: BoxDecoration(shape: BoxShape.circle, gradient: accentGrad,
-              boxShadow: [BoxShadow(color: C.accent.withOpacity(0.4), blurRadius: 20)]),
+              boxShadow: [BoxShadow(color: C.accent.withValues(alpha: 0.4), blurRadius: 20)]),
             child: const Icon(Icons.lock_outline, size: 34, color: Colors.white)),
           const SizedBox(height: 20),
           Text(tr('bitaps заблокирован'), style: disp(20, w: FontWeight.w700)),
@@ -17,6 +17,7 @@ extension ShellLock on _ShellState {
           Text(tr('Введите PIN, чтобы продолжить'), style: mono(12), textAlign: TextAlign.center),
           const SizedBox(height: 22),
           SizedBox(width: 210, child: TextField(controller: _pinCtrl, obscureText: true, keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly], // PIN только цифры (number-клавиатура на десктопе не ограничивает ввод)
             textAlign: TextAlign.center, maxLength: 8, style: disp(22, w: FontWeight.w700, c: C.text), cursorColor: C.accent, autofocus: true,
             decoration: InputDecoration(counterText: '', hintText: '••••', hintStyle: disp(22, c: C.muted),
               enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: C.line)),
@@ -36,6 +37,7 @@ extension ShellLock on _ShellState {
     if (_pinCtrl.text.trim() == appPin) {
       setState(() => _locked = false);
       _pinCtrl.clear();
+      _maybeAutoConnect(); // отложенный авто-коннект стартует только после разблокировки
     } else {
       _toast(tr('Неверный PIN'));
       _pinCtrl.clear();
@@ -57,9 +59,11 @@ extension ShellLock on _ShellState {
       title: Text(tr('Задай PIN для входа'), style: disp(16, w: FontWeight.w700, c: C.text)),
       content: Column(mainAxisSize: MainAxisSize.min, children: [
         TextField(controller: c1, obscureText: true, keyboardType: TextInputType.number, maxLength: 8,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           style: mono(15, c: C.text), cursorColor: C.accent,
           decoration: InputDecoration(counterText: '', hintText: tr('PIN (4–8 цифр)'), hintStyle: mono(12, c: C.muted))),
         TextField(controller: c2, obscureText: true, keyboardType: TextInputType.number, maxLength: 8,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           style: mono(15, c: C.text), cursorColor: C.accent,
           decoration: InputDecoration(counterText: '', hintText: tr('Повтори PIN'), hintStyle: mono(12, c: C.muted))),
       ]),
