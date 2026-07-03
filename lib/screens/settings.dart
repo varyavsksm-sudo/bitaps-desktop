@@ -1,13 +1,13 @@
 part of '../main.dart';
 
 // ============================ SETTINGS ============================
-extension ShellSettings on _ShellState {
+extension ShellSettings on ShellState {
   Widget _accentSwatch(int i) {
     final th = accentThemes[i];
     final sel = accentIdx == i;
     return GestureDetector(
       onTap: () {
-        setState(() {
+        rebuild(() {
           accentIdx = i;
           C.accent = th.$2;
           C.accentSoft = th.$3;
@@ -30,7 +30,7 @@ extension ShellSettings on _ShellState {
     final sel = btnStyle == i;
     const previews = [Icons.settings, Icons.radio_button_unchecked, Icons.brightness_1, Icons.wifi_tethering];
     return GestureDetector(
-      onTap: () { setState(() => btnStyle = i); _save(); },
+      onTap: () { rebuild(() => btnStyle = i); _save(); },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
         decoration: BoxDecoration(color: sel ? C.accent.withValues(alpha: 0.16) : C.fill,
@@ -48,7 +48,7 @@ extension ShellSettings on _ShellState {
     const icons = [Icons.dark_mode_outlined, Icons.light_mode_outlined, Icons.brightness_auto_outlined];
     final sel = themeMode == i;
     return GestureDetector(
-      onTap: () { setState(() { themeMode = i; _applyThemeMode(); }); _save(); },
+      onTap: () { rebuild(() { themeMode = i; _applyThemeMode(); }); _save(); },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
         decoration: BoxDecoration(color: sel ? C.accent.withValues(alpha: 0.16) : C.fill,
@@ -65,7 +65,7 @@ extension ShellSettings on _ShellState {
   Widget _langChip(String code, String label) {
     final sel = appLang == code;
     return GestureDetector(
-      onTap: () { setState(() { appLang = code; }); _save(); },
+      onTap: () { rebuild(() { appLang = code; }); _save(); },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
         decoration: BoxDecoration(color: sel ? C.accent.withValues(alpha: 0.16) : C.fill,
@@ -114,13 +114,13 @@ extension ShellSettings on _ShellState {
                   if (ok != true) return;
                 }
                 if (!mounted) return;
-                setState(() { keyStr = t; importedHost = host; customCfg = t; });
+                rebuild(() { keyStr = t; importedHost = host; customCfg = t; });
                 _save();
                 _toast(host != null
                     ? (appLang == 'en' ? 'Key replaced with $host ✓' : 'Ключ заменён на $host ✓')
                     : tr('Ключ заменён ✓'));
               } else {
-                setState(() => customCfg = t.isEmpty ? null : t);
+                rebuild(() => customCfg = t.isEmpty ? null : t);
                 _save();
                 _toast(t.isEmpty ? tr('Конфиг очищен') : tr('Конфиг сохранён ✓'));
               }
@@ -160,15 +160,15 @@ extension ShellSettings on _ShellState {
           _kicker(tr('безопасность')),
           const SizedBox(height: 10),
           _card(child: Column(children: [
-            _toggle(tr('Блокировка входа'), tr('PIN при открытии приложения'), tgl1, (v) { if (v) { _enableLock(); } else { setState(() { tgl1 = false; appPin = null; }); _save(); } }),
+            _toggle(tr('Блокировка входа'), tr('PIN при открытии приложения'), tgl1, (v) { if (v) { _enableLock(); } else { rebuild(() { tgl1 = false; appPin = null; }); _save(); } }),
             _divider(),
-            _toggle(tr('Обрыв соединения'), tr('Уведомлять, если VPN отвалился'), tgl2, (v) { setState(() => tgl2 = v); _save(); }),
+            _toggle(tr('Обрыв соединения'), tr('Уведомлять, если VPN отвалился'), tgl2, (v) { rebuild(() => tgl2 = v); _save(); }),
             _divider(),
-            _toggle(tr('Подписка истекает'), tr('Напомнить за пару дней'), tgl3, (v) { setState(() => tgl3 = v); _save(); }),
+            _toggle(tr('Подписка истекает'), tr('Напомнить за пару дней'), tgl3, (v) { rebuild(() => tgl3 = v); _save(); }),
             _divider(),
-            _toggle(tr('Лимит трафика'), tr('Сигнал при расходе от 5 ГБ за сессию'), tgl4, (v) { setState(() => tgl4 = v); _save(); }),
+            _toggle(tr('Лимит трафика'), tr('Сигнал при расходе от 5 ГБ за сессию'), tgl4, (v) { rebuild(() => tgl4 = v); _save(); }),
             _divider(),
-            _toggle(tr('Авто-подключение'), tr('Подключаться сразу при запуске'), autoConnect, (v) { setState(() => autoConnect = v); _save(); }),
+            _toggle(tr('Авто-подключение'), tr('Подключаться сразу при запуске'), autoConnect, (v) { rebuild(() => autoConnect = v); _save(); }),
           ])),
           const SizedBox(height: 22),
           _kicker(tr('инструменты')),
@@ -185,15 +185,18 @@ extension ShellSettings on _ShellState {
           const SizedBox(height: 22),
           _kicker(tr('подключение')),
           const SizedBox(height: 10),
-          _card(child: Column(children: [
-            _radioRow(tr('Авто'), 0),
-            _divider(),
-            _radioRow('VLESS + Reality', 1),
-            _divider(),
-            _radioRow('WireGuard', 2),
-          ])),
+          _card(child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+            child: Row(children: [
+              Icon(Icons.bolt, size: 19, color: C.accent),
+              const SizedBox(width: 12),
+              Text(tr('Протокол'), style: disp(15, w: FontWeight.w500)),
+              const Spacer(),
+              Text('VLESS + Reality', style: mono(13, c: C.muted)),
+            ]),
+          )),
           const SizedBox(height: 8),
-          Text(tr('«Авто» и VLESS + Reality работают на наших серверах. WireGuard — если у тебя WG-ключ. Протокол применяется при подключении.'),
+          Text(tr('Протокол подбирается автоматически под твой ключ. Настраивать ничего не нужно.'),
               style: mono(11, c: C.muted)),
           const SizedBox(height: 22),
           _btn(tr('Выйти'), kind: 1, icon: Icons.logout, onTap: _logout),
@@ -216,24 +219,6 @@ extension ShellSettings on _ShellState {
           ]),
         ),
       );
-
-  Widget _radioRow(String label, int idx, {bool soon = false}) {
-    final sel = proto == idx;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      // «скоро» — не выбираем (функция ещё не работает), показываем тост вместо ложного переключения
-      onTap: soon ? () => _toast(tr('Скоро 🙌')) : () { setState(() => proto = idx); _save(); },
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        child: Row(children: [
-          Text(label, style: disp(15, w: FontWeight.w500)),
-          if (soon) ...[const SizedBox(width: 8), _badge(tr('скоро'), C.muted)],
-          const Spacer(),
-          Icon(sel ? Icons.radio_button_checked : Icons.radio_button_off, size: 20, color: sel ? C.accent : C.muted),
-        ]),
-      ),
-    );
-  }
 
   Widget _toggle(String title, String sub, bool v, ValueChanged<bool> onCh, {bool soon = false}) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),

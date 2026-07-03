@@ -8,6 +8,12 @@
 
 import 'dart:convert';
 
+/// Схемы share-link, которые умеет разобрать [outboundFromKey] — единый источник
+/// правды для гарда подключения (connection.dart), чтобы он не отставал от парсера.
+const List<String> kSupportedKeySchemes = [
+  'vless://', 'trojan://', 'vmess://', 'ss://', 'hysteria2://', 'hy2://',
+];
+
 /// Политика роутинга для генерируемого конфига.
 enum Routing {
   global, // всё через прокси

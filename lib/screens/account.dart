@@ -13,7 +13,7 @@ const Map<String, String> _planShorts = {
 };
 const Map<String, int> _planTotalDays = {'mo': 30, 'q': 90, 'h': 180, 'yr': 365, 'trial': 3};
 
-extension ShellAccount on _ShellState {
+extension ShellAccount on ShellState {
   // Импорт своего ключа/подписки из буфера (модель Happ)
   Future<void> _importKey() async {
     final data = await Clipboard.getData('text/plain');
@@ -29,7 +29,7 @@ extension ShellAccount on _ShellState {
       if (ok != true) return;
     }
     if (!mounted) return;
-    setState(() {
+    rebuild(() {
       keyStr = t;
       importedHost = host;
     });

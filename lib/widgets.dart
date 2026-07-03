@@ -67,7 +67,7 @@ class GearPainter extends CustomPainter {
 
 // ============================ SHARED WIDGET BUILDERS ============================
 // Переиспользуемые «строительные блоки» интерфейса (стекло-карточка, кнопки, бейджи и т.д.).
-extension ShellWidgets on _ShellState {
+extension ShellWidgets on ShellState {
   // ---------------- GLASS CARD + SHARED ----------------
   Widget _card({required Widget child, double padding = 16, bool strong = false}) {
     final r = BorderRadius.circular(18);

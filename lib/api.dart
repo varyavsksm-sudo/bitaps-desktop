@@ -3,7 +3,7 @@ part of 'main.dart';
 // ============================ NETWORK / EDGE-FUNCTIONS ============================
 // Все сетевые вызовы к Supabase edge-функциям (app-login / app-sub / app-pair / rotate-secret /
 // notify) + сетевые инструменты (спид-тест, проверка утечек) + авто-проверка обновлений.
-extension ShellApi on _ShellState {
+extension ShellApi on ShellState {
   // Авто-проверка обновлений: сравниваем номер вшитой сборки с номером последнего релиза.
   // Тихо: любой сбой/таймаут/дев-сборка (kBuildNumber==0) — просто не показываем баннер.
   Future<void> _checkUpdate() async {
@@ -12,7 +12,7 @@ extension ShellApi on _ShellState {
       final r = await http.get(Uri.parse(kBuildNumberUrl)).timeout(const Duration(seconds: 10));
       if (r.statusCode != 200) return;
       final latest = int.tryParse(r.body.trim()) ?? 0;
-      if (latest > kBuildNumber && mounted) setState(() => _updateAvail = true);
+      if (latest > kBuildNumber && mounted) rebuild(() => _updateAvail = true);
     } catch (_) {/* тихо */}
   }
 
@@ -81,7 +81,7 @@ extension ShellApi on _ShellState {
       if (r.statusCode == 401 || r.statusCode == 403) { _doLogout(); _toast(tr('Сессия истекла — войди снова')); return; }
       final d = jsonDecode(r.body) as Map<String, dynamic>;
       if (d['ok'] == true && d['login_secret'] is String) {
-        setState(() => loginSecret = d['login_secret'] as String);
+        rebuild(() => loginSecret = d['login_secret'] as String);
         _save();
         _toast(tr('Код входа обновлён ✓'));
       } else {
@@ -129,7 +129,7 @@ extension ShellApi on _ShellState {
       }
       final d = jsonDecode(r.body) as Map<String, dynamic>;
       if (d['ok'] == true && d['telegram_id'] is num && d['app_token'] is String) {
-        setState(() {
+        rebuild(() {
           tgId = (d['telegram_id'] as num).toInt();
           appToken = d['app_token'] as String;
           _applySub(d, fresh: true);
@@ -207,6 +207,8 @@ extension ShellApi on _ShellState {
                 body: jsonEncode({'action': 'check', 'token': token}))
             .timeout(const Duration(seconds: 10));
         final cd = jsonDecode(cr.body) as Map<String, dynamic>;
+        // cd['key'] несёт login_secret (UUID) — вход по vpn_key закрыт на сервере (app-login → 403).
+        // _login сам определит UUID как «Код входа» и залогинится по secret, а не по key.
         if (cd['key'] != null) { key = cd['key'] as String; break; }
         if (cd['pending'] != true && cd['ok'] != true) break; // истёк/ошибка
       } catch (_) {/* сеть моргнула — продолжаем опрос */}
@@ -242,7 +244,7 @@ extension ShellApi on _ShellState {
       return;
     }
     if (!silent) _toast(del != null ? tr('Удаляю устройство…') : tr('Обновляю…'));
-    if (mounted) setState(() => _subLoading = true);
+    if (mounted) rebuild(() => _subLoading = true);
     try {
       final r = await http
           .post(Uri.parse(kAppSub),
@@ -274,7 +276,7 @@ extension ShellApi on _ShellState {
       }
       final d = jsonDecode(r.body) as Map<String, dynamic>;
       if (d['ok'] == true) {
-        setState(() => _applySub(d));
+        rebuild(() => _applySub(d));
         _save();
         if (!silent) _toast(del != null ? tr('Устройство удалено ✓') : tr('Обновлено ✓'));
       } else if (!silent) {
@@ -287,7 +289,7 @@ extension ShellApi on _ShellState {
       debugPrint('_refreshSub error: $e');
       if (!silent) _toast(_netErr);
     } finally {
-      if (mounted) setState(() => _subLoading = false);
+      if (mounted) rebuild(() => _subLoading = false);
     }
   }
 
@@ -316,7 +318,7 @@ extension ShellApi on _ShellState {
       if (!mounted) return;
       if (r.statusCode >= 200 && r.statusCode < 300) {
         _support.clear();
-        setState(() {});
+        rebuild(() {});
         _toast(tr('Отправлено в поддержку ✓'));
       } else {
         _toast(r.statusCode >= 500

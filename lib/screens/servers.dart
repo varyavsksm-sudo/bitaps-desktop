@@ -1,7 +1,7 @@
 part of '../main.dart';
 
 // ============================ SERVERS ============================
-extension ShellServers on _ShellState {
+extension ShellServers on ShellState {
   Widget _servers() => ListView(
         padding: const EdgeInsets.all(20),
         children: [
@@ -36,7 +36,7 @@ extension ShellServers on _ShellState {
             const SizedBox(width: 10),
             Expanded(child: TextField(
               controller: _search,
-              onChanged: (v) => setState(() => _q = v),
+              onChanged: (v) => rebuild(() => _q = v),
               style: mono(13, c: C.text),
               cursorColor: C.accent,
               decoration: InputDecoration(isDense: true, border: InputBorder.none,
@@ -44,7 +44,7 @@ extension ShellServers on _ShellState {
             )),
             if (_q.isNotEmpty) GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTap: () => setState(() { _q = ''; _search.clear(); }),
+              onTap: () => rebuild(() { _q = ''; _search.clear(); }),
               child: Icon(Icons.close, size: 16, color: C.muted)),
           ])),
           const SizedBox(height: 22),
@@ -133,7 +133,7 @@ extension ShellServers on _ShellState {
               const SizedBox(width: 8),
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onTap: () { setState(() => favs.contains(s.id) ? favs.remove(s.id) : favs.add(s.id)); _save(); },
+                onTap: () { rebuild(() => favs.contains(s.id) ? favs.remove(s.id) : favs.add(s.id)); _save(); },
                 child: Icon(favs.contains(s.id) ? Icons.star : Icons.star_border, size: 18,
                   color: favs.contains(s.id) ? C.accentSoft : C.muted)),
               const SizedBox(width: 8),

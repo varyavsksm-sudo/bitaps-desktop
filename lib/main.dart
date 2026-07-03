@@ -14,7 +14,8 @@ import 'native_tunnel.dart';
 import 'package:window_manager/window_manager.dart';
 
 // Приложение разбито на модули; все они — части одной библиотеки (part/part of),
-// чтобы приватные имена (_ShellState, _secRead и т.п.) оставались доступны между файлами.
+// чтобы приватные имена (_secRead, _load, _conn и т.п.) и extension'ы на ShellState
+// оставались доступны между файлами.
 part 'i18n.dart';        // локализация RU/EN
 part 'theme.dart';       // тема/токены/шрифты
 part 'models.dart';      // модели, константы/эндпоинты, токены+secure storage
@@ -70,13 +71,12 @@ class BitApp extends StatelessWidget {
 class Shell extends StatefulWidget {
   const Shell({super.key});
   @override
-  State<Shell> createState() => _ShellState();
+  State<Shell> createState() => ShellState();
 }
 
-class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBindingObserver {
+class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBindingObserver {
   int tab = 0;
   int mode = 0;
-  int proto = 0;
   Server server = ruServers[0];
   bool tgl1 = false, tgl2 = true, tgl3 = true, tgl4 = false;
   String? appPin; // PIN блокировки приложения
@@ -104,7 +104,7 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
   bool get loggedIn => tgId != null && appToken != null;
 
   // Подключение вынесено в ConnectionController (см. connection.dart) — состояние и логика туннеля
-  // больше не живут в _ShellState. Ниже тонкие прокси, чтобы экраны читали conn/hms/скорость как раньше.
+  // больше не живут в ShellState. Ниже тонкие прокси, чтобы экраны читали conn/hms/скорость как раньше.
   late final ConnectionController _conn;
   int get conn => _conn.conn;
   String get hms => _conn.hms;
@@ -113,12 +113,39 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
   int get sessions => _conn.sessions;
   void toggle() => _conn.toggle();
 
+  // Анимации НЕ гоняем безусловно (..repeat()) — это жгло батарею: starfield + шестерёнка + кольца
+  // перерисовывались каждый кадр на всех вкладках и даже в фоне. Теперь _syncAnimations() держит
+  // каждый контроллер запущенным ТОЛЬКО когда он реально виден (нужная вкладка + приложение активно).
   late final AnimationController _spin =
-      AnimationController(vsync: this, duration: const Duration(seconds: 6))..repeat();
+      AnimationController(vsync: this, duration: const Duration(seconds: 6));
   late final AnimationController _wave =
-      AnimationController(vsync: this, duration: const Duration(milliseconds: 2600))..repeat();
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 2600));
   late final AnimationController _twinkle =
-      AnimationController(vsync: this, duration: const Duration(seconds: 4))..repeat();
+      AnimationController(vsync: this, duration: const Duration(seconds: 4));
+  bool _foreground = true; // приложение на переднем плане (обновляется в didChangeAppLifecycleState)
+
+  // Запускать/останавливать анимации по факту видимости — экономит CPU/GPU/батарею.
+  // Вызывается пост-фрейм из build() (ловит смену вкладки/темы/стиля/подключения) и из lifecycle.
+  void _syncAnimations() {
+    final vis = _foreground && !_locked; // не гоняем, если свёрнуто или заблокировано
+    final onHome = tab == 0;
+    _drive(_twinkle, vis && onHome && !C.light);         // звёзды: только Главная, тёмная тема
+    _drive(_spin, vis && onHome && btnStyle == 0);        // шестерёнка: только Главная, стиль по умолчанию
+    _drive(_wave, vis && onHome && (conn == 2 || btnStyle == 3)); // кольца: когда реально показаны
+  }
+
+  void _drive(AnimationController c, bool on) {
+    if (on && !c.isAnimating) {
+      c.repeat();
+    } else if (!on && c.isAnimating) {
+      c.stop();
+    }
+  }
+
+  // Публичная обёртка над setState для extension-файлов (api/screens/widgets): они не наследники
+  // State, поэтому прямой setState даёт analyzer-warning invalid_use_of_protected_member. Обёртка
+  // закрывает это без большого рефактора god-object. mounted — публичный геттер, его звать можно.
+  void rebuild([VoidCallback? fn]) { if (mounted) setState(fn ?? () {}); }
 
   bool _updateAvail = false; // доступна новая сборка (build_number из релиза > вшитого)
 
@@ -140,11 +167,13 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     _checkUpdate();
   }
 
-  // крутить кнопку-шестерёнку: быстро во время коннекта, спокойно в покое/при обрыве
+  // крутить кнопку-шестерёнку: быстро во время коннекта, спокойно в покое/при обрыве.
+  // Меняем скорость и перезапускаем ТОЛЬКО если шестерёнка сейчас видна — иначе просто
+  // запоминаем длительность (её подхватит _syncAnimations, когда вернёмся на Главную).
   void _spinConn(bool fast) {
     _spin.duration = Duration(milliseconds: fast ? 1400 : 6000);
     _spin.stop();
-    _spin.repeat();
+    if (_foreground && !_locked && tab == 0 && btnStyle == 0) _spin.repeat();
   }
 
   @override
@@ -152,6 +181,8 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     // авто-замок при сворачивании. paused (мобильный) + hidden (десктоп свёрнут). НЕ inactive —
     // он срабатывает на ЛЮБУЮ потерю фокуса (в т.ч. открытие внешней ссылки) и ложно блокировал бы.
     final bg = state == AppLifecycleState.paused || state == AppLifecycleState.hidden;
+    _foreground = state == AppLifecycleState.resumed;
+    _syncAnimations(); // свернули → гасим анимации; вернулись → поднимаем нужные
     if (bg && tgl1 && (appPin?.isNotEmpty ?? false) && !_locked) {
       setState(() => _locked = true);
     }
@@ -189,7 +220,6 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
       accentIdx = (p.getInt('accent') ?? 0).clamp(0, accentThemes.length - 1);
       btnStyle = (p.getInt('btnStyle') ?? 0).clamp(0, btnStyleNames.length - 1);
       mode = (p.getInt('mode') ?? 0).clamp(0, modeLabels.length - 1);
-      proto = (p.getInt('proto') ?? 0).clamp(0, 2);
       themeMode = (p.getInt('themeMode') ?? 0).clamp(0, 2);
       autoConnect = p.getBool('autoConnect') ?? false;
       tgl1 = p.getBool('tgl1') ?? false;
@@ -260,7 +290,6 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
     await p.setInt('accent', accentIdx);
     await p.setInt('btnStyle', btnStyle);
     await p.setInt('mode', mode);
-    await p.setInt('proto', proto);
     await p.setInt('themeMode', themeMode);
     await p.setString('lang', appLang);
     await p.setBool('autoConnect', autoConnect);
@@ -476,6 +505,8 @@ class _ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBin
 
   @override
   Widget build(BuildContext context) {
+    // после кадра сверяем, какие анимации должны идти (вкладка/тема/стиль/подключение/блокировка)
+    WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _syncAnimations(); });
     if (_locked) return _lockScreen();
     final screens = [_home(), _servers(), _account(), _settings()];
     return Scaffold(

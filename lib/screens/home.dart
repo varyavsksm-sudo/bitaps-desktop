@@ -1,7 +1,7 @@
 part of '../main.dart';
 
 // ============================ HOME (статус / подключение) ============================
-extension ShellHome on _ShellState {
+extension ShellHome on ShellState {
   // ---------------- HOME ----------------
   Widget _updateBanner() => GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -63,7 +63,7 @@ extension ShellHome on _ShellState {
           ])),
           GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTap: () => setState(() => tab = 1),
+            onTap: () => rebuild(() => tab = 1),
             child: Row(children: [
               Icon(Icons.swap_horiz, size: 17, color: C.accent),
               const SizedBox(width: 5),
@@ -103,7 +103,7 @@ extension ShellHome on _ShellState {
         const SizedBox(height: 12),
         GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: () { if (conn == 0) setState(() => server = fastestServer); toggle(); },
+          onTap: () { if (conn == 0) rebuild(() => server = fastestServer); toggle(); },
           child: _card(child: Row(children: [
             _gIcon(Icons.bolt),
             const SizedBox(width: 13),
@@ -211,7 +211,7 @@ extension ShellHome on _ShellState {
   Widget _modeChip(String label, int i) {
     final sel = mode == i;
     return GestureDetector(
-      onTap: () { setState(() { mode = i; if (conn == 0) server = serverForMode(i); }); _save(); },
+      onTap: () { rebuild(() { mode = i; if (conn == 0) server = serverForMode(i); }); _save(); },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         height: 40, alignment: Alignment.center,

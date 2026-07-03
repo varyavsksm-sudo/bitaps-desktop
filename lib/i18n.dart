@@ -216,8 +216,9 @@ const Map<String, String> _kEn = {
   'инструменты': 'tools',
   'подключение': 'connection',
   'Авто': 'Auto',
-  '«Авто» и VLESS + Reality работают на наших серверах. WireGuard — если у тебя WG-ключ. Протокол применяется при подключении.':
-      '"Auto" and VLESS + Reality work on our servers. WireGuard — if you have a WG key. The protocol applies on connect.',
+  'Протокол': 'Protocol',
+  'Протокол подбирается автоматически под твой ключ. Настраивать ничего не нужно.':
+      'The protocol is chosen automatically from your key. Nothing to configure.',
   'Скоро 🙌': 'Soon 🙌',
   'скоро': 'soon',
 
@@ -256,6 +257,6 @@ const Map<String, String> _kEn = {
   'В «Кабинете» нажми «Продлить» — оплата через Telegram, СБП или крипту.':
       'In "Account" tap "Renew" — pay via Telegram, SBP or crypto.',
   'VPN не подключается?': "VPN won't connect?",
-  'Смени локацию или протокол на «Авто», проверь интернет. Не помогло — напиши в поддержку.':
-      'Switch location or set protocol to "Auto", check your internet. Still stuck — message support.',
+  'Смени локацию, проверь интернет и что подписка активна. Не помогло — напиши в поддержку.':
+      'Switch location, check your internet and that your subscription is active. Still stuck — message support.',
 };

@@ -1,16 +1,16 @@
 part of 'main.dart';
 
 // ============================ CONNECTION CONTROLLER ============================
-// Жизненный цикл VPN-подключения вынесен из _ShellState (god-object): здесь живут состояние
+// Жизненный цикл VPN-подключения вынесен из ShellState (god-object): здесь живут состояние
 // туннеля (conn/secs/скорость/поколение/таймеры/счётчик трафика) и вся логика connect/disconnect,
 // обрыва и демо-сессии. Контроллер НЕ знает про виджеты — зависимости от UI прокинуты колбэками:
-//   keyOf/serverOf   — актуальные ключ и выбранный сервер из _ShellState
+//   keyOf/serverOf   — актуальные ключ и выбранный сервер из ShellState
 //   dropAlertOn      — тумблер «Обрыв соединения»
 //   trafWarnOn       — тумблер «Лимит трафика»
-//   onToast          — показать тост (реализует _ShellState)
+//   onToast          — показать тост (реализует ShellState)
 //   onPersist        — сохранить состояние (_save; нужен для счётчика сессий)
 //   onSpin(fast)     — крутить кнопку-шестерёнку: быстро во время коннекта, медленно в покое
-// Обновления UI идут через ChangeNotifier: _ShellState слушает и делает setState.
+// Обновления UI идут через ChangeNotifier: ShellState слушает и делает setState.
 class ConnectionController extends ChangeNotifier {
   ConnectionController({
     required this.keyOf,
@@ -74,7 +74,9 @@ class ConnectionController extends ChangeNotifier {
       if (kRealTunnel) {
         // БОЕВОЙ режим: поднимаем НАСТОЯЩИЙ туннель через нативный движок sing-box.
         final key = keyOf();
-        if (!key.startsWith('vless://')) { _fail(gen, tr('Нужен рабочий VPN-ключ')); return; }
+        // пускаем все схемы, что умеет singbox_config (не только vless://) — иначе валидный
+        // trojan/vmess/ss/hysteria2-ключ ложно отвергался бы «Нужен рабочий VPN-ключ».
+        if (!kSupportedKeySchemes.any((s) => key.startsWith(s))) { _fail(gen, tr('Нужен рабочий VPN-ключ')); return; }
         String cfg;
         try {
           cfg = singboxConfigJson(key);

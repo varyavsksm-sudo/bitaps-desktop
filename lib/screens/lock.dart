@@ -1,7 +1,7 @@
 part of '../main.dart';
 
 // ============================ APP-LOCK (PIN) ============================
-extension ShellLock on _ShellState {
+extension ShellLock on ShellState {
   Widget _lockScreen() {
     return Scaffold(
       backgroundColor: C.bg,
@@ -35,7 +35,7 @@ extension ShellLock on _ShellState {
 
   void _tryUnlock() {
     if (_pinCtrl.text.trim() == appPin) {
-      setState(() => _locked = false);
+      rebuild(() => _locked = false);
       _pinCtrl.clear();
       _maybeAutoConnect(); // отложенный авто-коннект стартует только после разблокировки
     } else {
@@ -46,7 +46,7 @@ extension ShellLock on _ShellState {
 
   void _forgotPin() {
     _pinCtrl.clear();
-    setState(() { appPin = null; tgl1 = false; _locked = false; });
+    rebuild(() { appPin = null; tgl1 = false; _locked = false; });
     _doLogout(silent: true);
     _save();
     _toast(tr('Блокировка сброшена'));
@@ -79,7 +79,7 @@ extension ShellLock on _ShellState {
       ],
     ));
     c1.dispose(); c2.dispose();
-    setState(() => tgl1 = (ok == true));
+    rebuild(() => tgl1 = (ok == true));
     _save();
   }
 }
