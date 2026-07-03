@@ -79,6 +79,7 @@ extension ShellApi on ShellState {
           .timeout(const Duration(seconds: 20));
       if (!mounted) return;
       if (r.statusCode == 401 || r.statusCode == 403) { _doLogout(); _toast(tr('Сессия истекла — войди снова')); return; }
+      if (r.statusCode >= 500) { _toast(_srvErr(r.statusCode)); return; } // 5xx → «сервер недоступен», а не «нет интернета»
       final d = jsonDecode(r.body) as Map<String, dynamic>;
       if (d['ok'] == true && d['login_secret'] is String) {
         rebuild(() => loginSecret = d['login_secret'] as String);
@@ -158,6 +159,7 @@ extension ShellApi on ShellState {
               headers: {'content-type': 'application/json', 'apikey': kApiKey},
               body: jsonEncode({'action': 'start'}))
           .timeout(const Duration(seconds: 15));
+      if (r.statusCode >= 500) { _toast(_srvErr(r.statusCode)); return; } // 5xx → «сервер недоступен», а не «нет интернета»
       final d = jsonDecode(r.body) as Map<String, dynamic>;
       if (d['ok'] != true || d['url'] == null || d['token'] is! String) {
         _toast(tr('Не удалось начать вход, попробуй ещё раз'));

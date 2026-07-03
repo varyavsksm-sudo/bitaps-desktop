@@ -385,7 +385,8 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       final h = Uri.parse(key.trim()).host;
       if (h.isNotEmpty) return h;
     } catch (e) {
-      debugPrint('_hostOf error: $e');
+      // НЕ логируем сам ключ: FormatException.toString() включает исходную строку (vless://…) → утечка ключа в лог
+      debugPrint('_hostOf error: ${e.runtimeType}');
     }
     return null;
   }
@@ -492,7 +493,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
 
   void _pickServer(Server s) {
     if (conn == 2) {
-      _toast(tr('Отключитесь, чтобы сменить сервер'));
+      _toast(tr('Отключись, чтобы сменить сервер'));
       return;
     }
     if (!s.available) {

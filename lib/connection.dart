@@ -85,9 +85,15 @@ class ConnectionController extends ChangeNotifier {
           return;
         }
         try {
-          await NativeTunnel.connect(cfg, server: serverOf().city);
+          // таймаут: если нативный движок завис и не вернул ни успех, ни ошибку — не залипаем
+          // навсегда в «Подключение…», а честно откатываемся в «выключено» с тостом.
+          await NativeTunnel.connect(cfg, server: serverOf().city)
+              .timeout(const Duration(seconds: 30));
         } on TunnelUnavailable catch (e) {
           _fail(gen, '$e');
+          return;
+        } on TimeoutException {
+          _fail(gen, appLang == 'en' ? 'Connection timed out' : 'Подключение не удалось — таймаут');
           return;
         } catch (e) {
           _fail(gen, appLang == 'en' ? 'Failed to connect: $e' : 'Не удалось подключиться: $e');

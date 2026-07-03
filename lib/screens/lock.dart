@@ -14,7 +14,7 @@ extension ShellLock on ShellState {
           const SizedBox(height: 20),
           Text(tr('bitaps заблокирован'), style: disp(20, w: FontWeight.w700)),
           const SizedBox(height: 6),
-          Text(tr('Введите PIN, чтобы продолжить'), style: mono(12), textAlign: TextAlign.center),
+          Text(tr('Введи PIN, чтобы продолжить'), style: mono(12), textAlign: TextAlign.center),
           const SizedBox(height: 22),
           SizedBox(width: 210, child: TextField(controller: _pinCtrl, obscureText: true, keyboardType: TextInputType.number,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly], // PIN только цифры (number-клавиатура на десктопе не ограничивает ввод)

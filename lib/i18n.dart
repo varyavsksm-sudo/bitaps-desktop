@@ -25,7 +25,7 @@ const Map<String, String> _kEn = {
       "You'll sign out on this device. The connection will stop, your personal settings stay.",
   'Выйти': 'Sign out',
   'Ок': 'OK',
-  'Отключитесь, чтобы сменить сервер': 'Disconnect to switch server',
+  'Отключись, чтобы сменить сервер': 'Disconnect to switch server',
   'Не удалось открыть ссылку': "Couldn't open the link",
   'Главная': 'Home',
   'Серверы': 'Servers',
@@ -219,7 +219,6 @@ const Map<String, String> _kEn = {
   'Протокол': 'Protocol',
   'Протокол подбирается автоматически под твой ключ. Настраивать ничего не нужно.':
       'The protocol is chosen automatically from your key. Nothing to configure.',
-  'Скоро 🙌': 'Soon 🙌',
   'скоро': 'soon',
 
   // ---- modeLabels (home) ----
@@ -235,7 +234,7 @@ const Map<String, String> _kEn = {
 
   // ---- lock.dart ----
   'bitaps заблокирован': 'bitaps locked',
-  'Введите PIN, чтобы продолжить': 'Enter your PIN to continue',
+  'Введи PIN, чтобы продолжить': 'Enter your PIN to continue',
   'Разблокировать': 'Unlock',
   'Не помню PIN — выйти': 'Forgot PIN — sign out',
   'Неверный PIN': 'Wrong PIN',
