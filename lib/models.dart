@@ -4,8 +4,6 @@ part of 'main.dart';
 // Реальные ссылки/бэкенд
 const kBot = 'https://t.me/bitaps_vpn_auth_bot';
 const kSupport = 'https://t.me/bitapssupport';
-const kChannel = 'https://t.me/bitapsvpnofficial';
-const kRef = 'https://t.me/bitaps_vpn_auth_bot?start=ref_demo';
 // Боевой туннель: ВЫКЛ (демо). Мост к нативному движку уже есть (native_tunnel.dart:
 // MethodChannel app.bitaps.vpn/control) и toggle() в боевом режиме реально зовёт sing-box.
 // Ставить true, когда на платформе подключена нативная сторона (Apple: PacketTunnelProvider +

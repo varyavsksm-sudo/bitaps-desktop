@@ -14,9 +14,17 @@ extension ShellLock on ShellState {
           const SizedBox(height: 20),
           Text(tr('bitaps заблокирован'), style: disp(20, w: FontWeight.w700)),
           const SizedBox(height: 6),
-          Text(tr('Введи PIN, чтобы продолжить'), style: mono(12), textAlign: TextAlign.center),
+          Text(
+            _pinLockSecs > 0
+                ? (appLang == 'en'
+                    ? 'Too many attempts. Wait ${_pinLockSecs}s'
+                    : 'Слишком много попыток. Подожди $_pinLockSecs с')
+                : tr('Введи PIN, чтобы продолжить'),
+            style: mono(12, c: _pinLockSecs > 0 ? C.danger : C.muted),
+            textAlign: TextAlign.center),
           const SizedBox(height: 22),
           SizedBox(width: 210, child: TextField(controller: _pinCtrl, obscureText: true, keyboardType: TextInputType.number,
+            enabled: _pinLockSecs == 0, // блокируем ввод на время отсчёта
             inputFormatters: [FilteringTextInputFormatter.digitsOnly], // PIN только цифры (number-клавиатура на десктопе не ограничивает ввод)
             textAlign: TextAlign.center, maxLength: 8, style: disp(22, w: FontWeight.w700, c: C.text), cursorColor: C.accent, autofocus: true,
             decoration: InputDecoration(counterText: '', hintText: '••••', hintStyle: disp(22, c: C.muted),
@@ -24,7 +32,7 @@ extension ShellLock on ShellState {
               focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: C.accent))),
             onSubmitted: (_) => _tryUnlock())),
           const SizedBox(height: 18),
-          SizedBox(width: 210, child: _btn(tr('Разблокировать'), kind: 0, icon: Icons.lock_open, onTap: _tryUnlock)),
+          SizedBox(width: 210, child: _btn(tr('Разблокировать'), kind: 0, icon: Icons.lock_open, onTap: _pinLockSecs > 0 ? null : _tryUnlock)),
           const SizedBox(height: 16),
           GestureDetector(behavior: HitTestBehavior.opaque, onTap: _forgotPin,
             child: Text(tr('Не помню PIN — сбросить'), style: mono(12, c: C.muted))),
@@ -34,15 +42,36 @@ extension ShellLock on ShellState {
   }
 
   void _tryUnlock() {
+    if (_pinLockSecs > 0) return; // ввод временно заблокирован после серии ошибок
     if (_pinCtrl.text.trim() == appPin) {
+      _pinFails = 0;
+      _pinLockTimer?.cancel();
+      _pinLockSecs = 0;
       rebuild(() => _locked = false);
       _syncAnimations(); // разблокировали → поднимаем анимации, погашенные на замке
       _pinCtrl.clear();
       _maybeAutoConnect(); // отложенный авто-коннект стартует только после разблокировки
     } else {
-      _toast(tr('Неверный PIN'));
+      _pinFails++;
       _pinCtrl.clear();
+      // после 5 подряд ошибок — растущая блокировка ввода (локально, без бэкенда):
+      // 5-я ошибка → 5с, каждая следующая +5с, максимум 60с. Тормозит перебор PIN.
+      if (_pinFails >= 5) {
+        _startPinLock(((_pinFails - 4) * 5).clamp(5, 60));
+      } else {
+        _toast(tr('Неверный PIN'));
+      }
     }
+  }
+
+  void _startPinLock(int secs) {
+    _pinLockTimer?.cancel();
+    rebuild(() => _pinLockSecs = secs);
+    _pinLockTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) { t.cancel(); return; }
+      rebuild(() => _pinLockSecs = (_pinLockSecs - 1).clamp(0, 60));
+      if (_pinLockSecs <= 0) t.cancel();
+    });
   }
 
   // Забыл PIN → сбрасываем ТОЛЬКО замок (appPin в secure storage чистит _save), НЕ разлогинивая
@@ -61,7 +90,9 @@ extension ShellLock on ShellState {
             onPressed: () {
               Navigator.pop(dctx);
               _pinCtrl.clear();
-              rebuild(() { appPin = null; tgl1 = false; _locked = false; });
+              _pinLockTimer?.cancel();
+              _pinFails = 0;
+              rebuild(() { appPin = null; tgl1 = false; _locked = false; _pinLockSecs = 0; });
               _syncAnimations(); // сняли замок → поднимаем погашенные анимации
               _save(); // _secWrite(appPin=null) удаляет PIN из secure storage
               _toast(tr('Блокировка сброшена'));

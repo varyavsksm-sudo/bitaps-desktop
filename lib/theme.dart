@@ -11,7 +11,6 @@ class C {
   static Color field = const Color(0x59000000);  // фон полей/код-блоков (тема-зависимая)
   static Color accent = const Color(0xFFFF7A1A);
   static Color accentSoft = const Color(0xFFFFB347);
-  static const accent2 = Color(0xFF2D8BFF);
   static const ok = Color(0xFF39D98A);
   static const warn = Color(0xFFFFAE3D);
   static const danger = Color(0xFFFF5470);

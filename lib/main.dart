@@ -110,6 +110,9 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   String? appPin; // PIN блокировки приложения
   bool _locked = false;
   final TextEditingController _pinCtrl = TextEditingController();
+  int _pinFails = 0;       // подряд неверных попыток PIN (сбрасывается при успехе)
+  int _pinLockSecs = 0;    // >0 → ввод PIN временно заблокирован на это число секунд
+  Timer? _pinLockTimer;    // тикает обратный отсчёт блокировки
   int accentIdx = 0, btnStyle = 0;
   int themeMode = 0; // 0 тёмная · 1 светлая · 2 системная
   bool autoConnect = false;
@@ -223,6 +226,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _pinLockTimer?.cancel();
     _conn.dispose();
     _spin.dispose();
     _wave.dispose();

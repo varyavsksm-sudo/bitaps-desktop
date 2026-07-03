@@ -84,11 +84,11 @@ extension ShellHome on ShellState {
           Row(children: [
             Text('↓', style: disp(15, c: C.muted)),
             const SizedBox(width: 5),
-            Text(connected ? '$down' : '—', style: mono(13, c: C.text, w: FontWeight.w600)),
+            Text(connected ? _fmtSpeed(down) : '—', style: mono(13, c: C.text, w: FontWeight.w600)),
             const SizedBox(width: 16),
             Text('↑', style: disp(15, c: C.muted)),
             const SizedBox(width: 5),
-            Text(connected ? '$up' : '—', style: mono(13, c: C.text, w: FontWeight.w600)),
+            Text(connected ? _fmtSpeed(up) : '—', style: mono(13, c: C.text, w: FontWeight.w600)),
             const Spacer(),
             Icon(Icons.language, size: 15, color: C.muted),
             const SizedBox(width: 6),
@@ -116,6 +116,10 @@ extension ShellHome on ShellState {
       ],
     );
   }
+
+  // Скорость движка приходит в kbps: ≥1000 показываем как Mbps, иначе kbps.
+  String _fmtSpeed(int kbps) =>
+      kbps >= 1000 ? '${(kbps / 1000).toStringAsFixed(1)} Mbps' : '$kbps kbps';
 
   Widget _logo() => Row(children: [
         Container(width: 30, height: 30, alignment: Alignment.center,

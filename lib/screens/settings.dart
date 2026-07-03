@@ -96,7 +96,7 @@ extension ShellSettings on ShellState {
           maxLines: 4,
           style: mono(12, c: C.text),
           cursorColor: C.accent,
-          decoration: InputDecoration(hintText: tr('Вставь vless:// или другой конфиг'), hintStyle: mono(12, c: C.muted)),
+          decoration: InputDecoration(hintText: tr('Вставь ключ vless://…'), hintStyle: mono(12, c: C.muted)),
         ),
         actions: [
           TextButton(onPressed: () { ctrl.dispose(); Navigator.pop(context); }, child: Text(tr('Отмена'), style: mono(13, c: C.muted))),
@@ -220,18 +220,15 @@ extension ShellSettings on ShellState {
         ),
       );
 
-  Widget _toggle(String title, String sub, bool v, ValueChanged<bool> onCh, {bool soon = false}) => Padding(
+  Widget _toggle(String title, String sub, bool v, ValueChanged<bool> onCh) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: Row(children: [
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Flexible(child: Text(title, style: disp(15, w: FontWeight.w600))),
-              if (soon) ...[const SizedBox(width: 8), _badge(tr('скоро'), C.muted)],
-            ]),
+            Text(title, style: disp(15, w: FontWeight.w600)),
             const SizedBox(height: 2),
             Text(sub, style: mono(11)),
           ])),
-          Switch(value: soon ? false : v, onChanged: soon ? null : onCh, activeThumbColor: C.accent),
+          Switch(value: v, onChanged: onCh, activeThumbColor: C.accent),
         ]),
       );
 }
