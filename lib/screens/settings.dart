@@ -78,8 +78,8 @@ extension ShellSettings on ShellState {
   void _showStats() {
     _dialog(tr('Статистика'),
         appLang == 'en'
-            ? 'Sessions started: $sessions\nCurrent session: ${conn == 2 ? hms : "not connected"}\nServer: ${server.city}\nMode: ${tr(modeLabels[mode])}\nFavorite servers: ${favs.length}'
-            : 'Сессий запущено: $sessions\nТекущая сессия: ${conn == 2 ? hms : "не подключено"}\nСервер: ${server.city}\nРежим: ${modeLabels[mode]}\nИзбранных серверов: ${favs.length}');
+            ? 'Sessions started: $sessions\nCurrent session: ${conn == 2 ? hms : "not connected"}\nServer: ${tr(server.city)}\nMode: ${tr(modeLabels[mode])}\nFavorite servers: ${favs.length}'
+            : 'Сессий запущено: $sessions\nТекущая сессия: ${conn == 2 ? hms : "не подключено"}\nСервер: ${tr(server.city)}\nРежим: ${modeLabels[mode]}\nИзбранных серверов: ${favs.length}');
   }
 
   void _customConfig() {

@@ -53,19 +53,29 @@ class BitApp extends StatelessWidget {
   const BitApp({super.key});
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'bitaps VPN',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: C.bg,
-        colorScheme: ColorScheme.dark(primary: C.accent, surface: C.bg2),
-        useMaterial3: true,
-        fontFamily: 'SpaceGrotesk',
+    // Тема реактивна: слушаем глобальный флаг яркости (обновляется из C.applyTheme при смене
+    // темы/системной яркости) и перестраиваем ThemeData целиком. `home: const Shell()` сохраняет
+    // ShellState между пересборками MaterialApp (тот же тип виджета → State не пересоздаётся).
+    return ValueListenableBuilder<bool>(
+      valueListenable: themeLight,
+      builder: (_, light, __) => MaterialApp(
+        title: 'bitaps VPN',
+        debugShowCheckedModeBanner: false,
+        theme: _appTheme(light),
+        home: const Shell(),
       ),
-      home: const Shell(),
     );
   }
+
+  ThemeData _appTheme(bool light) => ThemeData(
+        brightness: light ? Brightness.light : Brightness.dark,
+        scaffoldBackgroundColor: C.bg,
+        colorScheme: light
+            ? ColorScheme.light(primary: C.accent, surface: C.bg2)
+            : ColorScheme.dark(primary: C.accent, surface: C.bg2),
+        useMaterial3: true,
+        fontFamily: 'SpaceGrotesk',
+      );
 }
 
 class Shell extends StatefulWidget {
@@ -349,9 +359,12 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
         content: Row(children: [
           Container(width: 4, height: 30, decoration: BoxDecoration(color: C.accent, borderRadius: BorderRadius.circular(2))),
           const SizedBox(width: 12),
+          // Цвет текста — из текущей темы (C.text): иначе в светлой теме тёмный текст ложился на
+          // захардкоженный тёмный фон и был нечитаем.
           Expanded(child: Text(m, style: disp(14, w: FontWeight.w600, c: C.text))),
         ]),
-        backgroundColor: const Color(0xFF221F30),
+        // Фон тоже тема-зависимый (C.bg2): белый в светлой, near-black в тёмной — читается в обеих.
+        backgroundColor: C.bg2,
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 18),
         elevation: 10,
@@ -497,17 +510,27 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       return;
     }
     if (!s.available) {
-      _toast(appLang == 'en' ? '${s.city} — soon' : '${s.city} — скоро');
+      _toast(appLang == 'en' ? '${tr(s.city)} — soon' : '${tr(s.city)} — скоро');
       return;
     }
     setState(() => server = s);
-    _toast(appLang == 'en' ? 'Server: ${s.city}' : 'Сервер: ${s.city}');
+    _toast(appLang == 'en' ? 'Server: ${tr(s.city)}' : 'Сервер: ${tr(s.city)}');
   }
 
   @override
   Widget build(BuildContext context) {
     // после кадра сверяем, какие анимации должны идти (вкладка/тема/стиль/подключение/блокировка)
     WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _syncAnimations(); });
+    // Статус-бар/системные оверлеи под актуальную тему: в светлой — тёмные иконки, в тёмной — светлые.
+    final overlay = (C.light ? SystemUiOverlayStyle.dark : SystemUiOverlayStyle.light).copyWith(
+      statusBarColor: Colors.transparent,
+      systemNavigationBarColor: C.bg,
+      systemNavigationBarIconBrightness: C.light ? Brightness.dark : Brightness.light,
+    );
+    return AnnotatedRegion<SystemUiOverlayStyle>(value: overlay, child: _buildBody());
+  }
+
+  Widget _buildBody() {
     if (_locked) return _lockScreen();
     final screens = [_home(), _servers(), _account(), _settings()];
     return Scaffold(
@@ -555,16 +578,26 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
 
   Widget _tabItem(String label, IconData ic, int i) {
     final sel = tab == i;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () => setState(() => tab = i),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(ic, size: 22, color: sel ? C.accent : C.muted),
-          const SizedBox(height: 4),
-          Text(label, style: mono(10.5, c: sel ? C.accent : C.muted, w: FontWeight.w600)),
-        ]),
+    // Semantics для скринридера: элемент навигации как кнопка-вкладка с меткой и признаком выбора.
+    // ExcludeSemantics на содержимом — чтобы иконка+текст не дублировали метку.
+    return Semantics(
+      button: true,
+      selected: sel,
+      label: label,
+      container: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => setState(() => tab = i),
+        child: ExcludeSemantics(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Icon(ic, size: 22, color: sel ? C.accent : C.muted),
+              const SizedBox(height: 4),
+              Text(label, style: mono(10.5, c: sel ? C.accent : C.muted, w: FontWeight.w600)),
+            ]),
+          ),
+        ),
       ),
     );
   }

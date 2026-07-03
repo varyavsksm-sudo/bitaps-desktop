@@ -26,8 +26,16 @@ class C {
     line = isLight ? const Color(0x1A101A30) : const Color(0x14FFFFFF);
     fill = isLight ? const Color(0x0D000000) : const Color(0x0AFFFFFF);
     field = isLight ? const Color(0x0A000000) : const Color(0x59000000);
+    // Уведомляем Material-слой (MaterialApp выше Shell) о смене яркости — иначе ThemeData
+    // остаётся тёмной в светлом режиме (selection handles / курсор / ripple / дефолты диалогов).
+    // Обновляем ПОСЛЕ применения C.*, чтобы билд ThemeData читал уже актуальные цвета.
+    themeLight.value = isLight;
   }
 }
+
+// Глобальный флаг яркости для реактивной темы Material-уровня. BitApp слушает его через
+// ValueListenableBuilder и перестраивает ThemeData под актуальную яркость (см. main.dart).
+final ValueNotifier<bool> themeLight = ValueNotifier<bool>(false);
 
 LinearGradient get accentGrad =>
     LinearGradient(colors: [C.accentSoft, C.accent], begin: Alignment.topLeft, end: Alignment.bottomRight);

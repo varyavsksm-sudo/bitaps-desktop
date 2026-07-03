@@ -51,13 +51,13 @@ extension ShellHome on ShellState {
             Expanded(child: Padding(padding: EdgeInsets.only(right: i < 3 ? 8 : 0), child: _modeChip(modeLabels[i], i))),
         ]),
         const SizedBox(height: 10),
-        Text(tr('Режим подбирает сервер: Авто/Игры — минимальный пинг, Стрим — наименьшая нагрузка, Прив. — зарубежный сервер.'), style: mono(12)),
+        Text(tr('Режим подбирает сервер: Авто/Игры — минимальный пинг, Стрим — наименьшая нагрузка, Прив. — быстрый сервер (зарубежные скоро).'), style: mono(12)),
         const SizedBox(height: 14),
         _card(child: Row(children: [
           Text(server.flag, style: const TextStyle(fontSize: 24)),
           const SizedBox(width: 13),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(server.city, style: disp(16, w: FontWeight.w700)),
+            Text(tr(server.city), style: disp(16, w: FontWeight.w700)),
             const SizedBox(height: 2),
             Text('${server.ping} ms · ${server.proto}', style: mono(12)),
           ])),
@@ -92,7 +92,10 @@ extension ShellHome on ShellState {
             const Spacer(),
             Icon(Icons.language, size: 15, color: C.muted),
             const SizedBox(width: 6),
-            Text(connected ? '95.142.16.7' : tr('IP скрыт'), style: mono(12)),
+            // В боевом режиме (kRealTunnel) реального канала IP из движка нет → не показываем
+            // выдуманный статичный адрес (иначе юзер увидел бы неверный IP без пометки «демо»).
+            // Демо-IP светим только в демо-режиме, где рядом стоит дисклеймер.
+            Text(connected && !kRealTunnel ? '95.142.16.7' : tr('IP скрыт'), style: mono(12)),
           ]),
           // Честно: без боевого туннеля скорость/трафик/IP — демонстрационные.
           if (connected && !kRealTunnel) ...[
@@ -240,7 +243,7 @@ extension ShellHome on ShellState {
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               Text(s.flag, style: const TextStyle(fontSize: 13)),
               const SizedBox(width: 6),
-              Text(s.city, style: disp(12, w: FontWeight.w600)),
+              Text(tr(s.city), style: disp(12, w: FontWeight.w600)),
             ]),
           ),
         ),

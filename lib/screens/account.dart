@@ -215,13 +215,16 @@ extension ShellAccount on ShellState {
         const SizedBox(height: 12),
         SizedBox(width: double.infinity, child: _btn(tr('Войти через Telegram'), kind: 0, icon: Icons.send, onTap: _pairLogin)),
         const SizedBox(height: 14),
-        Text(tr('или вставь ключ вручную:'), style: mono(11, c: C.muted)),
+        // Вход по VPN-ключу отключён на сервере — приглашаем вставлять только «Код входа» (UUID),
+        // который реально принимает бэкенд (app-login по {secret}). Раньше форма звала вставить
+        // vless-ключ → он уходил как {key} и всегда получал 403.
+        Text(tr('или вставь Код входа:'), style: mono(11, c: C.muted)),
         const SizedBox(height: 8),
         Container(padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(color: C.field, borderRadius: BorderRadius.circular(10)),
           child: TextField(controller: _loginCtrl, maxLines: 2, style: mono(11, c: C.text), cursorColor: C.accent,
             decoration: InputDecoration(isDense: true, border: InputBorder.none, contentPadding: EdgeInsets.zero,
-              hintText: tr('ключ vless://…@host:443 из бота'), hintStyle: mono(12, c: C.muted)))),
+              hintText: tr('Код входа (UUID из бота или письма)'), hintStyle: mono(12, c: C.muted)))),
         const SizedBox(height: 10),
         Row(children: [
           Expanded(child: _btn(tr('Войти'), kind: 1, icon: Icons.login, onTap: _login)),
@@ -327,9 +330,16 @@ extension ShellAccount on ShellState {
       Icon(Icons.smartphone, size: 18, color: C.muted),
       const SizedBox(width: 10),
       Expanded(child: Text(name, style: disp(14, w: FontWeight.w600), overflow: TextOverflow.ellipsis)),
-      GestureDetector(behavior: HitTestBehavior.opaque,
-        onTap: id == null ? null : () => _confirmDelDevice(id, name),
-        child: const Icon(Icons.delete_outline, size: 19, color: C.danger)),
+      // Тап-таргет удаления ≥40px (было 19px)
+      IconButton(
+        onPressed: id == null ? null : () => _confirmDelDevice(id, name),
+        iconSize: 19,
+        padding: EdgeInsets.zero,
+        visualDensity: VisualDensity.compact,
+        constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+        splashRadius: 22,
+        tooltip: tr('Удалить'),
+        icon: const Icon(Icons.delete_outline, color: C.danger)),
     ]));
   }
 

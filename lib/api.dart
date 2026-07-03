@@ -98,14 +98,18 @@ extension ShellApi on ShellState {
     if (!mounted) return; // _pairLogin может звать после закрытия экрана
     final key = (presetKey ?? _loginCtrl.text).trim();
     if (key.length < 12) {
-      _toast(tr('Вставь ключ из бота или Код входа'));
+      _toast(tr('Вставь Код входа из бота или письма'));
       return;
     }
-    // vless://… / https://… → VPN-ключ (шлём как key); иначе (UUID) — «Код входа»/login_secret (как secret).
-    // Готовит вход по login_secret на будущее, когда вход по vpn_key отключат. keyStr берётся из ответа, не отсюда.
-    final isKey = key.startsWith('vless://') || key.startsWith('http://') || key.startsWith('https://');
-    if (!isKey && key.contains(RegExp(r'\s'))) {
-      _toast(tr('Вставь ключ (vless://…) или Код входа'));
+    // Вход по vpn_key (vless://… / https://…) отключён на сервере (app-login → 403): принимаем
+    // ТОЛЬКО «Код входа» (UUID login_secret, уходит как {secret}). Так вызов согласован с бэкендом,
+    // а юзер не бьётся о вечный 403, вставляя VPN-ключ. _pairLogin тоже передаёт сюда UUID.
+    if (key.startsWith('vless://') || key.startsWith('http://') || key.startsWith('https://')) {
+      _loginError(tr('Вход по VPN-ключу отключён. Вставь «Код входа» (UUID) из бота или письма.'));
+      return;
+    }
+    if (key.contains(RegExp(r'\s'))) {
+      _toast(tr('Вставь «Код входа» (UUID) — без пробелов'));
       return;
     }
     _toast(tr('Вхожу…'));
@@ -113,7 +117,7 @@ extension ShellApi on ShellState {
       final r = await http
           .post(Uri.parse(kAppLogin),
               headers: {'content-type': 'application/json', 'apikey': kApiKey},
-              body: jsonEncode(isKey ? {'key': key} : {'secret': key}))
+              body: jsonEncode({'secret': key}))
           .timeout(const Duration(seconds: 20));
       if (!mounted) return;
       if (r.statusCode >= 500) {

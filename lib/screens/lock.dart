@@ -27,7 +27,7 @@ extension ShellLock on ShellState {
           SizedBox(width: 210, child: _btn(tr('Разблокировать'), kind: 0, icon: Icons.lock_open, onTap: _tryUnlock)),
           const SizedBox(height: 16),
           GestureDetector(behavior: HitTestBehavior.opaque, onTap: _forgotPin,
-            child: Text(tr('Не помню PIN — выйти'), style: mono(12, c: C.muted))),
+            child: Text(tr('Не помню PIN — сбросить'), style: mono(12, c: C.muted))),
         ]))),
       ),
     );
@@ -44,12 +44,32 @@ extension ShellLock on ShellState {
     }
   }
 
+  // Забыл PIN → сбрасываем ТОЛЬКО замок (appPin в secure storage чистит _save), НЕ разлогинивая
+  // аккаунт: сессия/подписка/ключ сохраняются. Подтверждение оставлено, чтобы случайный тап не снял защиту.
   void _forgotPin() {
-    _pinCtrl.clear();
-    rebuild(() { appPin = null; tgl1 = false; _locked = false; });
-    _doLogout(silent: true);
-    _save();
-    _toast(tr('Блокировка сброшена'));
+    showDialog(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        backgroundColor: C.bg2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
+        title: Text(tr('Сбросить PIN?'), style: disp(18, w: FontWeight.w700)),
+        content: Text(tr('Блокировка отключится, но ты останешься в аккаунте.'), style: mono(13, c: C.muted)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dctx), child: Text(tr('Отмена'), style: mono(13, c: C.muted))),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dctx);
+              _pinCtrl.clear();
+              rebuild(() { appPin = null; tgl1 = false; _locked = false; });
+              _save(); // _secWrite(appPin=null) удаляет PIN из secure storage
+              _toast(tr('Блокировка сброшена'));
+              _maybeAutoConnect(); // разблокировались → поднимаем отложенный авто-коннект, если включён
+            },
+            child: Text(tr('Сбросить'), style: mono(13, c: C.accent)),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _enableLock() async {
