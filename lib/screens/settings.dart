@@ -30,7 +30,7 @@ extension ShellSettings on ShellState {
     final sel = btnStyle == i;
     const previews = [Icons.settings, Icons.radio_button_unchecked, Icons.brightness_1, Icons.wifi_tethering];
     return GestureDetector(
-      onTap: () { rebuild(() => btnStyle = i); _save(); },
+      onTap: () { rebuild(() => btnStyle = i); _syncAnimations(); _save(); }, // стиль решает, крутить ли шестерёнку/кольца
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
         decoration: BoxDecoration(color: sel ? C.accent.withValues(alpha: 0.16) : C.fill,
@@ -48,7 +48,7 @@ extension ShellSettings on ShellState {
     const icons = [Icons.dark_mode_outlined, Icons.light_mode_outlined, Icons.brightness_auto_outlined];
     final sel = themeMode == i;
     return GestureDetector(
-      onTap: () { rebuild(() { themeMode = i; _applyThemeMode(); }); _save(); },
+      onTap: () { rebuild(() { themeMode = i; _applyThemeMode(); }); _syncAnimations(); _save(); }, // starfield только в тёмной
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
         decoration: BoxDecoration(color: sel ? C.accent.withValues(alpha: 0.16) : C.fill,

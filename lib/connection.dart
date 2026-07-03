@@ -155,7 +155,9 @@ class ConnectionController extends ChangeNotifier {
   void _accTraffic() {
     // Движок шлёт down/up в kbps (килобитах/с) — см. NativeTunnel.events() контракт.
     // kbps → МБ за 1 сек: делим на 8 (бит→байт) и на 1024 (КБ→МБ). Без /8 расход завышался в 8 раз.
-    _sessMB += (down + up) / (8 * 1024.0);
+    // В демо ускоряем накопление (kDemoTrafficBoost), чтобы порог «Лимит трафика» был достижим и
+    // тумблер можно было показать; в боевом режиме множитель = 1 (реальные байты не искажаем).
+    _sessMB += (down + up) / (8 * 1024.0) * (kRealTunnel ? 1 : kDemoTrafficBoost);
     if (trafWarnOn() && !_trafWarned && _sessMB >= kTrafficWarnMB) {
       _trafWarned = true;
       onToast(appLang == 'en'

@@ -288,9 +288,9 @@ extension ShellAccount on ShellState {
               : _btn(tr('Вставить'), kind: 2, icon: Icons.content_paste, onTap: _importKey)),
         ]),
         if (loggedIn && loginSecret != null) ...[
-          const SizedBox(height: 16),
-          Divider(color: C.line, height: 1),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
+          _divider(), // единый разделитель как в остальном UI (было голое Divider(...))
+          const SizedBox(height: 10),
           Row(children: [_gIcon(Icons.lock_outline), const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               _kicker(tr('код входа')), const SizedBox(height: 3),

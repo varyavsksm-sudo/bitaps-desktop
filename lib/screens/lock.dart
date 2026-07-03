@@ -36,6 +36,7 @@ extension ShellLock on ShellState {
   void _tryUnlock() {
     if (_pinCtrl.text.trim() == appPin) {
       rebuild(() => _locked = false);
+      _syncAnimations(); // разблокировали → поднимаем анимации, погашенные на замке
       _pinCtrl.clear();
       _maybeAutoConnect(); // отложенный авто-коннект стартует только после разблокировки
     } else {
@@ -61,6 +62,7 @@ extension ShellLock on ShellState {
               Navigator.pop(dctx);
               _pinCtrl.clear();
               rebuild(() { appPin = null; tgl1 = false; _locked = false; });
+              _syncAnimations(); // сняли замок → поднимаем погашенные анимации
               _save(); // _secWrite(appPin=null) удаляет PIN из secure storage
               _toast(tr('Блокировка сброшена'));
               _maybeAutoConnect(); // разблокировались → поднимаем отложенный авто-коннект, если включён

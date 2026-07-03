@@ -137,6 +137,8 @@ Map<String, dynamic> _ruleSet(String tag, String url) =>
 // ============================ OUTBOUND PARSING ============================
 
 /// Разобрать один share-link в sing-box outbound (tag "proxy"). null — если не распарсить.
+/// Бросает [FormatException] при внутренне-противоречивом ключе (напр. Reality без обязательного pbk),
+/// чтобы вызывающий получил явную ошибку вместо тихо-битого конфига.
 Map<String, dynamic>? outboundFromKey(String key) {
   final scheme = key.split(':').first.toLowerCase();
   switch (scheme) {
@@ -314,8 +316,13 @@ Map<String, dynamic> _tlsBlock(String security, Map<String, String> q, String de
   final fp = q['fp'] ?? '';
   final hasFp = fp.isNotEmpty;
   if (security == 'reality') {
-    final reality = <String, dynamic>{'enabled': true};
-    if (q['pbk'] != null) reality['public_key'] = q['pbk'];
+    // Reality без public_key (pbk) сгенерил бы reality:{enabled:true} без ключа — движок такой конфиг
+    // не поднимет (это тихо-битый туннель). Явно фейлим импорт вместо генерации нерабочего конфига.
+    final pbk = q['pbk'] ?? '';
+    if (pbk.isEmpty) {
+      throw const FormatException('Reality-ключ без public_key (pbk) — конфиг был бы невалиден');
+    }
+    final reality = <String, dynamic>{'enabled': true, 'public_key': pbk};
     if (q['sid'] != null) reality['short_id'] = q['sid'];
     tls['reality'] = reality;
     tls['utls'] = {'enabled': true, 'fingerprint': hasFp ? fp : 'chrome'};

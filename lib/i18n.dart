@@ -26,6 +26,7 @@ const Map<String, String> _kEn = {
   'Выйти': 'Sign out',
   'Ок': 'OK',
   'Отключись, чтобы сменить сервер': 'Disconnect to switch server',
+  'Отключись, чтобы сменить режим': 'Disconnect to switch mode',
   'Не удалось открыть ссылку': "Couldn't open the link",
   'Главная': 'Home',
   'Серверы': 'Servers',

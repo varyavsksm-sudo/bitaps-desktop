@@ -214,7 +214,13 @@ extension ShellHome on ShellState {
   Widget _modeChip(String label, int i) {
     final sel = mode == i;
     return GestureDetector(
-      onTap: () { rebuild(() { mode = i; if (conn == 0) server = serverForMode(i); }); _save(); },
+      onTap: () {
+        // Смена режима меняет и сервер → запрещаем не только при conn==2, но и при conn==1
+        // (конфиг коннекта уже собран), иначе туннель и выбранный режим/сервер разъезжаются.
+        if (conn != 0) { _toast(tr('Отключись, чтобы сменить режим')); return; }
+        rebuild(() { mode = i; server = serverForMode(i); });
+        _save();
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         height: 40, alignment: Alignment.center,

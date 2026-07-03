@@ -30,6 +30,9 @@ part 'screens/lock.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Тему применяем СИНХРОННО до первого кадра и до WindowOptions: иначе backgroundColor окна
+  // читает дефолтную тёмную C.bg, и у пользователей светлой темы мелькает тёмный фон на старте.
+  await _applyStoredThemeEarly();
   // window_manager — только десктоп (на Android/iOS его нет → иначе краш на старте)
   if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
     await windowManager.ensureInitialized();
@@ -37,7 +40,7 @@ Future<void> main() async {
       size: const Size(440, 900),
       minimumSize: const Size(390, 760),
       center: true,
-      backgroundColor: C.bg,
+      backgroundColor: C.bg, // уже согласован с сохранённой темой (см. _applyStoredThemeEarly)
       title: 'bitaps VPN',
     );
     windowManager.waitUntilReadyToShow(opts, () async {
@@ -46,6 +49,21 @@ Future<void> main() async {
     });
   }
   runApp(const BitApp());
+}
+
+// Прочитать сохранённый themeMode (0 тёмная · 1 светлая · 2 системная) и применить тему ДО runApp/окна.
+// Дешёвое чтение SharedPreferences; при любой ошибке молча остаёмся на дефолте, старт не блокируем.
+Future<void> _applyStoredThemeEarly() async {
+  try {
+    final p = await SharedPreferences.getInstance();
+    final tm = (p.getInt('themeMode') ?? 0).clamp(0, 2);
+    final light = tm == 1 ||
+        (tm == 2 &&
+            WidgetsBinding.instance.platformDispatcher.platformBrightness == Brightness.light);
+    C.applyTheme(light);
+  } catch (_) {
+    // не удалось прочитать настройку — оставляем дефолтную тему, окно всё равно откроется
+  }
 }
 
 // ============================ APP ============================
@@ -172,9 +190,13 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       onPersist: _save,
       onSpin: _spinConn,
     );
-    _conn.addListener(() { if (mounted) setState(() {}); });
+    // conn мог смениться (подключение/обрыв/таймер) → пересобираем И сверяем анимации здесь,
+    // а не пост-фреймом на каждый build (см. _syncAnimations вызовы у мутаторов tab/тема/стиль).
+    _conn.addListener(() { if (mounted) { setState(() {}); _syncAnimations(); } });
     _load();
     _checkUpdate();
+    // Одноразовый пост-фрейм: первичная сверка анимаций после первого кадра (дальше — событийно).
+    WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _syncAnimations(); });
   }
 
   // крутить кнопку-шестерёнку: быстро во время коннекта, спокойно в покое/при обрыве.
@@ -267,6 +289,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       _locked = tgl1 && (appPin?.isNotEmpty ?? false);
       server = serverForMode(mode); // сервер согласован с сохранённым режимом (без рассинхрона)
     });
+    _syncAnimations(); // применили тему/вкладку/стиль из хранилища → сверяем анимации разом
     if (loggedIn) _refreshSub(silent: true);
     // Авто-коннект НЕ должен подниматься сквозь блокировку или без логина: если экран заблокирован
     // (_locked) — стартуем после разблокировки (см. _tryUnlock), иначе пробуем сразу.
@@ -292,7 +315,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   @override
   void didChangePlatformBrightness() {
     // системная тема сменилась в ОС — подхватываем на лету, если выбран режим «Системная»
-    if (themeMode == 2 && mounted) setState(_applyThemeMode);
+    if (themeMode == 2 && mounted) { setState(_applyThemeMode); _syncAnimations(); } // starfield только в тёмной
   }
 
   Future<void> _save() async {
@@ -505,7 +528,9 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   }
 
   void _pickServer(Server s) {
-    if (conn == 2) {
+    // Запрещаем смену и при conn==1 (идёт подключение): конфиг коннекта уже собран со старым
+    // сервером — иначе UI показал бы один сервер, а туннель поднимался бы на другой (рассинхрон).
+    if (conn != 0) {
       _toast(tr('Отключись, чтобы сменить сервер'));
       return;
     }
@@ -519,8 +544,10 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
 
   @override
   Widget build(BuildContext context) {
-    // после кадра сверяем, какие анимации должны идти (вкладка/тема/стиль/подключение/блокировка)
-    WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _syncAnimations(); });
+    // _syncAnimations больше НЕ регистрируем пост-фреймом на каждый build (плодило аллокации на
+    // частых setState). Вместо этого зовём его событийно у мутаторов, влияющих на видимость анимаций:
+    // смена вкладки (_tabItem), темы (_themeChip/didChangePlatformBrightness), стиля кнопки (_styleChip),
+    // подключения (слушатель _conn), блокировки (lifecycle/_tryUnlock/_forgotPin) и первично в initState.
     // Статус-бар/системные оверлеи под актуальную тему: в светлой — тёмные иконки, в тёмной — светлые.
     final overlay = (C.light ? SystemUiOverlayStyle.dark : SystemUiOverlayStyle.light).copyWith(
       statusBarColor: Colors.transparent,
@@ -587,7 +614,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       container: true,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: () => setState(() => tab = i),
+        onTap: () { setState(() => tab = i); _syncAnimations(); },
         child: ExcludeSemantics(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 6),
