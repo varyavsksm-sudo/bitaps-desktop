@@ -50,6 +50,21 @@ extension ShellApi on ShellState {
     );
   }
 
+  // 2xx, но тело — не JSON-объект (пустое/HTML/массив). Это НЕ обрыв сети: возвращаем null, чтобы
+  // вызывающий показал «непонятный ответ сервера», а не вводящее в заблуждение «нет интернета».
+  Map<String, dynamic>? _asObj(String body) {
+    try {
+      final d = jsonDecode(body);
+      if (d is Map<String, dynamic>) return d;
+      if (d is Map) return d.cast<String, dynamic>();
+    } catch (_) {/* не JSON */}
+    return null;
+  }
+
+  String get _badRespErr => appLang == 'en'
+      ? 'Unexpected server response. Try again later.'
+      : 'Непонятный ответ сервера. Попробуй позже.';
+
   // ----- вход по ключу / реальная подписка / устройства -----
   void _applySub(Map<String, dynamic> d, {bool fresh = false}) {
     // явный вход в аккаунт (fresh) сбрасывает ранее импортированный чужой ключ — ключ аккаунта
@@ -80,7 +95,8 @@ extension ShellApi on ShellState {
       if (!mounted) return;
       if (r.statusCode == 401 || r.statusCode == 403) { _doLogout(); _toast(tr('Сессия истекла — войди снова')); return; }
       if (r.statusCode >= 500) { _toast(_srvErr(r.statusCode)); return; } // 5xx → «сервер недоступен», а не «нет интернета»
-      final d = jsonDecode(r.body) as Map<String, dynamic>;
+      final d = _asObj(r.body);
+      if (d == null) { _toast(_badRespErr); return; }
       if (d['ok'] == true && d['login_secret'] is String) {
         rebuild(() => loginSecret = d['login_secret'] as String);
         _save();
@@ -132,7 +148,8 @@ extension ShellApi on ShellState {
         _loginError(tr('Слишком много попыток. Подожди минуту и попробуй снова.'));
         return;
       }
-      final d = jsonDecode(r.body) as Map<String, dynamic>;
+      final d = _asObj(r.body);
+      if (d == null) { _toast(_badRespErr); return; }
       if (d['ok'] == true && d['telegram_id'] is num && d['app_token'] is String) {
         rebuild(() {
           tgId = (d['telegram_id'] as num).toInt();
@@ -164,7 +181,8 @@ extension ShellApi on ShellState {
               body: jsonEncode({'action': 'start'}))
           .timeout(const Duration(seconds: 15));
       if (r.statusCode >= 500) { _toast(_srvErr(r.statusCode)); return; } // 5xx → «сервер недоступен», а не «нет интернета»
-      final d = jsonDecode(r.body) as Map<String, dynamic>;
+      final d = _asObj(r.body);
+      if (d == null) { _toast(_badRespErr); return; }
       if (d['ok'] != true || d['url'] == null || d['token'] is! String) {
         _toast(tr('Не удалось начать вход, попробуй ещё раз'));
         return;
@@ -212,7 +230,8 @@ extension ShellApi on ShellState {
                 headers: {'content-type': 'application/json', 'apikey': kApiKey},
                 body: jsonEncode({'action': 'check', 'token': token}))
             .timeout(const Duration(seconds: 10));
-        final cd = jsonDecode(cr.body) as Map<String, dynamic>;
+        final cd = _asObj(cr.body);
+        if (cd == null) continue; // непонятный ответ — не рушим опрос, ждём следующей итерации
         // cd['key'] несёт login_secret (UUID) — вход по vpn_key закрыт на сервере (app-login → 403).
         // _login сам определит UUID как «Код входа» и залогинится по secret, а не по key.
         if (cd['key'] != null) { key = cd['key'] as String; break; }
@@ -280,7 +299,8 @@ extension ShellApi on ShellState {
         if (!silent) _toast(_srvErr(r.statusCode));
         return;
       }
-      final d = jsonDecode(r.body) as Map<String, dynamic>;
+      final d = _asObj(r.body);
+      if (d == null) { if (!silent) _toast(_badRespErr); return; }
       if (d['ok'] == true) {
         rebuild(() => _applySub(d));
         _save();

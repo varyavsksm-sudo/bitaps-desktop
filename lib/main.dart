@@ -531,6 +531,14 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     );
   }
 
+  // Единая точка смены вкладки: setState(tab) + _syncAnimations(). Звать ВЕЗДЕ вместо голого
+  // rebuild(()=>tab=…), иначе анимации (шестерёнка/кольца/starfield) крутятся вхолостую на вкладке
+  // без них и жгут батарею (как было у «сменить» на Главной, минуя логику _tabItem).
+  void _goTab(int i) {
+    setState(() => tab = i);
+    _syncAnimations();
+  }
+
   void _pickServer(Server s) {
     // Запрещаем смену и при conn==1 (идёт подключение): конфиг коннекта уже собран со старым
     // сервером — иначе UI показал бы один сервер, а туннель поднимался бы на другой (рассинхрон).
@@ -618,7 +626,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       container: true,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: () { setState(() => tab = i); _syncAnimations(); },
+        onTap: () => _goTab(i),
         child: ExcludeSemantics(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 6),

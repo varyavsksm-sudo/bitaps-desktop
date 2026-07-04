@@ -103,9 +103,8 @@ const Map<String, String> _kEn = {
   'Подключиться к быстрейшему серверу': 'Connect to the fastest server',
 
   // ---- servers.dart ----
-  'серверов\nонлайн': 'servers\nonline',
+  'серверов\nдоступно': 'servers\navailable',
   'локаций': 'locations',
-  'аптайм': 'uptime',
   'Быстрый сервер': 'Fast server',
   'АВТО': 'AUTO',
   'Поиск города или страны': 'Search city or country',
@@ -145,7 +144,7 @@ const Map<String, String> _kEn = {
   '6 МЕС': '6 MO',
   '1 ГОД': '1 YR',
   'ТРИАЛ': 'TRIAL',
-  'В буфере нет vless:// или ссылки-подписки': 'No vless:// or subscription link in the clipboard',
+  'В буфере нет ключа vless://': 'No vless:// key in the clipboard',
   'неизвестный хост': 'unknown host',
   'Ключ заменён ✓': 'Key replaced ✓',
   'Подписка истекла': 'Subscription expired',
@@ -234,6 +233,7 @@ const Map<String, String> _kEn = {
   'подключение': 'connection',
   'Авто': 'Auto',
   'Протокол': 'Protocol',
+  'подбирается автоматически': 'auto-detected',
   'Протокол подбирается автоматически под твой ключ. Настраивать ничего не нужно.':
       'The protocol is chosen automatically from your key. Nothing to configure.',
   'скоро': 'soon',

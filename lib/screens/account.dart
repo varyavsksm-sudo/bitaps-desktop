@@ -18,8 +18,10 @@ extension ShellAccount on ShellState {
   Future<void> _importKey() async {
     final data = await Clipboard.getData('text/plain');
     final t = (data?.text ?? '').trim();
-    if (!(t.startsWith('vless://') || t.startsWith('http://') || t.startsWith('https://'))) {
-      _toast(tr('В буфере нет vless:// или ссылки-подписки'));
+    // Принимаем только сам VPN-ключ (vless://). Fetch подписки по http(s)-ссылке не реализован —
+    // раньше ссылка молча сохранялась как ключ и коннект падал, поэтому http(s) больше не принимаем.
+    if (!t.startsWith('vless://')) {
+      _toast(tr('В буфере нет ключа vless://'));
       return;
     }
     final host = _hostOf(t);

@@ -2,17 +2,20 @@ part of '../main.dart';
 
 // ============================ SERVERS ============================
 extension ShellServers on ShellState {
-  Widget _servers() => ListView(
+  Widget _servers() {
+    // Честные цифры из реальных данных (models.dart), а не выдуманные «32 / 12 / 99.9%»:
+    // считаем реально доступные серверы и их локации (города). Зарубежные (available:false) не в счёт.
+    final avail = [...ruServers, ...intlServers].where((s) => s.available).toList();
+    final locations = avail.map((s) => s.city).toSet().length;
+    return ListView(
         padding: const EdgeInsets.all(20),
         children: [
           Text(tr('Серверы'), style: disp(26, w: FontWeight.w800)),
           const SizedBox(height: 18),
           Row(children: [
-            Expanded(child: _infoTile('32', tr('серверов\nонлайн'))),
+            Expanded(child: _infoTile('${avail.length}', tr('серверов\nдоступно'))),
             const SizedBox(width: 12),
-            Expanded(child: _infoTile('12', tr('локаций'))),
-            const SizedBox(width: 12),
-            Expanded(child: _infoTile('99.9%', tr('аптайм'))),
+            Expanded(child: _infoTile('$locations', tr('локаций'))),
           ]),
           const SizedBox(height: 16),
           GestureDetector(
@@ -51,6 +54,7 @@ extension ShellServers on ShellState {
           ..._serverSections(),
         ],
       );
+  }
 
   List<Widget> _serverSections() {
     final all = [...ruServers, ...intlServers];

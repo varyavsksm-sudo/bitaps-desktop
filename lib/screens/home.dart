@@ -63,7 +63,7 @@ extension ShellHome on ShellState {
           ])),
           GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTap: () => rebuild(() => tab = 1),
+            onTap: () => _goTab(1),
             child: Row(children: [
               Icon(Icons.swap_horiz, size: 17, color: C.accent),
               const SizedBox(width: 5),

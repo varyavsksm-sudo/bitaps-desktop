@@ -75,6 +75,28 @@ extension ShellSettings on ShellState {
     );
   }
 
+  // Честный лейбл протокола: выводим ФАКТИЧЕСКИЙ протокол текущего ключа (парсер умеет
+  // vless/trojan/vmess/ss/hysteria2), а не захардкоженный «VLESS + Reality».
+  String _protoLabel() {
+    final scheme = keyStr.split(':').first.toLowerCase();
+    switch (scheme) {
+      case 'vless':
+        final sec = Uri.tryParse(keyStr)?.queryParameters['security']?.toLowerCase();
+        return sec == 'reality' ? 'VLESS + Reality' : 'VLESS';
+      case 'trojan':
+        return 'Trojan';
+      case 'vmess':
+        return 'VMess';
+      case 'ss':
+        return 'Shadowsocks';
+      case 'hysteria2':
+      case 'hy2':
+        return 'Hysteria2';
+      default:
+        return tr('подбирается автоматически');
+    }
+  }
+
   void _showStats() {
     _dialog(tr('Статистика'),
         appLang == 'en'
@@ -105,7 +127,7 @@ extension ShellSettings on ShellState {
               final t = ctrl.text.trim();
               ctrl.dispose();
               Navigator.pop(context);
-              if (t.startsWith('vless://') || t.startsWith('http://') || t.startsWith('https://')) {
+              if (t.startsWith('vless://')) {
                 // ТОТ ЖE trusted-host гейт, что и в _importKey: без него «вставь это в Свой конфиг»
                 // обходил защиту и при kRealTunnel=true трафик молча ушёл бы на хост атакующего.
                 final host = _hostOf(t);
@@ -192,7 +214,7 @@ extension ShellSettings on ShellState {
               const SizedBox(width: 12),
               Text(tr('Протокол'), style: disp(15, w: FontWeight.w500)),
               const Spacer(),
-              Text('VLESS + Reality', style: mono(13, c: C.muted)),
+              Text(_protoLabel(), style: mono(13, c: C.muted)),
             ]),
           )),
           const SizedBox(height: 8),

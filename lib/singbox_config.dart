@@ -292,7 +292,8 @@ Map<String, dynamic>? _parseHysteria2(String key) {
   if (u == null || u.host.isEmpty || u.userInfo.isEmpty) return null;
   final q = u.queryParameters;
   final tls = <String, dynamic>{'enabled': true, 'server_name': q['sni'] ?? u.host};
-  if (q['insecure'] == '1') tls['insecure'] = true;
+  // insecure уважаем только для доверенных bitaps-хостов (иначе чужой ключ открыл бы MITM).
+  if (q['insecure'] == '1' && _isTrustedTunnelHost(u.host)) tls['insecure'] = true;
   return {
     'type': 'hysteria2',
     'tag': 'proxy',
@@ -305,14 +306,18 @@ Map<String, dynamic>? _parseHysteria2(String key) {
 
 // ============================ SHARED BUILDERS ============================
 
-Map<String, dynamic> _tlsBlock(String security, Map<String, String> q, String defaultSni) {
+Map<String, dynamic> _tlsBlock(String security, Map<String, String> q, String host) {
   final tls = <String, dynamic>{
     'enabled': true,
-    'server_name': q['sni'] ?? q['host'] ?? defaultSni,
+    'server_name': q['sni'] ?? q['host'] ?? host,
   };
   final alpn = q['alpn'] ?? '';
   if (alpn.isNotEmpty) tls['alpn'] = alpn.split(',');
-  if (q['allowInsecure'] == '1' || q['insecure'] == '1') tls['insecure'] = true;
+  // insecure/allowInsecure отключает проверку TLS-сертификата (MITM-риск). Уважаем флаг ТОЛЬКО для
+  // доверенных bitaps-хостов; у любого чужого хоста игнорируем, чтобы вредоносный ключ не открыл перехват.
+  if ((q['allowInsecure'] == '1' || q['insecure'] == '1') && _isTrustedTunnelHost(host)) {
+    tls['insecure'] = true;
+  }
   final fp = q['fp'] ?? '';
   final hasFp = fp.isNotEmpty;
   if (security == 'reality') {
@@ -357,6 +362,18 @@ Map<String, dynamic>? _transportBlock(Map<String, String> q) {
 }
 
 // ============================ HELPERS ============================
+
+/// Доверенные bitaps-хосты, которым позволено запрашивать insecure-TLS (отключение проверки
+/// сертификата). Для любого другого хоста insecure игнорируется — иначе чужой ключ открыл бы MITM.
+/// Совпадает по логике с _isTrustedHost (main.dart): точный домен bitaps или его поддомен.
+bool _isTrustedTunnelHost(String host) {
+  final h = host.toLowerCase();
+  const domains = ['bitaps.app', 'bitapsvpn.com'];
+  for (final d in domains) {
+    if (h == d || h.endsWith('.$d')) return true;
+  }
+  return false;
+}
 
 /// percent-decode с фолбэком (битый encoding не должен ронять импорт).
 String _decode(String s) {
