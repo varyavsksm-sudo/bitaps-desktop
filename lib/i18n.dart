@@ -213,7 +213,6 @@ const Map<String, String> _kEn = {
   'Вставь ключ vless://…': 'Paste a vless://… key',
   'Сохранить': 'Save',
   'Конфиг очищен': 'Config cleared',
-  'Конфиг сохранён ✓': 'Config saved ✓',
   'персонализация': 'personalization',
   'Цвет акцента': 'Accent color',
   'Кнопка подключения': 'Connect button',

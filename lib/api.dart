@@ -220,6 +220,17 @@ extension ShellApi on ShellState {
     }
     if (!mounted) return;
     bool cancelled = false;
+    // Держим ссылку на Navigator диалога, снятую ДО showDialog: если экран размонтируется во время
+    // опроса, `mounted` станет false и закрыть окно через `context` уже нельзя → диалог утечёт.
+    // Захваченный navigator позволяет закрыть окно из finally при любом исходе. dialogOpen страхует
+    // от двойного pop (кнопка «Отмена» закрывает окно сама).
+    final nav = Navigator.of(context, rootNavigator: true);
+    bool dialogOpen = true;
+    void closeDialog() {
+      if (!dialogOpen) return;
+      dialogOpen = false;
+      if (nav.canPop()) nav.pop();
+    }
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -236,31 +247,36 @@ extension ShellApi on ShellState {
               textAlign: TextAlign.center, style: mono(12, c: C.muted)),
         ]),
         actions: [
-          TextButton(onPressed: () { cancelled = true; Navigator.pop(dctx); }, child: Text(tr('Отмена'), style: mono(13, c: C.muted))),
+          TextButton(onPressed: () { cancelled = true; dialogOpen = false; Navigator.pop(dctx); }, child: Text(tr('Отмена'), style: mono(13, c: C.muted))),
         ],
       ),
     );
     String? key;
-    // опрашиваем до серверного TTL привязки (~15 мин), чтобы позднее подтверждение не терялось
-    for (int i = 0; i < 180 && !cancelled; i++) {
-      await Future.delayed(const Duration(seconds: 5));
-      if (cancelled || !mounted) break;
-      try {
-        final cr = await http
-            .post(Uri.parse(kAppPair),
-                headers: {'content-type': 'application/json', 'apikey': kApiKey},
-                body: jsonEncode({'action': 'check', 'token': token}))
-            .timeout(const Duration(seconds: 10));
-        final cd = _asObj(cr.body);
-        if (cd == null) continue; // непонятный ответ — не рушим опрос, ждём следующей итерации
-        // cd['key'] несёт login_secret (UUID) — вход по vpn_key закрыт на сервере (app-login → 403).
-        // _login сам определит UUID как «Код входа» и залогинится по secret, а не по key.
-        if (cd['key'] != null) { key = cd['key'] as String; break; }
-        if (cd['pending'] != true && cd['ok'] != true) break; // истёк/ошибка
-      } catch (_) {/* сеть моргнула — продолжаем опрос */}
+    try {
+      // опрашиваем до серверного TTL привязки (~15 мин), чтобы позднее подтверждение не терялось
+      for (int i = 0; i < 180 && !cancelled; i++) {
+        await Future.delayed(const Duration(seconds: 5));
+        if (cancelled || !mounted) break;
+        try {
+          final cr = await http
+              .post(Uri.parse(kAppPair),
+                  headers: {'content-type': 'application/json', 'apikey': kApiKey},
+                  body: jsonEncode({'action': 'check', 'token': token}))
+              .timeout(const Duration(seconds: 10));
+          final cd = _asObj(cr.body);
+          if (cd == null) continue; // непонятный ответ — не рушим опрос, ждём следующей итерации
+          // cd['key'] несёт login_secret (UUID) — вход по vpn_key закрыт на сервере (app-login → 403).
+          // _login сам определит UUID как «Код входа» и залогинится по secret, а не по key.
+          if (cd['key'] != null) { key = cd['key'] as String; break; }
+          if (cd['pending'] != true && cd['ok'] != true) break; // истёк/ошибка
+        } catch (_) {/* сеть моргнула — продолжаем опрос */}
+      }
+    } finally {
+      // Закрываем окно во всех путях: успех, таймаут опроса, размонтирование экрана.
+      // При «Отмене» dialogOpen уже false — closeDialog ничего не делает (не двойной pop).
+      closeDialog();
     }
     if (cancelled) return; // окно уже закрыто «Отменой»
-    if (mounted && Navigator.canPop(context)) Navigator.pop(context);
     if (key != null) {
       await _login(key);
     } else if (mounted) {
@@ -323,6 +339,9 @@ extension ShellApi on ShellState {
       final d = _asObj(r.body);
       if (d == null) { if (!silent) _toast(_badRespErr); return; }
       if (d['ok'] == true) {
+        // logout мог произойти во время запроса (mounted остаётся true, но loggedIn=false):
+        // не воскрешаем подписку/ключ/устройства вышедшего аккаунта поздним ответом.
+        if (!loggedIn) return;
         rebuild(() => _applySub(d));
         _save();
         if (!silent) _toast(del != null ? tr('Устройство удалено ✓') : tr('Обновлено ✓'));
