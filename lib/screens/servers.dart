@@ -7,6 +7,10 @@ extension ShellServers on ShellState {
     // считаем реально доступные серверы и их локации (города). Зарубежные (available:false) не в счёт.
     final avail = [...ruServers, ...intlServers].where((s) => s.available).toList();
     final locations = avail.map((s) => s.city).toSet().length;
+    // Пока туннель поднят/поднимается (conn!=0), выбор сервера отбивается тостом. Список при этом
+    // выглядит кликабельным → показываем тонкий inline-хинт и приглушаем некликабельные-сейчас строки
+    // (текущий сервер остаётся читаемым). Логику/тосты не трогаем — только визуальная подсказка.
+    final locked = conn != 0;
     return ListView(
         padding: const EdgeInsets.all(20),
         children: [
@@ -51,13 +55,21 @@ extension ShellServers on ShellState {
               onTap: () => rebuild(() { _q = ''; _search.clear(); }),
               child: Icon(Icons.close, size: 16, color: C.muted)),
           ])),
+          if (locked) ...[
+            const SizedBox(height: 16),
+            Row(children: [
+              Icon(Icons.lock_outline, size: 14, color: C.muted),
+              const SizedBox(width: 6),
+              Flexible(child: Text(tr('Отключись, чтобы сменить сервер'), style: mono(12))),
+            ]),
+          ],
           const SizedBox(height: 22),
-          ..._serverSections(),
+          ..._serverSections(locked),
         ],
       );
   }
 
-  List<Widget> _serverSections() {
+  List<Widget> _serverSections(bool locked) {
     final all = [...ruServers, ...intlServers];
     final q = _q.trim().toLowerCase();
     if (q.isNotEmpty) {
@@ -81,7 +93,7 @@ extension ShellServers on ShellState {
       return [
         _kicker(tr('результаты')),
         const SizedBox(height: 10),
-        for (final s in found) _serverRow(s),
+        for (final s in found) _serverRow(s, locked),
       ];
     }
     final favList = all.where((s) => favs.contains(s.id)).toList();
@@ -89,27 +101,30 @@ extension ShellServers on ShellState {
       if (favList.isNotEmpty) ...[
         _kicker(tr('⭐ избранное')),
         const SizedBox(height: 10),
-        for (final s in favList) _serverRow(s),
+        for (final s in favList) _serverRow(s, locked),
         const SizedBox(height: 22),
       ],
       _kicker(tr('🇷🇺 Россия')),
       const SizedBox(height: 10),
-      for (final s in ruServers) _serverRow(s),
+      for (final s in ruServers) _serverRow(s, locked),
       const SizedBox(height: 22),
       _kicker(tr('🌍 Зарубежные · скоро')),
       const SizedBox(height: 10),
-      for (final s in intlServers) _serverRow(s),
+      for (final s in intlServers) _serverRow(s, locked),
     ];
   }
 
-  Widget _serverRow(Server s) {
+  Widget _serverRow(Server s, bool locked) {
     final sel = s.id == server.id;
     final pingCol = s.ping < 60 ? C.ok : s.ping < 120 ? C.warn : C.danger;
     final pingLabel = s.ping < 60 ? tr('быстрый отклик') : s.ping < 120 ? tr('средний отклик') : tr('медленный отклик');
+    // При locked (conn!=0) все строки кроме текущего сервера некликабельны-сейчас → приглушаем их,
+    // чтобы список не выглядел обманчиво активным. Текущий сервер (sel) оставляем читаемым.
+    final dimmed = (locked && !sel) || !s.available;
     return IgnorePointer(
       ignoring: !s.available,
       child: Opacity(
-        opacity: s.available ? 1 : 0.55,
+        opacity: dimmed ? 0.55 : 1,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: s.available ? () => _pickServer(s) : null,

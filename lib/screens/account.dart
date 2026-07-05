@@ -153,7 +153,7 @@ extension ShellAccount on ShellState {
                   contentPadding: EdgeInsets.zero, hintText: tr('Опиши проблему…'), hintStyle: mono(13, c: C.muted)),
               )),
             const SizedBox(height: 12),
-            _btn(tr('Отправить'), kind: 0, icon: Icons.send, onTap: _sendSupport),
+            _btn(tr('Отправить'), kind: 0, icon: Icons.send, onTap: _supportSending ? null : _sendSupport),
             const SizedBox(height: 10),
             GestureDetector(
               behavior: HitTestBehavior.opaque,
@@ -229,7 +229,7 @@ extension ShellAccount on ShellState {
               hintText: tr('Код входа (UUID из бота или письма)'), hintStyle: mono(12, c: C.muted)))),
         const SizedBox(height: 10),
         Row(children: [
-          Expanded(child: _btn(tr('Войти'), kind: 1, icon: Icons.login, onTap: _login)),
+          Expanded(child: _btn(tr('Войти'), kind: 1, icon: Icons.login, onTap: _loggingIn ? null : () => _login())),
           const SizedBox(width: 12),
           Expanded(child: _btn(tr('Ключ в боте'), kind: 1, icon: Icons.smart_toy, onTap: () => _open(kBot))),
         ]),

@@ -17,8 +17,11 @@ extension ShellApi on ShellState {
   }
 
   // Инструмент с сетью: окно с крутилкой → результат прямо в окне (видно всегда)
+  // Ре-entrancy-гвард: двойной тап по «Спид-тест»/«Проверка утечек» не стартует 2 запроса + 2 диалога.
   Future<void> _runTool(String title, Future<String> Function() work) async {
-    final fut = work();
+    if (_toolBusy) return;
+    _toolBusy = true;
+    final fut = work().whenComplete(() => _toolBusy = false);
     if (!mounted) return;
     showDialog(
       context: context,
@@ -113,6 +116,7 @@ extension ShellApi on ShellState {
 
   Future<void> _login([String? presetKey]) async {
     if (!mounted) return; // _pairLogin может звать после закрытия экрана
+    if (_loggingIn) return; // гвард от двойного входа (двойной тап / _pairLogin + ручной)
     final key = (presetKey ?? _loginCtrl.text).trim();
     if (key.length < 12) {
       _toast(tr('Вставь Код входа из бота или письма'));
@@ -134,6 +138,7 @@ extension ShellApi on ShellState {
       return;
     }
     _toast(tr('Вхожу…'));
+    rebuild(() => _loggingIn = true); // гасим кнопку «Войти» на время запроса
     try {
       final r = await http
           .post(Uri.parse(kAppLogin),
@@ -178,6 +183,8 @@ extension ShellApi on ShellState {
     } catch (e) {
       debugPrint('_login error: $e');
       _toast(_netErr);
+    } finally {
+      if (mounted) { rebuild(() => _loggingIn = false); } else { _loggingIn = false; }
     }
   }
 
@@ -360,12 +367,14 @@ extension ShellApi on ShellState {
   }
 
   Future<void> _sendSupport() async {
+    if (_supportSending) return; // гвард от двойной отправки в поддержку
     final msg = _support.text.trim();
     if (msg.isEmpty) {
       _toast(tr('Сначала напиши сообщение'));
       return;
     }
     _toast(tr('Отправляю…'));
+    rebuild(() => _supportSending = true); // гасим кнопку «Отправить» на время запроса
     try {
       final r = await http.post(Uri.parse(kNotify),
           headers: {'content-type': 'application/json', 'apikey': kApiKey},
@@ -394,6 +403,8 @@ extension ShellApi on ShellState {
     } catch (e) {
       debugPrint('_sendSupport error: $e');
       _toast(_netErr);
+    } finally {
+      if (mounted) { rebuild(() => _supportSending = false); } else { _supportSending = false; }
     }
   }
 

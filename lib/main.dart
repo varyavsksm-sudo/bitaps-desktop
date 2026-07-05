@@ -131,6 +131,9 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   bool subActive = false;
   bool _subLoading = false;
   bool _pairing = false; // идёт авто-вход через бота — гвард от двойного тапа (два диалога подряд)
+  bool _toolBusy = false; // идёт сетевой инструмент (спид-тест/утечки) — гвард от двойного запуска
+  bool _supportSending = false; // идёт отправка в поддержку — гвард от двойной отправки
+  bool _loggingIn = false; // идёт вход по ключу — гвард от двойного входа
   List<Map<String, dynamic>> devices = [];
   final TextEditingController _loginCtrl = TextEditingController();
   bool get loggedIn => tgId != null && appToken != null;

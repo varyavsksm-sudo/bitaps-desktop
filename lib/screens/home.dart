@@ -113,7 +113,10 @@ extension ShellHome on ShellState {
         const SizedBox(height: 12),
         GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: () { if (conn == 0) rebuild(() => server = fastestServer); toggle(); },
+          // Во время «Подключение…» (conn==1) подпись всё ещё «Подключиться», но toggle() отменил бы
+          // коннект — это противоречит подписи. Гасим повторный тап (главная кнопка/шестерёнка, где
+          // busy виден, не трогаются).
+          onTap: () { if (conn == 1) return; if (conn == 0) rebuild(() => server = fastestServer); toggle(); },
           child: _card(child: Row(children: [
             _gIcon(Icons.bolt),
             const SizedBox(width: 13),

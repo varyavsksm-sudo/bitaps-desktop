@@ -150,8 +150,11 @@ extension ShellWidgets on ShellState {
   Widget _btn(String label, {int kind = 0, IconData? icon, VoidCallback? onTap}) {
     final solid = kind == 0;
     final line = kind == 1;
-    return GestureDetector(
-      onTap: onTap ?? () {},
+    // onTap==null трактуем как disabled: гасим кнопку (Opacity), снимаем свечение и делаем её
+    // некликабельной (onTap=null, а не пустой колбэк). Активные кнопки (onTap!=null) не меняются.
+    final disabled = onTap == null;
+    final btn = GestureDetector(
+      onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
         width: double.infinity,
@@ -162,7 +165,7 @@ extension ShellWidgets on ShellState {
           color: solid ? null : (line ? Colors.transparent : C.fill),
           borderRadius: BorderRadius.circular(12),
           border: solid ? null : Border.all(color: C.line),
-          boxShadow: solid ? [BoxShadow(color: C.accent.withValues(alpha: 0.45), blurRadius: 22)] : null,
+          boxShadow: (solid && !disabled) ? [BoxShadow(color: C.accent.withValues(alpha: 0.45), blurRadius: 22)] : null,
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           if (icon != null) ...[Icon(icon, size: 17, color: solid ? C.bg : C.text), const SizedBox(width: 8)],
@@ -170,5 +173,6 @@ extension ShellWidgets on ShellState {
         ]),
       ),
     );
+    return disabled ? Opacity(opacity: 0.5, child: btn) : btn;
   }
 }
