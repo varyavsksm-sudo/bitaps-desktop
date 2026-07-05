@@ -241,7 +241,10 @@ extension ShellAccount on ShellState {
     final ringFrac = total > 0 ? (dleft / total).clamp(0.0, 1.0) : 0.0;
     return _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [_gIcon(Icons.workspace_premium), const SizedBox(width: 12), _kicker(tr('подписка')), const Spacer(),
-        GestureDetector(behavior: HitTestBehavior.opaque, onTap: () => _refreshSub(), child: Icon(Icons.refresh, size: 18, color: C.accent))]),
+        GestureDetector(behavior: HitTestBehavior.opaque, onTap: () => _refreshSub(),
+          child: _subLoading
+              ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: C.accent))
+              : Icon(Icons.refresh, size: 18, color: C.accent))]),
       const SizedBox(height: 16),
       Row(children: [
         _ring(dleft, ringFrac),
@@ -313,7 +316,10 @@ extension ShellAccount on ShellState {
   Widget _devicesCard() => _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [_gIcon(Icons.devices), const SizedBox(width: 12),
           _kicker(appLang == 'en' ? 'devices · ${devices.length}/$_limitStr' : 'устройства · ${devices.length}/$_limitStr'), const Spacer(),
-          GestureDetector(behavior: HitTestBehavior.opaque, onTap: () => _refreshSub(), child: Icon(Icons.refresh, size: 18, color: C.accent))]),
+          GestureDetector(behavior: HitTestBehavior.opaque, onTap: () => _refreshSub(),
+            child: _subLoading
+                ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: C.accent))
+                : Icon(Icons.refresh, size: 18, color: C.accent))]),
         const SizedBox(height: 8),
         if (devices.isEmpty)
           Padding(padding: const EdgeInsets.symmetric(vertical: 16), child: Column(children: [

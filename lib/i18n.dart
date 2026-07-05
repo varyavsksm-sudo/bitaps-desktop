@@ -93,6 +93,9 @@ const Map<String, String> _kEn = {
   'Подключено': 'Connected',
   'под защитой': "you're protected",
   'нажми на кнопку': 'tap the button',
+  'устанавливаем соединение…': 'establishing connection…',
+  'Подключиться': 'Connect',
+  'Скорость появится после подключения': 'Speed will appear once connected',
   'Режим подбирает сервер: Авто/Игры — минимальный пинг, Стрим — наименьшая нагрузка, Прив. — быстрый сервер (зарубежные скоро).':
       'Mode picks the server: Auto/Games — lowest ping, Stream — lowest load, Private — the fastest server (international soon).',
   'сменить': 'change',
@@ -251,6 +254,7 @@ const Map<String, String> _kEn = {
   // ---- lock.dart ----
   'bitaps заблокирован': 'bitaps locked',
   'Введи PIN, чтобы продолжить': 'Enter your PIN to continue',
+  'Введите PIN': 'Enter PIN', // Semantics-метка PIN-поля (скринридер)
   'Разблокировать': 'Unlock',
   'Не помню PIN — сбросить': 'Forgot PIN — reset lock',
   'Сбросить PIN?': 'Reset PIN?',

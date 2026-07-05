@@ -253,13 +253,14 @@ extension ShellSettings on ShellState {
 
   Widget _toggle(String title, String sub, bool v, ValueChanged<bool> onCh) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(children: [
+        // MergeSemantics: скринридер зачитывает заголовок+подзаголовок+состояние переключателя как один элемент.
+        child: MergeSemantics(child: Row(children: [
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(title, style: disp(15, w: FontWeight.w600)),
             const SizedBox(height: 2),
             Text(sub, style: mono(11)),
           ])),
           Switch(value: v, onChanged: onCh, activeThumbColor: C.accent),
-        ]),
+        ])),
       );
 }

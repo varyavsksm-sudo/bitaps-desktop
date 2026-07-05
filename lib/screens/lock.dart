@@ -23,18 +23,20 @@ extension ShellLock on ShellState {
             style: mono(12, c: _pinLockSecs > 0 ? C.danger : C.muted),
             textAlign: TextAlign.center),
           const SizedBox(height: 22),
-          SizedBox(width: 210, child: TextField(controller: _pinCtrl, obscureText: true, keyboardType: TextInputType.number,
+          // Semantics-обёртка: голосовой хинт '••••' бесполезен, даём скринридеру осмысленную метку поля.
+          SizedBox(width: 210, child: Semantics(textField: true, label: tr('Введите PIN'), child: TextField(controller: _pinCtrl, obscureText: true, keyboardType: TextInputType.number,
             enabled: _pinLockSecs == 0, // блокируем ввод на время отсчёта
             inputFormatters: [FilteringTextInputFormatter.digitsOnly], // PIN только цифры (number-клавиатура на десктопе не ограничивает ввод)
             textAlign: TextAlign.center, maxLength: 8, style: disp(22, w: FontWeight.w700, c: C.text), cursorColor: C.accent, autofocus: true,
             decoration: InputDecoration(counterText: '', hintText: '••••', hintStyle: disp(22, c: C.muted),
               enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: C.line)),
               focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: C.accent))),
-            onSubmitted: (_) => _tryUnlock())),
+            onSubmitted: (_) => _tryUnlock()))),
           const SizedBox(height: 18),
-          SizedBox(width: 210, child: Opacity(
+          // Semantics: во время локаута кнопка визуально приглушена — сообщаем скринридеру, что она недоступна.
+          SizedBox(width: 210, child: Semantics(button: true, enabled: _pinLockSecs == 0, label: tr('Разблокировать'), child: Opacity(
             opacity: _pinLockSecs > 0 ? 0.45 : 1.0, // во время локаута кнопка приглушена — видно, что она неактивна
-            child: _btn(tr('Разблокировать'), kind: 0, icon: Icons.lock_open, onTap: _pinLockSecs > 0 ? null : _tryUnlock))),
+            child: _btn(tr('Разблокировать'), kind: 0, icon: Icons.lock_open, onTap: _pinLockSecs > 0 ? null : _tryUnlock)))),
           const SizedBox(height: 16),
           GestureDetector(behavior: HitTestBehavior.opaque, onTap: _forgotPin,
             child: Text(tr('Не помню PIN — сбросить'), style: mono(12, c: C.muted))),

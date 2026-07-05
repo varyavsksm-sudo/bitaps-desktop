@@ -447,14 +447,9 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
 
   // Доверенный хост = точный домен bitaps, а не любая строка с подстрокой 'bitaps'
   // (иначе bitaps.attacker.com / evil-bitaps.io прошли бы без предупреждения).
-  bool _isTrustedHost(String host) {
-    final h = host.toLowerCase();
-    const domains = ['bitaps.app', 'bitapsvpn.com'];
-    for (final d in domains) {
-      if (h == d || h.endsWith('.$d')) return true;
-    }
-    return false;
-  }
+  // Делегирует к общей isTrustedBitapsHost (singbox_config.dart) — единый список доменов
+  // и логика сравнения с гардом туннеля (_isTrustedTunnelHost), чтобы они не разъезжались.
+  bool _isTrustedHost(String host) => isTrustedBitapsHost(host);
 
   Future<bool?> _confirmForeignHost(String host) {
     return showDialog<bool>(

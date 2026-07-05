@@ -363,17 +363,26 @@ Map<String, dynamic>? _transportBlock(Map<String, String> q) {
 
 // ============================ HELPERS ============================
 
-/// Доверенные bitaps-хосты, которым позволено запрашивать insecure-TLS (отключение проверки
-/// сертификата). Для любого другого хоста insecure игнорируется — иначе чужой ключ открыл бы MITM.
-/// Совпадает по логике с _isTrustedHost (main.dart): точный домен bitaps или его поддомен.
-bool _isTrustedTunnelHost(String host) {
+/// Единый список доверенных bitaps-доменов + проверка хоста — общий источник правды
+/// для гарда туннеля здесь (_isTrustedTunnelHost) и гарда импорта в UI (_isTrustedHost,
+/// main.dart). Обе стороны делегируют сюда, чтобы список доменов и логика сравнения не
+/// разъезжались. Логика прежняя: точный домен bitaps ИЛИ его поддомен (h == d либо h
+/// оканчивается на «.d»). Определено в этом (импортируемом) модуле, т.к. main.dart уже
+/// импортирует singbox_config.dart, а models.dart — лишь `part of main.dart` и извне не виден.
+const List<String> kTrustedBitapsDomains = ['bitaps.app', 'bitapsvpn.com'];
+
+bool isTrustedBitapsHost(String host) {
   final h = host.toLowerCase();
-  const domains = ['bitaps.app', 'bitapsvpn.com'];
-  for (final d in domains) {
+  for (final d in kTrustedBitapsDomains) {
     if (h == d || h.endsWith('.$d')) return true;
   }
   return false;
 }
+
+/// Доверенные bitaps-хосты, которым позволено запрашивать insecure-TLS (отключение проверки
+/// сертификата). Для любого другого хоста insecure игнорируется — иначе чужой ключ открыл бы MITM.
+/// Делегирует к общей [isTrustedBitapsHost] (единый список доменов).
+bool _isTrustedTunnelHost(String host) => isTrustedBitapsHost(host);
 
 /// percent-decode с фолбэком (битый encoding не должен ронять импорт).
 String _decode(String s) {

@@ -10,13 +10,16 @@ const kSupport = 'https://t.me/bitapssupport';
 // Libbox.xcframework; Android: VpnService + libbox). См. TUNNEL.md. При true без нативной
 // стороны connect() честно бросит TunnelUnavailable — фейкового «Подключено» не будет.
 const bool kRealTunnel = false;
-const kNotify = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/notify';
+// Базовый URL edge-функций (functions/v1) — вынесен, чтобы не повторять один и тот же префикс
+// в каждом эндпоинте. Значения эндпоинтов идентичны прежним полным литералам.
+const kFnBase = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/';
+const kNotify = '${kFnBase}notify';
 const kApiKey = 'sb_publishable_X2CJWgjqeZtbNelAri9ofw_trbfWF9Z';
 const kDemoKey = 'vless://3a7c9f1e-0b2d-4e6f-9a1c-7b3e2f8d4c5a@vpn.bitaps.app:443?security=reality&type=tcp&sni=www.microsoft.com&fp=chrome&pbk=DEMObitapsPLACEHOLDERkey00000000000000000000000&sid=88#bitaps%20VPN';
-const kAppLogin = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/app-login';
-const kAppSub = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/app-sub';
-const kAppPair = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/app-pair';
-const kRotateSecret = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/rotate-secret';
+const kAppLogin = '${kFnBase}app-login';
+const kAppSub = '${kFnBase}app-sub';
+const kAppPair = '${kFnBase}app-pair';
+const kRotateSecret = '${kFnBase}rotate-secret';
 
 // Авто-проверка обновлений: CI вшивает номер сборки через --dart-define и кладёт build_number.txt в релиз.
 // Локальная/дев-сборка → 0 (проверку не делаем, чтобы не звать «обновись» в дебаге).

@@ -44,7 +44,9 @@ extension ShellHome on ShellState {
           style: TextStyle(fontFamily: 'JetBrainsMono', fontSize: 38, fontWeight: FontWeight.w700,
             color: connected ? C.accentSoft : C.muted, letterSpacing: 2))),
         const SizedBox(height: 4),
-        Center(child: Text(connected ? tr('под защитой') : tr('нажми на кнопку'), style: mono(12))),
+        Center(child: Text(
+          conn == 0 ? tr('нажми на кнопку') : conn == 1 ? tr('устанавливаем соединение…') : tr('под защитой'),
+          style: mono(12))),
         const SizedBox(height: 20),
         Row(children: [
           for (int i = 0; i < 4; i++)
@@ -102,6 +104,11 @@ extension ShellHome on ShellState {
             const SizedBox(height: 8),
             Text(tr('Демо-режим — скорость и IP показаны для примера'), style: mono(10, c: C.muted)),
           ],
+          // Пока не подключены — прочерки без пояснения непонятны: подсказываем, что цифры появятся после коннекта.
+          if (!connected) ...[
+            const SizedBox(height: 8),
+            Text(tr('Скорость появится после подключения'), style: mono(10, c: C.muted)),
+          ],
         ])),
         const SizedBox(height: 12),
         GestureDetector(
@@ -138,26 +145,36 @@ extension ShellHome on ShellState {
     final glow = connected ? 0.6 : busy ? 0.35 : 0.0;
     final col = busy ? C.accentSoft : C.accent;
     final showRings = connected || btnStyle == 3;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
+    // Semantics для скринридера: кнопка подключения. label — что делает (подключить/отключить),
+    // value — текущее состояние. ExcludeSemantics на визуале, чтобы кольца/иконки не шумели.
+    return Semantics(
+      button: true,
+      label: connected ? tr('Отключить') : tr('Подключиться'),
+      value: conn == 0 ? tr('Отключено') : conn == 1 ? tr('Подключение…') : tr('Подключено'),
       onTap: toggle,
-      child: SizedBox(
-        width: 270, height: 270,
-        child: Stack(alignment: Alignment.center, children: [
-          if (showRings)
-            AnimatedBuilder(animation: _wave, builder: (_, __) {
-              return Stack(alignment: Alignment.center, children: [
-                for (int i = 0; i < 3; i++) _pulseRing((_wave.value + i / 3) % 1.0),
-              ]);
-            }),
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 450),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: toggle,
+        child: ExcludeSemantics(
+          child: SizedBox(
             width: 270, height: 270,
-            decoration: BoxDecoration(shape: BoxShape.circle, gradient: RadialGradient(
-              colors: [C.accent.withValues(alpha: glow), C.accent.withValues(alpha: 0)], stops: const [0.25, 1.0])),
+            child: Stack(alignment: Alignment.center, children: [
+              if (showRings)
+                AnimatedBuilder(animation: _wave, builder: (_, __) {
+                  return Stack(alignment: Alignment.center, children: [
+                    for (int i = 0; i < 3; i++) _pulseRing((_wave.value + i / 3) % 1.0),
+                  ]);
+                }),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 450),
+                width: 270, height: 270,
+                decoration: BoxDecoration(shape: BoxShape.circle, gradient: RadialGradient(
+                  colors: [C.accent.withValues(alpha: glow), C.accent.withValues(alpha: 0)], stops: const [0.25, 1.0])),
+              ),
+              _powerInner(col),
+            ]),
           ),
-          _powerInner(col),
-        ]),
+        ),
       ),
     );
   }

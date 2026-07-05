@@ -37,14 +37,15 @@ extension ShellServers on ShellState {
           _card(padding: 12, child: Row(children: [
             Icon(Icons.search, size: 18, color: C.muted),
             const SizedBox(width: 10),
-            Expanded(child: TextField(
+            // Semantics-метка поля: hint виден глазами, но скринридеру нужна явная текстовая метка.
+            Expanded(child: Semantics(textField: true, label: tr('Поиск города или страны'), child: TextField(
               controller: _search,
               onChanged: (v) => rebuild(() => _q = v),
               style: mono(13, c: C.text),
               cursorColor: C.accent,
               decoration: InputDecoration(isDense: true, border: InputBorder.none,
                 contentPadding: EdgeInsets.zero, hintText: tr('Поиск города или страны'), hintStyle: mono(13, c: C.muted)),
-            )),
+            ))),
             if (_q.isNotEmpty) GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: () => rebuild(() { _q = ''; _search.clear(); }),
