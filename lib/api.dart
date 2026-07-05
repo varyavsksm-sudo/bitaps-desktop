@@ -75,8 +75,9 @@ extension ShellApi on ShellState {
     subExpires = d['expires_at']?.toString();
     subLimit = (d['device_limit'] is num) ? (d['device_limit'] as num).toInt() : null;
     subActive = d['active'] == true;
-    // не перетираем вручную импортированный ключ (чужой хост) авто-рефрешем подписки
-    if (d['vpn_key'] is String && importedHost == null) keyStr = d['vpn_key'] as String;
+    // не перетираем вручную импортированный ключ авто-рефрешем подписки: importedHost==null у ключей
+    // без URL-хоста (vmess/base64-ss) → доп. страхуемся на customCfg, иначе свой конфиг молча терялся
+    if (d['vpn_key'] is String && importedHost == null && customCfg == null) keyStr = d['vpn_key'] as String;
     if (d['login_secret'] is String) loginSecret = d['login_secret'] as String;
     final dl = d['devices'];
     devices = (dl is List) ? dl.whereType<Map>().map((e) => e.cast<String, dynamic>()).toList() : [];
