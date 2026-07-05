@@ -159,9 +159,9 @@ extension ShellWidgets on ShellState {
         alignment: Alignment.center,
         decoration: BoxDecoration(
           gradient: solid ? accentGrad : null,
-          color: solid ? null : (line ? Colors.transparent : Colors.white.withValues(alpha: 0.05)),
+          color: solid ? null : (line ? Colors.transparent : C.fill),
           borderRadius: BorderRadius.circular(12),
-          border: line ? Border.all(color: C.line) : null,
+          border: solid ? null : Border.all(color: C.line),
           boxShadow: solid ? [BoxShadow(color: C.accent.withValues(alpha: 0.45), blurRadius: 22)] : null,
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [

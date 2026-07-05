@@ -32,7 +32,9 @@ extension ShellLock on ShellState {
               focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: C.accent))),
             onSubmitted: (_) => _tryUnlock())),
           const SizedBox(height: 18),
-          SizedBox(width: 210, child: _btn(tr('Разблокировать'), kind: 0, icon: Icons.lock_open, onTap: _pinLockSecs > 0 ? null : _tryUnlock)),
+          SizedBox(width: 210, child: Opacity(
+            opacity: _pinLockSecs > 0 ? 0.45 : 1.0, // во время локаута кнопка приглушена — видно, что она неактивна
+            child: _btn(tr('Разблокировать'), kind: 0, icon: Icons.lock_open, onTap: _pinLockSecs > 0 ? null : _tryUnlock))),
           const SizedBox(height: 16),
           GestureDetector(behavior: HitTestBehavior.opaque, onTap: _forgotPin,
             child: Text(tr('Не помню PIN — сбросить'), style: mono(12, c: C.muted))),

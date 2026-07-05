@@ -93,6 +93,9 @@ class ConnectionController extends ChangeNotifier {
           _fail(gen, '$e');
           return;
         } on TimeoutException {
+          // движок мог зависнуть и подняться уже после таймаута — гасим натив, чтобы не осталось
+          // «осиротевшего» туннеля при выключенном UI (как ветка disconnect в reset()).
+          if (kRealTunnel) NativeTunnel.disconnect();
           _fail(gen, appLang == 'en' ? 'Connection timed out' : 'Подключение не удалось — таймаут');
           return;
         } catch (e) {
@@ -179,6 +182,9 @@ class ConnectionController extends ChangeNotifier {
   // движок сообщил об обрыве соединения — снимаем «подключено»
   void _dropped(int gen) {
     if (_disposed || gen != _gen) return;
+    // синхронизируем натив с UI: явно гасим движок, чтобы после обрыва он не остался в
+    // полу-поднятом/реконнектящем состоянии (как reset()/disconnect-ветка toggle()).
+    if (kRealTunnel) NativeTunnel.disconnect();
     _stopWatch();
     onSpin(false);
     conn = 0; secs = 0;

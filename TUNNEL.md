@@ -64,3 +64,14 @@ ios-arm64, ios-sim, macos, tvos). Готовая реализация extension 
 Dart-слой и Swift-extension — код-полные. «Настоящий VPN» упирается в сборочно-подписные шаги
 (Apple-аккаунт, gomobile-.aar под Android), которые не делаются из CLI — только в Xcode/Android Studio
 на машине разработчика.
+
+## ⚠️ ОБЯЗАТЕЛЬНО до боевого включения (kRealTunnel=true): killswitch / fail-closed
+
+Аудит 2026-07-05: при обрыве туннеля (`_dropped`) и таймауте `connect()` Dart теперь явно зовёт
+`NativeTunnel.disconnect()` (натив и UI синхронны, нет «осиротевшего» движка). НО это ещё НЕ killswitch:
+после обрыва трафик уходит в ОТКРЫТУЮ сеть, а не блокируется. До релиза боевого VPN нативная сторона
+ДОЛЖНА реализовать fail-closed:
+- Android: `VpnService` с блокирующим маршрутом до явного disconnect + обработка `onRevoke`.
+- macOS/iOS: `NEPacketTunnelProvider` `includeAllNetworks`/`enforceRoutes`, не рвать маршрут при reconnect.
+- Опция «Kill Switch» в настройках уже есть в UI-заготовке — привязать к нативному поведению.
+Без этого пользователь при обрыве думает, что защищён, а трафик идёт напрямую.

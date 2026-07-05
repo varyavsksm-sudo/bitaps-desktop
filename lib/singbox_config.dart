@@ -328,7 +328,7 @@ Map<String, dynamic> _tlsBlock(String security, Map<String, String> q, String ho
       throw const FormatException('Reality-ключ без public_key (pbk) — конфиг был бы невалиден');
     }
     final reality = <String, dynamic>{'enabled': true, 'public_key': pbk};
-    if (q['sid'] != null) reality['short_id'] = q['sid'];
+    if (q['sid'] != null && q['sid']!.isNotEmpty) reality['short_id'] = q['sid'];
     tls['reality'] = reality;
     tls['utls'] = {'enabled': true, 'fingerprint': hasFp ? fp : 'chrome'};
   } else if (hasFp) {
