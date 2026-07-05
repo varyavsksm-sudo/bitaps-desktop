@@ -130,6 +130,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   int? subLimit;
   bool subActive = false;
   bool _subLoading = false;
+  bool _pairing = false; // идёт авто-вход через бота — гвард от двойного тапа (два диалога подряд)
   List<Map<String, dynamic>> devices = [];
   final TextEditingController _loginCtrl = TextEditingController();
   bool get loggedIn => tgId != null && appToken != null;
@@ -247,6 +248,9 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     final secToken = await _secRead(p, 'appToken');
     final secLogin = await _secRead(p, 'loginSecret');
     final secCfg = await _secRead(p, 'cfg'); // «Свой конфиг» может нести vless-ключ → тоже в secure storage
+    // троттлинг PIN переживает рестарт: счётчик ошибок + время окончания локаута (epoch ms)
+    final secPinFails = await _secRead(p, 'pinFails');
+    final secPinLockUntil = await _secRead(p, 'pinLockUntil');
     if (!mounted) return;
     // язык: сохранённый выбор, иначе автоопределение по системной локали (ru → ru, иначе en)
     final savedLang = p.getString('lang');
@@ -260,6 +264,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       autoConnect = p.getBool('autoConnect') ?? false;
       tgl1 = p.getBool('tgl1') ?? false;
       appPin = secPin;
+      _pinFails = int.tryParse(secPinFails ?? '') ?? 0; // восстанавливаем счётчик ошибок PIN
       tgl2 = p.getBool('tgl2') ?? true;
       tgl3 = p.getBool('tgl3') ?? true;
       tgl4 = p.getBool('tgl4') ?? false;
@@ -294,6 +299,13 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       server = serverForMode(mode); // сервер согласован с сохранённым режимом (без рассинхрона)
     });
     _syncAnimations(); // применили тему/вкладку/стиль из хранилища → сверяем анимации разом
+    // если на прошлой сессии перебор PIN оставил активный локаут — доигрываем оставшийся отсчёт,
+    // чтобы блокировка ввода пережила рестарт (иначе перезапуск сбрасывал троттлинг мгновенно).
+    if (_locked) {
+      final lockUntil = int.tryParse(secPinLockUntil ?? '') ?? 0;
+      final remainMs = lockUntil - DateTime.now().millisecondsSinceEpoch;
+      if (remainMs > 0) _startPinLock((remainMs / 1000).ceil().clamp(1, 60));
+    }
     if (loggedIn) _refreshSub(silent: true);
     // Авто-коннект НЕ должен подниматься сквозь блокировку или без логина: если экран заблокирован
     // (_locked) — стартуем после разблокировки (см. _tryUnlock), иначе пробуем сразу.
@@ -410,8 +422,10 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     }
   }
 
-  void _copy(String text, String label) {
-    Clipboard.setData(ClipboardData(text: text));
+  Future<void> _copy(String text, String label) async {
+    // ждём фактической записи в буфер, потом сообщаем «скопировано» — иначе тост мог опередить запись
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
     _toast(appLang == 'en' ? '$label · copied to clipboard' : '$label · скопировано в буфер');
   }
 

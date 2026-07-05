@@ -47,6 +47,7 @@ extension ShellLock on ShellState {
       _pinFails = 0;
       _pinLockTimer?.cancel();
       _pinLockSecs = 0;
+      _clearPinThrottle(); // успех → стираем сохранённый счётчик/таймер локаута
       rebuild(() => _locked = false);
       _syncAnimations(); // разблокировали → поднимаем анимации, погашенные на замке
       _pinCtrl.clear();
@@ -59,14 +60,34 @@ extension ShellLock on ShellState {
       if (_pinFails >= 5) {
         _startPinLock(((_pinFails - 4) * 5).clamp(5, 60));
       } else {
+        _savePinThrottle(); // копим счётчик и до порога — эскалация должна пережить рестарт
         _toast(tr('Неверный PIN'));
       }
     }
   }
 
+  // Персист троттлинга PIN в secure storage (та же ОС-крипта, что и сам PIN): счётчик ошибок и
+  // время окончания локаута (epoch ms). Fail-open: сбой записи не ломает вход, просто не переживёт рестарт.
+  Future<void> _savePinThrottle({int lockUntilMs = 0}) async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      await _secWrite(p, 'pinFails', _pinFails > 0 ? '$_pinFails' : null);
+      await _secWrite(p, 'pinLockUntil', lockUntilMs > 0 ? '$lockUntilMs' : null);
+    } catch (_) {/* fail-open */}
+  }
+
+  Future<void> _clearPinThrottle() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      await _secWrite(p, 'pinFails', null);
+      await _secWrite(p, 'pinLockUntil', null);
+    } catch (_) {/* fail-open */}
+  }
+
   void _startPinLock(int secs) {
     _pinLockTimer?.cancel();
     rebuild(() => _pinLockSecs = secs);
+    _savePinThrottle(lockUntilMs: DateTime.now().millisecondsSinceEpoch + secs * 1000);
     _pinLockTimer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (!mounted) { t.cancel(); return; }
       rebuild(() => _pinLockSecs = (_pinLockSecs - 1).clamp(0, 60));
@@ -92,6 +113,7 @@ extension ShellLock on ShellState {
               _pinCtrl.clear();
               _pinLockTimer?.cancel();
               _pinFails = 0;
+              _clearPinThrottle(); // сброс PIN → стираем и сохранённый локаут
               rebuild(() { appPin = null; tgl1 = false; _locked = false; _pinLockSecs = 0; });
               _syncAnimations(); // сняли замок → поднимаем погашенные анимации
               _save(); // _secWrite(appPin=null) удаляет PIN из secure storage
@@ -131,8 +153,10 @@ extension ShellLock on ShellState {
         }, child: Text(tr('Включить'), style: mono(13, c: C.accent))),
       ],
     ));
-    c1.dispose(); c2.dispose();
     rebuild(() => tgl1 = (ok == true));
     _save();
+    // освобождаем контроллеры ПОСЛЕ того, как маршрут диалога полностью снят (пост-фрейм) —
+    // иначе TextField'ы ещё в дереве на выходной анимации → в debug «used after being disposed».
+    WidgetsBinding.instance.addPostFrameCallback((_) { c1.dispose(); c2.dispose(); });
   }
 }

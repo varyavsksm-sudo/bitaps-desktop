@@ -106,7 +106,9 @@ extension ShellSettings on ShellState {
 
   void _customConfig() {
     final ctrl = TextEditingController(text: customCfg ?? '');
-    showDialog(
+    // Контроллер живёт, пока открыт диалог; освобождаем ПОСЛЕ закрытия маршрута (иначе TextField
+    // ещё смонтирован → в debug «used after being disposed»). onPressed читает ctrl.text до pop.
+    showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (_) => AlertDialog(
@@ -121,15 +123,16 @@ extension ShellSettings on ShellState {
           decoration: InputDecoration(hintText: tr('Вставь ключ vless://…'), hintStyle: mono(12, c: C.muted)),
         ),
         actions: [
-          TextButton(onPressed: () { ctrl.dispose(); Navigator.pop(context); }, child: Text(tr('Отмена'), style: mono(13, c: C.muted))),
+          TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Отмена'), style: mono(13, c: C.muted))),
           TextButton(
             onPressed: () async {
               final t = ctrl.text.trim();
-              ctrl.dispose();
               Navigator.pop(context);
-              if (t.startsWith('vless://')) {
+              if (kSupportedKeySchemes.any((s) => t.startsWith(s))) {
                 // ТОТ ЖE trusted-host гейт, что и в _importKey: без него «вставь это в Свой конфиг»
                 // обходил защиту и при kRealTunnel=true трафик молча ушёл бы на хост атакующего.
+                // Принимаем ВСЕ схемы singbox_config (vless/trojan/vmess/ss/hysteria2), а не только
+                // vless:// — и реально ПРИМЕНЯЕМ конфиг как ключ подключения (keyStr), а не мёртвый customCfg.
                 final host = _hostOf(t);
                 if (host == null || !_isTrustedHost(host)) {
                   final ok = await _confirmForeignHost(host ?? tr('неизвестный хост'));
@@ -141,17 +144,23 @@ extension ShellSettings on ShellState {
                 _toast(host != null
                     ? (appLang == 'en' ? 'Key replaced with $host ✓' : 'Ключ заменён на $host ✓')
                     : tr('Ключ заменён ✓'));
-              } else {
-                rebuild(() => customCfg = t.isEmpty ? null : t);
+              } else if (t.isEmpty) {
+                rebuild(() => customCfg = null);
                 _save();
-                _toast(t.isEmpty ? tr('Конфиг очищен') : tr('Конфиг сохранён ✓'));
+                _toast(tr('Конфиг очищен'));
+              } else {
+                // раньше любой текст «сохранялся» в customCfg с зелёным тостом, но customCfg нигде не
+                // читается → фича была мёртвой. Не врём об успехе: честно отклоняем неподдержанный формат.
+                _toast(appLang == 'en'
+                    ? 'Need a vless:// key (or trojan/vmess/ss/hysteria2). Other formats are not supported.'
+                    : 'Нужен ключ vless:// (или trojan/vmess/ss/hysteria2). Другой формат не поддерживается.');
               }
             },
             child: Text(tr('Сохранить'), style: mono(13, c: C.accent)),
           ),
         ],
       ),
-    );
+    ).then((_) => ctrl.dispose());
   }
 
   Widget _settings() => ListView(
@@ -182,7 +191,7 @@ extension ShellSettings on ShellState {
           _kicker(tr('безопасность')),
           const SizedBox(height: 10),
           _card(child: Column(children: [
-            _toggle(tr('Блокировка входа'), tr('PIN при открытии приложения'), tgl1, (v) { if (v) { _enableLock(); } else { rebuild(() { tgl1 = false; appPin = null; }); _save(); } }),
+            _toggle(tr('Блокировка входа'), tr('PIN при открытии приложения'), tgl1, (v) { if (v) { _enableLock(); } else { _pinFails = 0; _clearPinThrottle(); rebuild(() { tgl1 = false; appPin = null; }); _save(); } }),
             _divider(),
             _toggle(tr('Обрыв соединения'), tr('Уведомлять, если VPN отвалился'), tgl2, (v) { rebuild(() => tgl2 = v); _save(); }),
             _divider(),

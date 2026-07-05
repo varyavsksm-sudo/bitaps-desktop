@@ -190,6 +190,10 @@ class ConnectionController extends ChangeNotifier {
   // полный сброс подключения (напр. при выходе из аккаунта): гасит поколение, таймеры, статус
   void reset() {
     _gen++;
+    // боевой режим: гасим и НАСТОЯЩИЙ туннель — иначе после logout трафик продолжал бы идти через
+    // движок (reset раньше только обнулял UI). fire-and-forget, как ветка disconnect в toggle().
+    // Демо-режим (kRealTunnel=false) туннель не поднимает — там гасить нечего, поведение не меняем.
+    if (kRealTunnel) NativeTunnel.disconnect();
     _stopWatch();
     onSpin(false);
     conn = 0; secs = 0;

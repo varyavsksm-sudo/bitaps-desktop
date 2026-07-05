@@ -117,14 +117,18 @@ extension ShellApi on ShellState {
       _toast(tr('Вставь Код входа из бота или письма'));
       return;
     }
-    // Вход по vpn_key (vless://… / https://…) отключён на сервере (app-login → 403): принимаем
-    // ТОЛЬКО «Код входа» (UUID login_secret, уходит как {secret}). Так вызов согласован с бэкендом,
-    // а юзер не бьётся о вечный 403, вставляя VPN-ключ. _pairLogin тоже передаёт сюда UUID.
-    if (key.startsWith('vless://') || key.startsWith('http://') || key.startsWith('https://')) {
+    // Вход по VPN-ключу поддержан для ЛЕГАСИ-аккаунтов без login_secret: app-login бутстрапит их
+    // по {key} и сам выдаёт свежий «Код входа». Ключ (vless://…/trojan://… — любая схема из
+    // kSupportedKeySchemes) уходит как {key}; всё остальное — как {secret} (UUID «Кода входа»).
+    // Аккаунты, у которых секрет уже есть, сервер честно 403-ит (use_login_secret) — показываем
+    // подсказку про «Код входа». _pairLogin передаёт сюда UUID → идёт по ветке secret.
+    final isKey = kSupportedKeySchemes.any((s) => key.startsWith(s));
+    // http(s)://-подписки (не share-link) не поддержаны: fetch подписки не реализован → сразу отклоняем.
+    if (!isKey && (key.startsWith('http://') || key.startsWith('https://'))) {
       _loginError(tr('Вход по VPN-ключу отключён. Вставь «Код входа» (UUID) из бота или письма.'));
       return;
     }
-    if (key.contains(RegExp(r'\s'))) {
+    if (!isKey && key.contains(RegExp(r'\s'))) {
       _toast(tr('Вставь «Код входа» (UUID) — без пробелов'));
       return;
     }
@@ -133,7 +137,7 @@ extension ShellApi on ShellState {
       final r = await http
           .post(Uri.parse(kAppLogin),
               headers: {'content-type': 'application/json', 'apikey': kApiKey},
-              body: jsonEncode({'secret': key}))
+              body: jsonEncode(isKey ? {'key': key} : {'secret': key}))
           .timeout(const Duration(seconds: 20));
       if (!mounted) return;
       if (r.statusCode >= 500) {
@@ -141,7 +145,12 @@ extension ShellApi on ShellState {
         return;
       }
       if (r.statusCode == 401 || r.statusCode == 403) {
-        _loginError(tr('Этот ключ не подошёл. Возьми актуальный ключ в боте.'));
+        // 403 use_login_secret: у аккаунта уже есть «Код входа» — вход по ключу закрыт (вектор захвата).
+        // Ведём юзера на «Код входа», а не показываем невнятное «ключ не подошёл».
+        final d403 = _asObj(r.body);
+        _loginError(d403 != null && d403['error'] == 'use_login_secret'
+            ? tr('Вход по VPN-ключу отключён. Вставь «Код входа» (UUID) из бота или письма.')
+            : tr('Этот ключ не подошёл. Возьми актуальный ключ в боте.'));
         return;
       }
       if (r.statusCode == 429) {
@@ -172,7 +181,18 @@ extension ShellApi on ShellState {
   }
 
   // Авто-вход через бота: старт привязки → открыть бота → опрашивать, пока не подтвердит → войти.
+  // Гвард от двойного тапа: пока идёт привязка, повторный вызов игнорируем (иначе два диалога-ожидания).
   Future<void> _pairLogin() async {
+    if (_pairing) return;
+    _pairing = true;
+    try {
+      await _pairLoginInner();
+    } finally {
+      _pairing = false;
+    }
+  }
+
+  Future<void> _pairLoginInner() async {
     String token = '';
     try {
       final r = await http

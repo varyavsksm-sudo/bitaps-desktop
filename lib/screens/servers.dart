@@ -60,7 +60,13 @@ extension ShellServers on ShellState {
     final all = [...ruServers, ...intlServers];
     final q = _q.trim().toLowerCase();
     if (q.isNotEmpty) {
-      final found = all.where((s) => s.city.toLowerCase().contains(q) || s.country.toLowerCase().contains(q)).toList();
+      // матчим и по исходным RU-строкам (s.city/s.country), и по переведённым (tr(...)) — иначе
+      // в EN пользователь ищет «Moscow/Netherlands», а фильтр знает только «Москва/Нидерланды».
+      final found = all.where((s) =>
+          s.city.toLowerCase().contains(q) ||
+          s.country.toLowerCase().contains(q) ||
+          tr(s.city).toLowerCase().contains(q) ||
+          tr(s.country).toLowerCase().contains(q)).toList();
       if (found.isEmpty) {
         return [
           Padding(padding: const EdgeInsets.symmetric(vertical: 28), child: Column(children: [
