@@ -432,15 +432,16 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     _toast(appLang == 'en' ? '$label · copied to clipboard' : '$label · скопировано в буфер');
   }
 
-  // Хост берём ТЕМ ЖЕ парсером (Uri.parse().host), что и реальное подключение в singbox_config.dart —
-  // иначе проверка доверенного хоста и фактический коннект расходятся: напр.
-  //   vless://u@bitaps.app:443@evil.com  →  ручной indexOf дал бы «bitaps.app» (первый @),
-  //   а Uri.parse даёт «evil.com» (userinfo до ПОСЛЕДНЕГО @) — юзеру показали бы доверенное имя,
-  //   а трафик ушёл бы на злой хост. Uri.parse также корректно отдаёт хост для ключа без :порта.
+  // Хост берём ТЕМ ЖЕ парсером (outboundFromKey), что строит реальный outbound в singbox_config.dart —
+  // иначе проверка доверенного хоста и фактический коннект расходятся:
+  //   • vless://u@bitaps.app:443@evil.com → outboundFromKey отдаёт u.host = «evil.com» (userinfo до
+  //     ПОСЛЕДНЕГО @), а не «bitaps.app» — юзеру не покажут доверенное имя при уходе трафика на злой хост.
+  //   • vmess:// и ss:// в base64-форме: Uri.parse().host вернул бы мусорный base64-блоб (и ложное
+  //     «это не сервер bitaps» для настоящего ключа); outboundFromKey декодирует тело и даёт реальный server.
   String? _hostOf(String key) {
     try {
-      final h = Uri.parse(key.trim()).host;
-      if (h.isNotEmpty) return h;
+      final h = outboundFromKey(key.trim())?['server'] as String?;
+      if (h != null && h.isNotEmpty) return h;
     } catch (e) {
       // НЕ логируем сам ключ: FormatException.toString() включает исходную строку (vless://…) → утечка ключа в лог
       debugPrint('_hostOf error: ${e.runtimeType}');
