@@ -78,10 +78,13 @@ jobs:
           channel: stable
       - run: flutter --version
       - run: flutter create --org com.bitapsvpn --platforms=android --project-name bitaps_vpn .
-      - name: Patch Android manifest (INTERNET) + minSdk 24
+      - name: Patch Android manifest (INTERNET, allowBackup=false) + minSdk 24
         run: |
           perl -0pi -e 's/(<manifest\b[^>]*>)/$1\n    <uses-permission android:name="android.permission.INTERNET"\/>/' android/app/src/main/AndroidManifest.xml
           grep -q "android.permission.INTERNET" android/app/src/main/AndroidManifest.xml && echo "INTERNET ok" || (echo "INTERNET MISSING" && exit 1)
+          # allowBackup=false: не бэкапить локальную сессию/секреты приложения (flutter_secure_storage + plaintext-фолбэк) через adb/облачный backup
+          perl -0pi -e 's/(<application\b)/$1 android:allowBackup="false"/ unless /android:allowBackup/' android/app/src/main/AndroidManifest.xml
+          grep -q 'android:allowBackup="false"' android/app/src/main/AndroidManifest.xml && echo "allowBackup ok" || (echo "allowBackup MISSING" && exit 1)
           sed -i.bak 's/minSdk = flutter.minSdkVersion/minSdk = 24/; s/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' android/app/build.gradle.kts 2>/dev/null || true
           sed -i.bak 's/minSdk = flutter.minSdkVersion/minSdk = 24/; s/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' android/app/build.gradle 2>/dev/null || true
       - run: flutter pub get
