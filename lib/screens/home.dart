@@ -37,7 +37,8 @@ extension ShellHome on ShellState {
         Center(child: _powerButton()),
         const SizedBox(height: 4),
         Center(child: Text(
-          conn == 0 ? tr('Отключено') : conn == 1 ? tr('Подключение…') : tr('Подключено'),
+          // в демо (kRealTunnel=false) НЕ заявляем «Подключено/под защитой» — реального туннеля нет
+          conn == 0 ? tr('Отключено') : conn == 1 ? tr('Подключение…') : (kRealTunnel ? tr('Подключено') : tr('Демо-режим')),
           style: disp(22, w: FontWeight.w700, c: connected ? C.accent : (conn == 1 ? C.warn : C.text)))),
         const SizedBox(height: 6),
         Center(child: Text(connected ? hms : '00:00:00',
@@ -45,7 +46,7 @@ extension ShellHome on ShellState {
             color: connected ? C.accentSoft : C.muted, letterSpacing: 2))),
         const SizedBox(height: 4),
         Center(child: Text(
-          conn == 0 ? tr('нажми на кнопку') : conn == 1 ? tr('устанавливаем соединение…') : tr('под защитой'),
+          conn == 0 ? tr('нажми на кнопку') : conn == 1 ? tr('устанавливаем соединение…') : (kRealTunnel ? tr('под защитой') : tr('демо — без реального туннеля')),
           style: mono(12))),
         const SizedBox(height: 20),
         Row(children: [

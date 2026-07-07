@@ -110,16 +110,24 @@ extension ShellWidgets on ShellState {
         child: Text(t, style: mono(11, c: col, w: FontWeight.w600)),
       );
 
-  Widget _shieldPill(bool on) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        decoration: BoxDecoration(color: (on ? C.ok : C.muted).withValues(alpha: 0.12), borderRadius: BorderRadius.circular(20)),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: on ? C.ok : C.muted,
-            boxShadow: on ? [BoxShadow(color: C.ok.withValues(alpha: 0.6), blurRadius: 8)] : null)),
-          const SizedBox(width: 7),
-          Text(on ? tr('защищено') : tr('не защищено'), style: mono(12, c: on ? C.ok : C.muted, w: FontWeight.w600)),
-        ]),
-      );
+  // в демо (kRealTunnel=false) подключённое состояние НЕ показываем зелёным «защищено» —
+  // это ложный сигнал безопасности без реального туннеля. Демо → нейтральный янтарный «демо».
+  Widget _shieldPill(bool on) {
+    final green = on && kRealTunnel;
+    final demo = on && !kRealTunnel;
+    final col = green ? C.ok : (demo ? C.warn : C.muted);
+    final label = green ? tr('защищено') : (demo ? tr('демо') : tr('не защищено'));
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(color: col.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(20)),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: col,
+          boxShadow: green ? [BoxShadow(color: C.ok.withValues(alpha: 0.6), blurRadius: 8)] : null)),
+        const SizedBox(width: 7),
+        Text(label, style: mono(12, c: col, w: FontWeight.w600)),
+      ]),
+    );
+  }
 
   Widget _infoTile(String val, String label) => _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(val, style: disp(22, w: FontWeight.w800, c: C.accent)),
