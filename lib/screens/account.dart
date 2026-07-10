@@ -14,7 +14,10 @@ const Map<String, String> _planShorts = {
 const Map<String, int> _planTotalDays = {'mo': 30, 'q': 90, 'h': 180, 'yr': 365, 'trial': 3};
 
 extension ShellAccount on ShellState {
-  // Импорт своего ключа/подписки из буфера (модель Happ)
+  // Вставка ключа из буфера. Ключ bitaps = credential ВХОДА: по нему входим в аккаунт (подписка,
+  // устройства, кабинет), а не просто подменяем строку подключения — «вставила ключ и просто
+  // подключила VPN» владелицу не устраивало. Чужой (не-bitaps) ключ в аккаунт не пустит —
+  // для него остаётся старый импорт «только для подключения» (модель Happ).
   Future<void> _importKey() async {
     final data = await Clipboard.getData('text/plain');
     final t = (data?.text ?? '').trim();
@@ -29,16 +32,25 @@ extension ShellAccount on ShellState {
     if (host == null || !_isTrustedHost(host)) {
       final ok = await _confirmForeignHost(host ?? tr('неизвестный хост'));
       if (ok != true) return;
+      if (!mounted) return;
+      rebuild(() {
+        keyStr = t;
+        importedHost = host;
+      });
+      _save();
+      _toast(host != null
+          ? (appLang == 'en' ? 'Key replaced with $host ✓' : 'Ключ заменён на $host ✓')
+          : tr('Ключ заменён ✓'));
+      return;
     }
     if (!mounted) return;
-    rebuild(() {
-      keyStr = t;
-      importedHost = host;
-    });
-    _save();
-    _toast(host != null
-        ? (appLang == 'en' ? 'Key replaced with $host ✓' : 'Ключ заменён на $host ✓')
-        : tr('Ключ заменён ✓'));
+    // Ключ bitaps: не залогинены → входим по нему (app-login подтянет подписку/устройства и сам
+    // применит актуальный ключ аккаунта через _applySub). Уже залогинены → просто обновим кабинет.
+    if (!loggedIn) {
+      await _login(t);
+    } else {
+      await _refreshSub();
+    }
   }
 
   int? _daysLeft() {
@@ -217,16 +229,16 @@ extension ShellAccount on ShellState {
         const SizedBox(height: 12),
         SizedBox(width: double.infinity, child: _btn(tr('Войти через Telegram'), kind: 0, icon: Icons.send, onTap: _pairLogin)),
         const SizedBox(height: 14),
-        // Вход по VPN-ключу отключён на сервере — приглашаем вставлять только «Код входа» (UUID),
-        // который реально принимает бэкенд (app-login по {secret}). Раньше форма звала вставить
-        // vless-ключ → он уходил как {key} и всегда получал 403.
-        Text(tr('или вставь Код входа:'), style: mono(11, c: C.muted)),
+        // Вход по VPN-ключу снова разрешён на сервере (решение владельца 2026-07-10): ключ —
+        // основной credential, «Код входа» (UUID) работает как раньше. _login сам различает:
+        // vless://… уходит как {key}, UUID — как {secret}.
+        Text(tr('или вставь VPN-ключ / Код входа:'), style: mono(11, c: C.muted)),
         const SizedBox(height: 8),
         Container(padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(color: C.field, borderRadius: BorderRadius.circular(10)),
           child: TextField(controller: _loginCtrl, maxLines: 2, style: mono(11, c: C.text), cursorColor: C.accent,
             decoration: InputDecoration(isDense: true, border: InputBorder.none, contentPadding: EdgeInsets.zero,
-              hintText: tr('Код входа (UUID из бота или письма)'), hintStyle: mono(12, c: C.muted)))),
+              hintText: tr('VPN-ключ (vless://…) или Код входа'), hintStyle: mono(12, c: C.muted)))),
         const SizedBox(height: 10),
         Row(children: [
           Expanded(child: _btn(tr('Войти'), kind: 1, icon: Icons.login, onTap: _loggingIn ? null : () => _login())),

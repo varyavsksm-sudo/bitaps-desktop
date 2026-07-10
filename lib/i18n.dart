@@ -49,7 +49,7 @@ const Map<String, String> _kEn = {
   'Сессия истекла — войди снова': 'Session expired — sign in again',
   'Код входа обновлён ✓': 'Login code updated ✓',
   'Не удалось сменить код': "Couldn't change the code",
-  'Вставь Код входа из бота или письма': 'Paste your login code from the bot or email',
+  'Вставь VPN-ключ или Код входа': 'Paste your VPN key or login code',
   'Вход по VPN-ключу отключён. Вставь «Код входа» (UUID) из бота или письма.':
       'Signing in with a VPN key is disabled. Paste your login code (UUID) from the bot or email.',
   'Вставь «Код входа» (UUID) — без пробелов': 'Paste your login code (UUID) — no spaces',
@@ -183,8 +183,8 @@ const Map<String, String> _kEn = {
   'Войди через Telegram — приложение само подхватит твою подписку и ключ. Без ручного копирования.':
       'Sign in with Telegram — the app pulls in your subscription and key automatically. No manual copying.',
   'Войти через Telegram': 'Sign in with Telegram',
-  'или вставь Код входа:': 'or paste your login code:',
-  'Код входа (UUID из бота или письма)': 'Login code (UUID from the bot or email)',
+  'или вставь VPN-ключ / Код входа:': 'or paste your VPN key / login code:',
+  'VPN-ключ (vless://…) или Код входа': 'VPN key (vless://…) or login code',
   'Войти': 'Sign in',
   'Ключ в боте': 'Key in the bot',
   'подписка': 'subscription',

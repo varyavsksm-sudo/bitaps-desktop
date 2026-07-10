@@ -119,14 +119,14 @@ extension ShellApi on ShellState {
     if (_loggingIn) return; // гвард от двойного входа (двойной тап / _pairLogin + ручной)
     final key = (presetKey ?? _loginCtrl.text).trim();
     if (key.length < 12) {
-      _toast(tr('Вставь Код входа из бота или письма'));
+      _toast(tr('Вставь VPN-ключ или Код входа'));
       return;
     }
-    // Вход по VPN-ключу поддержан для ЛЕГАСИ-аккаунтов без login_secret: app-login бутстрапит их
-    // по {key} и сам выдаёт свежий «Код входа». Ключ (vless://…/trojan://… — любая схема из
-    // kSupportedKeySchemes) уходит как {key}; всё остальное — как {secret} (UUID «Кода входа»).
-    // Аккаунты, у которых секрет уже есть, сервер честно 403-ит (use_login_secret) — показываем
-    // подсказку про «Код входа». _pairLogin передаёт сюда UUID → идёт по ветке secret.
+    // Вход по VPN-ключу разрешён для ВСЕХ аккаунтов (решение владельца 2026-07-10). Ключ
+    // (vless://…/trojan://… — любая схема из kSupportedKeySchemes) уходит как {key}; всё
+    // остальное — как {secret} (UUID «Кода входа»). 403 use_login_secret остаётся обработан
+    // на случай аварийного рубильника DISABLE_KEY_LOGIN на сервере. _pairLogin передаёт сюда
+    // UUID → идёт по ветке secret.
     final isKey = kSupportedKeySchemes.any((s) => key.startsWith(s));
     // http(s)://-подписки (не share-link) не поддержаны: fetch подписки не реализован → сразу отклоняем.
     if (!isKey && (key.startsWith('http://') || key.startsWith('https://'))) {
