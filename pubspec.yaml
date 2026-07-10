@@ -41,7 +41,7 @@ flutter:
 # разложить его в AppIcon.appiconset: sips -z N N assets/icon_macos.png (N=16…1024).
 # iOS тоже НЕ здесь: CI создаёт только windows/android (ios/ нет → генератор падает,
 # уронил run 84). iOS-иконки генерятся локально из отдельного конфига:
-#   dart run flutter_launcher_icons -f flutter_launcher_icons-ios.yaml
+#   dart run flutter_launcher_icons -f icons-ios.yaml
 flutter_launcher_icons:
   image_path: "assets/icon.png"
   android: true

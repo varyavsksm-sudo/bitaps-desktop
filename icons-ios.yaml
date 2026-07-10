@@ -1,0 +1,9 @@
+# iOS-иконки — отдельным конфигом, НЕ в pubspec: CI (build.yml) создаёт только
+# windows/android, папки ios/ там нет, и генератор с ios:true роняет весь джоб.
+# ВАЖНО: имя файла НЕ должно матчить flutter_launcher_icons-*.yaml — такие файлы
+# генератор сам подхватывает как «флейворы» даже без -f (это уронило CI run 86).
+# Запускать локально, когда есть ios/: dart run flutter_launcher_icons -f icons-ios.yaml
+flutter_launcher_icons:
+  image_path: "assets/icon.png"
+  ios: true
+  remove_alpha_ios: true
