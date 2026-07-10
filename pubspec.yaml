@@ -35,12 +35,18 @@ flutter:
       fonts:
         - asset: assets/fonts/JetBrainsMono.ttf
 
+# macOS здесь СОЗНАТЕЛЬНО не включён: генератор кладёт квадрат без скруглений/полей,
+# а Dock показывает asset как есть. Мастер — assets/icon_macos.png (скруглённый квадрат
+# 824/1024 по HIG); macos/ не в git, поэтому после flutter create --platforms=macos
+# разложить его в AppIcon.appiconset: sips -z N N assets/icon_macos.png (N=16…1024).
 flutter_launcher_icons:
   image_path: "assets/icon.png"
   android: true
   min_sdk_android: 24
   adaptive_icon_background: "#0C0A14"
   adaptive_icon_foreground: "assets/icon_fg.png"
+  ios: true
+  remove_alpha_ios: true
   windows:
     generate: true
     image_path: "assets/icon.png"
