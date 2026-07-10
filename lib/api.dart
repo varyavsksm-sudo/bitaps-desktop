@@ -408,6 +408,33 @@ extension ShellApi on ShellState {
     }
   }
 
+  // Замер пинга по всем доступным серверам (кнопка «Пинг» на Серверах). Замер честный —
+  // реальный запрос по сети в момент нажатия, — но хост у всех строк один (наш бэкенд):
+  // собственных нод по городам пока нет, поэтому это отклик канала пользователя, а не
+  // конкретного города. http.get каждый раз поднимает свежее соединение (TCP+TLS) —
+  // значения не схлопываются в кэшированный keep-alive. Результаты обновляются построчно.
+  Future<void> _pingServers() async {
+    if (_pinging) return; // гвард от двойного тапа
+    rebuild(() => _pinging = true);
+    var okCount = 0;
+    try {
+      for (final s in [...ruServers, ...intlServers].where((s) => s.available)) {
+        try {
+          final sw = Stopwatch()..start();
+          await http.get(Uri.parse(kFnBase)).timeout(const Duration(seconds: 4));
+          sw.stop();
+          okCount++;
+          rebuild(() => pingMeasured[s.id] = sw.elapsedMilliseconds.clamp(1, 999));
+        } catch (_) {
+          // таймаут/обрыв на этом замере — оставляем прежнее значение строки, идём дальше
+        }
+      }
+      _toast(okCount > 0 ? tr('Пинг обновлён ✓') : _netErr);
+    } finally {
+      if (mounted) { rebuild(() => _pinging = false); } else { _pinging = false; }
+    }
+  }
+
   Future<void> _leakCheck() => _runTool(tr('Проверка утечек'), () async {
         final r = await http.get(Uri.parse('https://api.ipify.org?format=json')).timeout(const Duration(seconds: 15));
         if (r.statusCode != 200) {

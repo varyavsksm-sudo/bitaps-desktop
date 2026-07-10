@@ -116,12 +116,17 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   int accentIdx = 0, btnStyle = 0;
   int themeMode = 0; // 0 тёмная · 1 светлая · 2 системная
   bool autoConnect = false;
+  // Режим «лучший сервер»: при подключении сами берём оптимальный сервер (ползунок на Главной).
+  // Выбор конкретного сервера в списке выключает режим (см. _pickServer).
+  bool bestServer = true;
+  // Живые замеры отклика (кнопка «Пинг» на Серверах): id сервера → мс. Пока замера не было —
+  // показываем статичный s.ping из models.dart. Не персистим: замер живёт в рамках сессии.
+  final Map<String, int> pingMeasured = {};
+  bool _pinging = false; // идёт замер пинга — гвард от двойного запуска
   String keyStr = kDemoKey;
   String? customCfg;
   String? importedHost;
-  final TextEditingController _search = TextEditingController();
   final TextEditingController _support = TextEditingController();
-  String _q = '';
   final Set<String> favs = {};
   // вход / подписка / устройства (реальные данные из Supabase)
   int? tgId;
@@ -146,7 +151,13 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   int get down => _conn.down;
   int get up => _conn.up;
   int get sessions => _conn.sessions;
-  void toggle() => _conn.toggle();
+  void toggle() {
+    // Режим «лучший сервер»: перед стартом коннекта сами берём оптимальный для текущего режима
+    // сервер (для «Авто»/«Игры» это минимальный пинг — с учётом живых замеров pingOf). Только при
+    // conn==0: конфиг уже идущего подключения не трогаем.
+    if (bestServer && _conn.conn == 0) setState(() => server = serverForMode(mode));
+    _conn.toggle();
+  }
 
   // Анимации НЕ гоняем безусловно (..repeat()) — это жгло батарею: starfield + шестерёнка + кольца
   // перерисовывались каждый кадр на всех вкладках и даже в фоне. Теперь _syncAnimations() держит
@@ -235,7 +246,6 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     _spin.dispose();
     _wave.dispose();
     _twinkle.dispose();
-    _search.dispose();
     _support.dispose();
     _loginCtrl.dispose();
     _pinCtrl.dispose();
@@ -265,6 +275,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       mode = (p.getInt('mode') ?? 0).clamp(0, modeLabels.length - 1);
       themeMode = (p.getInt('themeMode') ?? 0).clamp(0, 2);
       autoConnect = p.getBool('autoConnect') ?? false;
+      bestServer = p.getBool('bestServer') ?? true;
       tgl1 = p.getBool('tgl1') ?? false;
       appPin = secPin;
       _pinFails = int.tryParse(secPinFails ?? '') ?? 0; // восстанавливаем счётчик ошибок PIN
@@ -300,6 +311,14 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       tab = loggedIn ? 0 : 2; // не вошёл → сразу экран входа (Кабинет), а не демо-главная
       _locked = tgl1 && (appPin?.isNotEmpty ?? false);
       server = serverForMode(mode); // сервер согласован с сохранённым режимом (без рассинхрона)
+      // Ползунок «лучший сервер» выключен → восстанавливаем РУЧНОЙ выбор пользователя (serverId),
+      // иначе после рестарта плашка говорила бы «сервер выбираешь ты», а стоял бы автоподобранный.
+      // Фолбэк на serverForMode выше, если сохранённый сервер исчез/стал недоступен.
+      if (!bestServer) {
+        final saved = p.getString('serverId');
+        final match = [...ruServers, ...intlServers].where((s) => s.id == saved && s.available);
+        if (match.isNotEmpty) server = match.first;
+      }
     });
     _syncAnimations(); // применили тему/вкладку/стиль из хранилища → сверяем анимации разом
     // если на прошлой сессии перебор PIN оставил активный локаут — доигрываем оставшийся отсчёт,
@@ -345,6 +364,8 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     await p.setInt('themeMode', themeMode);
     await p.setString('lang', appLang);
     await p.setBool('autoConnect', autoConnect);
+    await p.setBool('bestServer', bestServer);
+    await p.setString('serverId', server.id); // ручной выбор восстанавливаем в _load при bestServer=false
     await p.setBool('tgl1', tgl1);
     await _secWrite(p, 'appPin', appPin);
     await p.setBool('tgl2', tgl2);
@@ -371,13 +392,8 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     }
   }
 
-  // Быстрейший доступный сервер (минимальный пинг среди ru+intl) — единый источник для Главной и Серверов
-  Server get fastestServer {
-    final avail = [...ruServers, ...intlServers].where((s) => s.available).toList();
-    if (avail.isEmpty) return ruServers[0];
-    avail.sort((a, b) => a.ping.compareTo(b.ping));
-    return avail.first;
-  }
+  // Пинг сервера: живой замер (кнопка «Пинг» на Серверах), пока его нет — статичный из models.dart.
+  int pingOf(Server s) => pingMeasured[s.id] ?? s.ping;
 
   // режим реально подбирает сервер: Стрим→мин.нагрузка, Игры/Авто→мин.пинг, Прив→зарубежный (иначе лучший)
   Server serverForMode(int m) {
@@ -386,9 +402,9 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     if (m == 1) { avail.sort((a, b) => a.load.compareTo(b.load)); return avail.first; }
     if (m == 3) {
       final intl = avail.where((s) => s.country != 'Россия').toList();
-      if (intl.isNotEmpty) { intl.sort((a, b) => a.ping.compareTo(b.ping)); return intl.first; }
+      if (intl.isNotEmpty) { intl.sort((a, b) => pingOf(a).compareTo(pingOf(b))); return intl.first; }
     }
-    avail.sort((a, b) => a.ping.compareTo(b.ping));
+    avail.sort((a, b) => pingOf(a).compareTo(pingOf(b)));
     return avail.first;
   }
 
@@ -563,7 +579,10 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       _toast(appLang == 'en' ? '${tr(s.city)} — soon' : '${tr(s.city)} — скоро');
       return;
     }
-    setState(() => server = s);
+    // Выбор конкретного сервера выключает режим «лучший сервер» (ползунок на Главной) —
+    // иначе toggle() молча заменил бы только что выбранный сервер на «оптимальный».
+    setState(() { server = s; bestServer = false; });
+    _save();
     _toast(appLang == 'en' ? 'Server: ${tr(s.city)}' : 'Сервер: ${tr(s.city)}');
   }
 

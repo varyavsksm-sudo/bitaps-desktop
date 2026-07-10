@@ -62,7 +62,7 @@ extension ShellHome on ShellState {
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(tr(server.city), style: disp(16, w: FontWeight.w700)),
             const SizedBox(height: 2),
-            Text('${server.ping} ms · ${server.proto}', style: mono(12)),
+            Text('${pingOf(server)} ms · ${server.proto}', style: mono(12)),
           ])),
           GestureDetector(
             behavior: HitTestBehavior.opaque,
@@ -74,14 +74,6 @@ extension ShellHome on ShellState {
             ]),
           ),
         ])),
-        const SizedBox(height: 10),
-        Row(children: [
-          Text(tr('ещё:'), style: mono(12)),
-          const SizedBox(width: 8),
-          Expanded(child: SizedBox(height: 32, child: ListView(
-            scrollDirection: Axis.horizontal,
-            children: [for (final s in [ruServers[1], ruServers[2], ...intlServers]) _miniChip(s)]))),
-        ]),
         const SizedBox(height: 12),
         _card(padding: 13, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
@@ -112,20 +104,42 @@ extension ShellHome on ShellState {
           ],
         ])),
         const SizedBox(height: 12),
+        // Ползунок режима «лучший сервер»: подключение само берёт оптимальный под режим сервер
+        // (toggle() в main.dart). Выбор конкретного сервера в списке выключает режим (_pickServer),
+        // тап по чипу режима — включает обратно (_modeChip). Тап по всей плашке = тот же переключатель;
+        // excludeFromSemantics — чтобы у скринридера не было второго безымянного tap-узла рядом
+        // с merged-переключателем (сам паттерн MergeSemantics — как у _toggle в settings.dart).
         GestureDetector(
           behavior: HitTestBehavior.opaque,
-          // Во время «Подключение…» (conn==1) подпись всё ещё «Подключиться», но toggle() отменил бы
-          // коннект — это противоречит подписи. Гасим повторный тап (главная кнопка/шестерёнка, где
-          // busy виден, не трогаются).
-          onTap: () { if (conn == 1) return; if (conn == 0) rebuild(() => server = fastestServer); toggle(); },
-          child: _card(child: Row(children: [
+          excludeFromSemantics: true,
+          onTap: () => _setBestServer(!bestServer),
+          child: _card(child: MergeSemantics(child: Row(children: [
             _gIcon(Icons.bolt),
             const SizedBox(width: 13),
-            Text(connected ? tr('Отключить') : tr('Подключиться к быстрейшему серверу'), style: disp(15, w: FontWeight.w600)),
-          ])),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(tr('Подключаться к лучшему серверу'), style: disp(15, w: FontWeight.w600)),
+              const SizedBox(height: 2),
+              // «оптимальный под режим», а не «быстрейший»: serverForMode для Стрим берёт минимальную
+              // нагрузку, для Прив. — зарубежный; «быстрейший» в подписи противоречил бы карточке режимов
+              Text(bestServer ? tr('при подключении сам возьму оптимальный под режим') : tr('выключено — сервер выбираешь ты'),
+                style: mono(11)),
+            ])),
+            const SizedBox(width: 8),
+            Switch(value: bestServer, activeThumbColor: C.accent, onChanged: _setBestServer),
+          ]))),
         ),
       ],
     );
+  }
+
+  // Включение режима при выключенном туннеле сразу показывает оптимальный сервер в карточке
+  // (при поднятом — не трогаем: конфиг живого коннекта менять нельзя, подхватится при следующем).
+  void _setBestServer(bool v) {
+    rebuild(() {
+      bestServer = v;
+      if (v && conn == 0) server = serverForMode(mode);
+    });
+    _save();
   }
 
   // Скорость движка приходит в kbps: ≥1000 показываем как Mbps, иначе kbps.
@@ -243,7 +257,9 @@ extension ShellHome on ShellState {
         // Смена режима меняет и сервер → запрещаем не только при conn==2, но и при conn==1
         // (конфиг коннекта уже собран), иначе туннель и выбранный режим/сервер разъезжаются.
         if (conn != 0) { _toast(tr('Отключись, чтобы сменить режим')); return; }
-        rebuild(() { mode = i; server = serverForMode(i); });
+        // Режим = просьба автоподбора → включаем bestServer обратно: иначе при выключенном
+        // ползунке server молча заменился бы автоподбором, а плашка говорила бы «сервер выбираешь ты».
+        rebuild(() { mode = i; bestServer = true; server = serverForMode(i); });
         _save();
       },
       child: AnimatedContainer(
@@ -259,24 +275,4 @@ extension ShellHome on ShellState {
     );
   }
 
-  Widget _miniChip(Server s) => Padding(
-        padding: const EdgeInsets.only(right: 8),
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () => _pickServer(s),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: server.id == s.id ? C.accent.withValues(alpha: 0.16) : C.fill,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: server.id == s.id ? C.accent : C.line)),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Text(s.flag, style: const TextStyle(fontSize: 13)),
-              const SizedBox(width: 6),
-              Text(tr(s.city), style: disp(12, w: FontWeight.w600)),
-            ]),
-          ),
-        ),
-      );
 }

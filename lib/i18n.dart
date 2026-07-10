@@ -102,21 +102,20 @@ const Map<String, String> _kEn = {
   'Режим подбирает сервер: Авто/Игры — минимальный пинг, Стрим — наименьшая нагрузка, Прив. — быстрый сервер (зарубежные скоро).':
       'Mode picks the server: Auto/Games — lowest ping, Stream — lowest load, Private — the fastest server (international soon).',
   'сменить': 'change',
-  'ещё:': 'more:',
   'IP скрыт': 'IP hidden',
   'Демо-режим — скорость и IP показаны для примера': 'Demo mode — speed and IP are shown for example',
   'Отключить': 'Disconnect',
-  'Подключиться к быстрейшему серверу': 'Connect to the fastest server',
+  'Подключаться к лучшему серверу': 'Connect to the best server',
+  'при подключении сам возьму оптимальный под режим': "auto-picks the optimal server for your mode",
+  'выключено — сервер выбираешь ты': 'off — you pick the server',
 
   // ---- servers.dart ----
   'серверов\nдоступно': 'servers\navailable',
   'локаций': 'locations',
-  'Быстрый сервер': 'Fast server',
-  'АВТО': 'AUTO',
-  'Поиск города или страны': 'Search city or country',
-  'Ничего не найдено.\nПопробуй город — Москва, Амстердам —\nили страну, либо очисти поиск.':
-      'Nothing found.\nTry a city — Moscow, Amsterdam —\nor a country, or clear the search.',
-  'результаты': 'results',
+  'Пинг серверов': 'Ping servers',
+  'замеряю отклик…': 'measuring latency…',
+  'замерить отклик доступных серверов': 'measure latency of available servers',
+  'Пинг обновлён ✓': 'Ping updated ✓',
   '⭐ избранное': '⭐ favorites',
   'избранное': 'favorites',
   '🇷🇺 Россия': '🇷🇺 Russia',

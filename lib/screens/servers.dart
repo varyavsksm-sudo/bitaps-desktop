@@ -22,39 +22,29 @@ extension ShellServers on ShellState {
             Expanded(child: _infoTile('$locations', tr('локаций'))),
           ]),
           const SizedBox(height: 16),
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => _pickServer(fastestServer),
-            child: _card(strong: true, child: Row(children: [
-              _gIcon(Icons.bolt),
-              const SizedBox(width: 14),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Row(children: [Text(tr('Быстрый сервер'), style: disp(16, w: FontWeight.w700)),
-                  const SizedBox(width: 8), _badge(tr('АВТО'), C.accent)]),
-                const SizedBox(height: 3),
-                Text('${tr(fastestServer.city)} · ${fastestServer.ping} ms', style: mono(12)),
-              ])),
-              Icon(Icons.chevron_right, color: C.muted),
-            ])),
-          ),
-          const SizedBox(height: 12),
-          _card(padding: 12, child: Row(children: [
-            Icon(Icons.search, size: 18, color: C.muted),
-            const SizedBox(width: 10),
-            // Semantics-метка поля: hint виден глазами, но скринридеру нужна явная текстовая метка.
-            Expanded(child: Semantics(textField: true, label: tr('Поиск города или страны'), child: TextField(
-              controller: _search,
-              onChanged: (v) => rebuild(() => _q = v),
-              style: mono(13, c: C.text),
-              cursorColor: C.accent,
-              decoration: InputDecoration(isDense: true, border: InputBorder.none,
-                contentPadding: EdgeInsets.zero, hintText: tr('Поиск города или страны'), hintStyle: mono(13, c: C.muted)),
-            ))),
-            if (_q.isNotEmpty) GestureDetector(
+          // Кнопка «Пинг»: живой замер отклика по всем доступным серверам (_pingServers в api.dart).
+          // Semantics: во время замера кнопка неактивна — сообщаем это и скринридеру.
+          Semantics(
+            button: true,
+            enabled: !_pinging,
+            label: tr('Пинг серверов'),
+            child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTap: () => rebuild(() { _q = ''; _search.clear(); }),
-              child: Icon(Icons.close, size: 16, color: C.muted)),
-          ])),
+              onTap: _pinging ? null : _pingServers,
+              child: _card(strong: true, child: Row(children: [
+                _gIcon(Icons.network_ping),
+                const SizedBox(width: 14),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(tr('Пинг серверов'), style: disp(16, w: FontWeight.w700)),
+                  const SizedBox(height: 3),
+                  Text(_pinging ? tr('замеряю отклик…') : tr('замерить отклик доступных серверов'), style: mono(12)),
+                ])),
+                _pinging
+                    ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: C.accent))
+                    : Icon(Icons.play_arrow, color: C.accent),
+              ])),
+            ),
+          ),
           if (locked) ...[
             const SizedBox(height: 16),
             Row(children: [
@@ -71,31 +61,6 @@ extension ShellServers on ShellState {
 
   List<Widget> _serverSections(bool locked) {
     final all = [...ruServers, ...intlServers];
-    final q = _q.trim().toLowerCase();
-    if (q.isNotEmpty) {
-      // матчим и по исходным RU-строкам (s.city/s.country), и по переведённым (tr(...)) — иначе
-      // в EN пользователь ищет «Moscow/Netherlands», а фильтр знает только «Москва/Нидерланды».
-      final found = all.where((s) =>
-          s.city.toLowerCase().contains(q) ||
-          s.country.toLowerCase().contains(q) ||
-          tr(s.city).toLowerCase().contains(q) ||
-          tr(s.country).toLowerCase().contains(q)).toList();
-      if (found.isEmpty) {
-        return [
-          Padding(padding: const EdgeInsets.symmetric(vertical: 28), child: Column(children: [
-            Icon(Icons.travel_explore, size: 32, color: C.muted),
-            const SizedBox(height: 10),
-            Text(tr('Ничего не найдено.\nПопробуй город — Москва, Амстердам —\nили страну, либо очисти поиск.'),
-              textAlign: TextAlign.center, style: mono(12)),
-          ])),
-        ];
-      }
-      return [
-        _kicker(tr('результаты')),
-        const SizedBox(height: 10),
-        for (final s in found) _serverRow(s, locked),
-      ];
-    }
     final favList = all.where((s) => favs.contains(s.id)).toList();
     return [
       if (favList.isNotEmpty) ...[
@@ -116,8 +81,9 @@ extension ShellServers on ShellState {
 
   Widget _serverRow(Server s, bool locked) {
     final sel = s.id == server.id;
-    final pingCol = s.ping < 60 ? C.ok : s.ping < 120 ? C.warn : C.danger;
-    final pingLabel = s.ping < 60 ? tr('быстрый отклик') : s.ping < 120 ? tr('средний отклик') : tr('медленный отклик');
+    final ping = pingOf(s); // живой замер (кнопка «Пинг»), иначе статичный из models.dart
+    final pingCol = ping < 60 ? C.ok : ping < 120 ? C.warn : C.danger;
+    final pingLabel = ping < 60 ? tr('быстрый отклик') : ping < 120 ? tr('средний отклик') : tr('медленный отклик');
     // При locked (conn!=0) все строки кроме текущего сервера некликабельны-сейчас → приглушаем их,
     // чтобы список не выглядел обманчиво активным. Текущий сервер (sel) оставляем читаемым.
     final dimmed = (locked && !sel) || !s.available;
@@ -148,8 +114,8 @@ extension ShellServers on ShellState {
                 const SizedBox(height: 2),
                 Text(tr(s.country), style: mono(12)),
               ])),
-              Tooltip(message: '$pingLabel · ${s.ping} ms',
-                child: Text('${s.ping} ms', style: mono(13, c: pingCol, w: FontWeight.w600))),
+              Tooltip(message: '$pingLabel · $ping ms',
+                child: Text('$ping ms', style: mono(13, c: pingCol, w: FontWeight.w600))),
               const SizedBox(width: 10),
               Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.end, children: [
                 Text('${s.load}%', style: mono(10, c: C.muted)),
