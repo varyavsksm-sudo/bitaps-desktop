@@ -17,9 +17,13 @@ extension ShellServers on ShellState {
           Text(tr('Серверы'), style: disp(26, w: FontWeight.w800)),
           const SizedBox(height: 18),
           Row(children: [
-            Expanded(child: _infoTile('${avail.length}', tr('серверов\nдоступно'))),
+            Expanded(child: _infoTile('${avail.length}', appLang == 'en'
+                ? (avail.length == 1 ? 'server\navailable' : 'servers\navailable')
+                : '${_ruPlural(avail.length, 'сервер', 'сервера', 'серверов')}\nдоступно')),
             const SizedBox(width: 12),
-            Expanded(child: _infoTile('$locations', tr('локаций'))),
+            Expanded(child: _infoTile('$locations', appLang == 'en'
+                ? (locations == 1 ? 'location' : 'locations')
+                : _ruPlural(locations, 'локация', 'локации', 'локаций'))),
           ]),
           const SizedBox(height: 16),
           // Кнопка «Пинг»: живой замер отклика по всем доступным серверам (_pingServers в api.dart).
@@ -59,9 +63,27 @@ extension ShellServers on ShellState {
       );
   }
 
+  // Русские склонения для счётчиков плиток: 1 сервер / 2-4 сервера / 5+ серверов
+  // (тот же алгоритм, что _pluralDays в account.dart).
+  String _ruPlural(int n, String one, String few, String many) {
+    final n10 = n % 10, n100 = n % 100;
+    if (n10 == 1 && n100 != 11) return one;
+    if (n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14)) return few;
+    return many;
+  }
+
+  // Секция сортируется по фактическому пингу (живой замер приоритетнее статичного):
+  // лучшие сверху; во время замера «Пинг» строки пересортировываются на лету —
+  // rebuild после каждого замеренного сервера в _pingServers.
+  List<Server> _byPing(Iterable<Server> src) {
+    final l = src.toList();
+    l.sort((a, b) => pingOf(a).compareTo(pingOf(b)));
+    return l;
+  }
+
   List<Widget> _serverSections(bool locked) {
     final all = [...ruServers, ...intlServers];
-    final favList = all.where((s) => favs.contains(s.id)).toList();
+    final favList = _byPing(all.where((s) => favs.contains(s.id)));
     return [
       if (favList.isNotEmpty) ...[
         _kicker(tr('⭐ избранное')),
@@ -71,11 +93,11 @@ extension ShellServers on ShellState {
       ],
       _kicker(tr('🇷🇺 Россия')),
       const SizedBox(height: 10),
-      for (final s in ruServers) _serverRow(s, locked),
+      for (final s in _byPing(ruServers)) _serverRow(s, locked),
       const SizedBox(height: 22),
-      _kicker(tr('🌍 Зарубежные · скоро')),
+      _kicker(tr('🌍 зарубежные · скоро')),
       const SizedBox(height: 10),
-      for (final s in intlServers) _serverRow(s, locked),
+      for (final s in _byPing(intlServers)) _serverRow(s, locked),
     ];
   }
 
@@ -91,7 +113,13 @@ extension ShellServers on ShellState {
       ignoring: !s.available,
       child: Opacity(
         opacity: dimmed ? 0.55 : 1,
-        child: GestureDetector(
+        // Semantics: строка — кнопка выбора сервера с признаком выбора (как кнопка «Пинг» выше);
+        // лейбл (город/страна/пинг) собирается из дочерних текстов автоматически.
+        child: Semantics(
+          button: true,
+          selected: sel,
+          enabled: s.available,
+          child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: s.available ? () => _pickServer(s) : null,
           child: Container(
@@ -105,14 +133,16 @@ extension ShellServers on ShellState {
                 decoration: BoxDecoration(color: C.fill, borderRadius: BorderRadius.circular(12)),
                 child: Text(s.flag, style: const TextStyle(fontSize: 20))),
               const SizedBox(width: 12),
+              // Город — отдельной строкой (на окне 390px бейджи в одной строке с городом
+              // схлопывали его до «А…»), PRO-бейдж — к строке страны. Пер-строчный бейдж
+              // «Скоро» убран: недоступные серверы живут только в секции «зарубежные · скоро».
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Row(children: [
-                  Flexible(child: Text(tr(s.city), style: disp(15, w: FontWeight.w600), overflow: TextOverflow.ellipsis)),
-                  if (s.premium) ...[const SizedBox(width: 6), _badge('PRO', C.accentSoft)],
-                  if (!s.available) ...[const SizedBox(width: 6), _badge(tr('Скоро'), C.muted)],
-                ]),
+                Text(tr(s.city), style: disp(15, w: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
                 const SizedBox(height: 2),
-                Text(tr(s.country), style: mono(12)),
+                Row(children: [
+                  Flexible(child: Text(tr(s.country), style: mono(12), overflow: TextOverflow.ellipsis)),
+                  if (s.premium) ...[const SizedBox(width: 6), _badge('PRO', C.accentSoft)],
+                ]),
               ])),
               Tooltip(message: '$pingLabel · $ping ms',
                 child: Text('$ping ms', style: mono(13, c: pingCol, w: FontWeight.w600))),
@@ -138,6 +168,7 @@ extension ShellServers on ShellState {
               Icon(sel ? Icons.check_circle : Icons.circle_outlined, size: 20, color: sel ? C.accent : C.muted),
             ]),
           ),
+        ),
         ),
       ),
     );

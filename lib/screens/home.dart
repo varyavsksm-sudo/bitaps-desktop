@@ -3,7 +3,10 @@ part of '../main.dart';
 // ============================ HOME (статус / подключение) ============================
 extension ShellHome on ShellState {
   // ---------------- HOME ----------------
-  Widget _updateBanner() => GestureDetector(
+  // Semantics: баннер — одна кнопка для скринридера (обе строки читаются одним узлом).
+  Widget _updateBanner() => Semantics(
+        button: true,
+        child: MergeSemantics(child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () => _open(kDownloadUrl),
         child: Container(
@@ -24,7 +27,7 @@ extension ShellHome on ShellState {
             Icon(Icons.download, size: 18, color: C.accent),
           ]),
         ),
-      );
+      )));
 
   Widget _home() {
     final connected = conn == 2;
@@ -64,14 +67,18 @@ extension ShellHome on ShellState {
             const SizedBox(height: 2),
             Text('${pingOf(server)} ms · ${server.proto}', style: mono(12)),
           ])),
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => _goTab(1),
-            child: Row(children: [
-              Icon(Icons.swap_horiz, size: 17, color: C.accent),
-              const SizedBox(width: 5),
-              Text(tr('сменить'), style: disp(13, w: FontWeight.w700, c: C.accent)),
-            ]),
+          // Semantics: «сменить» — кнопка (лейбл читается из дочернего текста, merge — одним узлом)
+          Semantics(
+            button: true,
+            child: MergeSemantics(child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _goTab(1),
+              child: Row(children: [
+                Icon(Icons.swap_horiz, size: 17, color: C.accent),
+                const SizedBox(width: 5),
+                Text(tr('сменить'), style: disp(13, w: FontWeight.w700, c: C.accent)),
+              ]),
+            )),
           ),
         ])),
         const SizedBox(height: 12),
@@ -89,8 +96,10 @@ extension ShellHome on ShellState {
             const SizedBox(width: 6),
             // В боевом режиме (kRealTunnel) реального канала IP из движка нет → не показываем
             // выдуманный статичный адрес (иначе юзер увидел бы неверный IP без пометки «демо»).
-            // Демо-IP светим только в демо-режиме, где рядом стоит дисклеймер.
-            Text(connected && !kRealTunnel ? '95.142.16.7' : tr('IP скрыт'), style: mono(12)),
+            // Демо-IP светим только в демо-режиме, где рядом стоит дисклеймер. Отключённому
+            // пользователю IP-строку не подписываем «IP скрыт» (это было бы ложью) — прочерк,
+            // согласованный с плейсхолдерами скорости в этой же строке.
+            Text(!connected ? '—' : (kRealTunnel ? tr('IP скрыт') : '95.142.16.7'), style: mono(12)),
           ]),
           // Честно: без боевого туннеля скорость/трафик/IP — демонстрационные.
           if (connected && !kRealTunnel) ...[
@@ -125,7 +134,9 @@ extension ShellHome on ShellState {
                 style: mono(11)),
             ])),
             const SizedBox(width: 8),
-            Switch(value: bestServer, activeThumbColor: C.accent, onChanged: _setBestServer),
+            // activeTrackColor от текущего акцента: дефолтный трек красится colorScheme.primary,
+            // который не пересобирается при смене акцента (ThemeData слушает только яркость).
+            Switch(value: bestServer, activeThumbColor: C.accent, activeTrackColor: C.accent.withValues(alpha: 0.35), onChanged: _setBestServer),
           ]))),
         ),
       ],
@@ -168,7 +179,9 @@ extension ShellHome on ShellState {
     return Semantics(
       button: true,
       label: connected ? tr('Отключить') : tr('Подключиться'),
-      value: conn == 0 ? tr('Отключено') : conn == 1 ? tr('Подключение…') : tr('Подключено'),
+      // value повторяет видимый статус (строка 41), включая honesty-гейт: в демо скринридер
+      // тоже слышит «Демо-режим», а не «Подключено».
+      value: conn == 0 ? tr('Отключено') : conn == 1 ? tr('Подключение…') : (kRealTunnel ? tr('Подключено') : tr('Демо-режим')),
       onTap: toggle,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -210,11 +223,13 @@ extension ShellHome on ShellState {
             decoration: BoxDecoration(shape: BoxShape.circle, color: C.bg2, border: Border.all(color: C.line))),
           Icon(Icons.power_settings_new, size: 60, color: col),
         ]);
-      case 2: // орб — наполненная светящаяся сфера
+      case 2: // орб — наполненная светящаяся сфера; off-состояние тема-зависимое (тёмная сфера на светлом фоне выглядела чужой)
         return Container(width: 192, height: 192, alignment: Alignment.center,
           decoration: BoxDecoration(shape: BoxShape.circle,
             gradient: RadialGradient(center: const Alignment(-0.4, -0.4),
-              colors: on ? [C.accentSoft, C.accent, C.accent.withValues(alpha: 0.55)] : const [Color(0xFF1A1728), Color(0xFF12101C)]),
+              colors: on
+                  ? [C.accentSoft, C.accent, C.accent.withValues(alpha: 0.55)]
+                  : (C.light ? const [Color(0xFFFFFFFF), Color(0xFFDDE3EF)] : const [Color(0xFF1A1728), Color(0xFF12101C)])),
             boxShadow: [BoxShadow(color: col.withValues(alpha: on ? 0.55 : 0.14), blurRadius: 36)]),
           child: Icon(Icons.power_settings_new, size: 62, color: on ? Colors.black.withValues(alpha: 0.85) : col));
       case 3: // пульс — концентрические кольца от ядра
@@ -252,7 +267,11 @@ extension ShellHome on ShellState {
 
   Widget _modeChip(String label, int i) {
     final sel = mode == i;
-    return GestureDetector(
+    // Semantics: чип — кнопка с признаком выбора (как _tabItem в main.dart), лейбл — из текста.
+    return Semantics(
+      button: true,
+      selected: sel,
+      child: GestureDetector(
       onTap: () {
         // Смена режима меняет и сервер → запрещаем не только при conn==2, но и при conn==1
         // (конфиг коннекта уже собран), иначе туннель и выбранный режим/сервер разъезжаются.
@@ -272,7 +291,7 @@ extension ShellHome on ShellState {
         ),
         child: Text(tr(label), style: disp(13, w: FontWeight.w700, c: sel ? C.accent : C.muted)),
       ),
-    );
+    ));
   }
 
 }

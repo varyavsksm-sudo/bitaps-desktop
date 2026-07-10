@@ -55,9 +55,11 @@ const Map<String, String> _kEn = {
   'Вставь «Код входа» (UUID) — без пробелов': 'Paste your login code (UUID) — no spaces',
   'Вхожу…': 'Signing in…',
   'Этот ключ не подошёл. Возьми актуальный ключ в боте.': "This key didn't work. Get a fresh key from the bot.",
+  'Этот код не подошёл. Возьми актуальный в боте (/start → Код входа).': "This code didn't work. Get a fresh one in the bot (/start → Login code).",
   'Слишком много попыток. Подожди минуту и попробуй снова.': 'Too many attempts. Wait a minute and try again.',
   'Вход выполнен ✓': 'Signed in ✓',
   'Ключ не найден. Возьми актуальный ключ в боте.': 'Key not found. Get a fresh key from the bot.',
+  'Код не найден. Возьми актуальный в боте (/start → Код входа).': 'Code not found. Get a fresh one in the bot (/start → Login code).',
   'Не удалось начать вход, попробуй ещё раз': "Couldn't start sign-in, try again",
   'Подтверди вход в Telegram': 'Confirm sign-in in Telegram',
   'Открылся бот — нажми «Запустить», затем «✅ Да, это я». Войду сам, как подтвердишь.':
@@ -73,7 +75,6 @@ const Map<String, String> _kEn = {
   'Удаление требует «Код входа». Открой его в боте (/start → Код входа) и войди по нему.':
       'Removing needs your login code. Get it in the bot (/start → Login code) and sign in with it.',
   'Не удалось подтвердить «Код входа» для удаления.': "Couldn't confirm the login code for removal.",
-  'Сессия истекла — войди заново': 'Session expired — sign in again',
   'Устройство удалено ✓': 'Device removed ✓',
   'Обновлено ✓': 'Updated ✓',
   'Не удалось обновить': "Couldn't refresh",
@@ -103,15 +104,13 @@ const Map<String, String> _kEn = {
       'Mode picks the server: Auto/Games — lowest ping, Stream — lowest load, Private — the fastest server (international soon).',
   'сменить': 'change',
   'IP скрыт': 'IP hidden',
-  'Демо-режим — скорость и IP показаны для примера': 'Demo mode — speed and IP are shown for example',
+  'Демо-режим — скорость и IP показаны для примера': 'Demo mode — speed and IP are sample values',
   'Отключить': 'Disconnect',
   'Подключаться к лучшему серверу': 'Connect to the best server',
   'при подключении сам возьму оптимальный под режим': "auto-picks the optimal server for your mode",
   'выключено — сервер выбираешь ты': 'off — you pick the server',
 
   // ---- servers.dart ----
-  'серверов\nдоступно': 'servers\navailable',
-  'локаций': 'locations',
   'Пинг серверов': 'Ping servers',
   'замеряю отклик…': 'measuring latency…',
   'замерить отклик доступных серверов': 'measure latency of available servers',
@@ -119,7 +118,7 @@ const Map<String, String> _kEn = {
   '⭐ избранное': '⭐ favorites',
   'избранное': 'favorites',
   '🇷🇺 Россия': '🇷🇺 Russia',
-  '🌍 Зарубежные · скоро': '🌍 International · soon',
+  '🌍 зарубежные · скоро': '🌍 international · soon',
   // названия локаций серверов (models.dart) — чтобы города/страны переводились в EN
   'Москва': 'Moscow',
   'Санкт-Петербург': 'Saint Petersburg',
@@ -136,7 +135,6 @@ const Map<String, String> _kEn = {
   'быстрый отклик': 'fast response',
   'средний отклик': 'medium response',
   'медленный отклик': 'slow response',
-  'Скоро': 'Soon',
 
   // ---- account.dart (тарифы/подписка/ключ/устройства) ----
   '1 месяц': '1 month',
@@ -149,7 +147,7 @@ const Map<String, String> _kEn = {
   '6 МЕС': '6 MO',
   '1 ГОД': '1 YR',
   'ТРИАЛ': 'TRIAL',
-  'В буфере нет ключа vless://': 'No vless:// key in the clipboard',
+  'В буфере нет VPN-ключа': 'No VPN key in the clipboard',
   'неизвестный хост': 'unknown host',
   'Ключ заменён ✓': 'Key replaced ✓',
   'Подписка истекла': 'Subscription expired',
@@ -158,8 +156,8 @@ const Map<String, String> _kEn = {
   'Продлить →': 'Renew →',
   'пригласи друзей': 'invite friends',
   'Приглашай — получай бонусные дни': 'Invite friends — earn bonus days',
-  '▸ +14 дней за каждого друга, кто оформит первую подписку\n▸ начисляем автоматически':
-      '▸ +14 days for every friend who buys their first subscription\n▸ added automatically',
+  '▸ +14 дней и +100 🪙 за каждого друга, кто оформит первую подписку\n▸ начисляем автоматически':
+      '▸ +14 days and +100 🪙 for every friend who buys their first subscription\n▸ added automatically',
   'Поделиться ссылкой': 'Share link',
   'Войди, чтобы получить свою реферальную ссылку': 'Sign in to get your referral link',
   'Рефералы — через нашего Telegram-бота': 'Referrals work through our Telegram bot',
@@ -172,7 +170,7 @@ const Map<String, String> _kEn = {
   'или напиши @bitapssupport': 'or message @bitapssupport',
   'частые вопросы': 'faq',
   'Вход не выполнен': 'Not signed in',
-  'Вход по ключу из бота': 'Signed in with a key from the bot',
+  'Вход выполнен': 'Signed in',
   'Войди через Telegram, чтобы активировать подписку': 'Sign in with Telegram to activate your subscription',
   'Активна': 'Active',
   'Не активна': 'Inactive',
@@ -215,7 +213,7 @@ const Map<String, String> _kEn = {
   'Статистика': 'Statistics',
   'Свой конфиг': 'Custom config',
   'Свой конфиг ✓': 'Custom config ✓',
-  'Вставь ключ vless://…': 'Paste a vless://… key',
+  'Вставь ключ vless://, trojan://, ss://…': 'Paste a vless://, trojan://, ss://… key',
   'Сохранить': 'Save',
   'Конфиг очищен': 'Config cleared',
   'персонализация': 'personalization',
@@ -240,7 +238,6 @@ const Map<String, String> _kEn = {
   'подбирается автоматически': 'auto-detected',
   'Протокол подбирается автоматически под твой ключ. Настраивать ничего не нужно.':
       'The protocol is chosen automatically from your key. Nothing to configure.',
-  'скоро': 'soon',
 
   // ---- modeLabels (home) ----
   'Стрим': 'Stream',

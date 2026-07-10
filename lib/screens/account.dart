@@ -21,10 +21,11 @@ extension ShellAccount on ShellState {
   Future<void> _importKey() async {
     final data = await Clipboard.getData('text/plain');
     final t = (data?.text ?? '').trim();
-    // Принимаем только сам VPN-ключ (vless://). Fetch подписки по http(s)-ссылке не реализован —
-    // раньше ссылка молча сохранялась как ключ и коннект падал, поэтому http(s) больше не принимаем.
-    if (!t.startsWith('vless://')) {
-      _toast(tr('В буфере нет ключа vless://'));
+    // Принимаем только сам VPN-ключ (любая схема из kSupportedKeySchemes — как гард коннекта и
+    // «Свой конфиг»). Fetch подписки по http(s)-ссылке не реализован — раньше ссылка молча
+    // сохранялась как ключ и коннект падал, поэтому http(s) не принимаем.
+    if (!kSupportedKeySchemes.any((s) => t.startsWith(s))) {
+      _toast(tr('В буфере нет VPN-ключа'));
       return;
     }
     final host = _hostOf(t);
@@ -87,7 +88,7 @@ extension ShellAccount on ShellState {
         decoration: BoxDecoration(color: C.warn.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(14),
           border: Border.all(color: C.warn.withValues(alpha: 0.5))),
         child: Row(children: [
-          const Icon(Icons.notifications_active, color: C.warn, size: 20),
+          Icon(Icons.notifications_active, color: C.warn, size: 20),
           const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(expired ? tr('Подписка истекла') : tr('Подписка истекает'), style: disp(14, w: FontWeight.w700, c: C.warn)),
@@ -127,7 +128,8 @@ extension ShellAccount on ShellState {
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 _kicker(tr('пригласи друзей')), const SizedBox(height: 3), Text(tr('Приглашай — получай бонусные дни'), style: mono(11))]))]),
             const SizedBox(height: 10),
-            Text(tr('▸ +14 дней за каждого друга, кто оформит первую подписку\n▸ начисляем автоматически'), style: mono(12, c: C.muted)),
+            // бот реально начисляет и дни, и токены (TOKENS_PER_REFERRAL=100) — не занижаем обещание
+            Text(tr('▸ +14 дней и +100 🪙 за каждого друга, кто оформит первую подписку\n▸ начисляем автоматически'), style: mono(12, c: C.muted)),
             const SizedBox(height: 12),
             _btn(tr('Поделиться ссылкой'), kind: 1, icon: Icons.share, onTap: () {
               if (!loggedIn) { _toast(tr('Войди, чтобы получить свою реферальную ссылку')); return; }
@@ -179,7 +181,8 @@ extension ShellAccount on ShellState {
             for (final f in faqs) _faqRow(f),
           ])),
           const SizedBox(height: 18),
-          Center(child: Text('bitaps vpn · v1.0', style: mono(11, c: C.muted))),
+          // номер сборки — чтобы релизные версии были различимы (дев-сборка kBuildNumber==0 — без него)
+          Center(child: Text(kBuildNumber > 0 ? 'bitaps vpn · v1.0 · build $kBuildNumber' : 'bitaps vpn · v1.0', style: mono(11, c: C.muted))),
         ],
       );
   }
@@ -200,15 +203,25 @@ extension ShellAccount on ShellState {
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(name, style: disp(20, w: FontWeight.w700)),
         const SizedBox(height: 3),
-        Text(loggedIn ? tr('Вход по ключу из бота') : tr('Войди через Telegram, чтобы активировать подписку'), style: mono(11)),
+        // нейтральное «Вход выполнен»: способов входа три (Telegram-пейринг / ключ / код) —
+        // не угадываем, каким именно вошли
+        Text(loggedIn ? tr('Вход выполнен') : tr('Войди через Telegram, чтобы активировать подписку'), style: mono(11)),
         const SizedBox(height: 6),
         Row(children: loggedIn
             ? [_badge(subActive ? tr('Активна') : tr('Не активна'), subActive ? C.ok : C.muted),
                if (subPlan != null) ...[const SizedBox(width: 6), _badge(_planShort(subPlan!), C.accent)]]
             : [_badge(tr('Гость'), C.muted)]),
       ])),
-      if (loggedIn) GestureDetector(behavior: HitTestBehavior.opaque, onTap: _logout,
-        child: Icon(Icons.logout, size: 20, color: C.muted)),
+      // IconButton вместо голой иконки: тап-таргет ≥40px + tooltip/семантика (как в _deviceRow)
+      if (loggedIn) IconButton(
+        onPressed: _logout,
+        iconSize: 20,
+        padding: EdgeInsets.zero,
+        visualDensity: VisualDensity.compact,
+        constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+        splashRadius: 22,
+        tooltip: tr('Выйти'),
+        icon: Icon(Icons.logout, color: C.muted)),
     ]));
   }
 
@@ -253,10 +266,17 @@ extension ShellAccount on ShellState {
     final ringFrac = total > 0 ? (dleft / total).clamp(0.0, 1.0) : 0.0;
     return _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [_gIcon(Icons.workspace_premium), const SizedBox(width: 12), _kicker(tr('подписка')), const Spacer(),
-        GestureDetector(behavior: HitTestBehavior.opaque, onTap: () => _refreshSub(),
-          child: _subLoading
-              ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: C.accent))
-              : Icon(Icons.refresh, size: 18, color: C.accent))]),
+        _subLoading
+            ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: C.accent))
+            : IconButton(
+                onPressed: () => _refreshSub(),
+                iconSize: 18,
+                padding: EdgeInsets.zero,
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                splashRadius: 22,
+                tooltip: tr('Обновить'),
+                icon: Icon(Icons.refresh, color: C.accent))]),
       const SizedBox(height: 16),
       Row(children: [
         _ring(dleft, ringFrac),
@@ -328,10 +348,17 @@ extension ShellAccount on ShellState {
   Widget _devicesCard() => _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [_gIcon(Icons.devices), const SizedBox(width: 12),
           _kicker(appLang == 'en' ? 'devices · ${devices.length}/$_limitStr' : 'устройства · ${devices.length}/$_limitStr'), const Spacer(),
-          GestureDetector(behavior: HitTestBehavior.opaque, onTap: () => _refreshSub(),
-            child: _subLoading
-                ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: C.accent))
-                : Icon(Icons.refresh, size: 18, color: C.accent))]),
+          _subLoading
+              ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: C.accent))
+              : IconButton(
+                  onPressed: () => _refreshSub(),
+                  iconSize: 18,
+                  padding: EdgeInsets.zero,
+                  visualDensity: VisualDensity.compact,
+                  constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                  splashRadius: 22,
+                  tooltip: tr('Обновить'),
+                  icon: Icon(Icons.refresh, color: C.accent))]),
         const SizedBox(height: 8),
         if (devices.isEmpty)
           Padding(padding: const EdgeInsets.symmetric(vertical: 16), child: Column(children: [
@@ -359,7 +386,7 @@ extension ShellAccount on ShellState {
         constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
         splashRadius: 22,
         tooltip: tr('Удалить'),
-        icon: const Icon(Icons.delete_outline, color: C.danger)),
+        icon: Icon(Icons.delete_outline, color: C.danger)),
     ]));
   }
 

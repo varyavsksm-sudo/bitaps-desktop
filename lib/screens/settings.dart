@@ -14,14 +14,21 @@ extension ShellSettings on ShellState {
         });
         _save();
       },
-      child: Container(
-        margin: const EdgeInsets.only(right: 12),
-        width: 44, height: 44, alignment: Alignment.center,
-        decoration: BoxDecoration(shape: BoxShape.circle,
-          gradient: LinearGradient(colors: [th.$3, th.$2]),
-          border: Border.all(color: sel ? (C.light ? Colors.black : Colors.white) : Colors.transparent, width: 3),
-          boxShadow: [BoxShadow(color: th.$2.withValues(alpha: 0.5), blurRadius: sel ? 14 : 6)]),
-        child: sel ? Icon(Icons.check, size: 18, color: C.light ? Colors.black : Colors.white) : null,
+      // Semantics: свотч — кнопка с именем акцента (Sunset/Neon/…) и признаком выбора,
+      // иначе скринридер слышит 5 безымянных кружков.
+      child: Semantics(
+        button: true,
+        selected: sel,
+        label: th.$1,
+        child: Container(
+          margin: const EdgeInsets.only(right: 12),
+          width: 44, height: 44, alignment: Alignment.center,
+          decoration: BoxDecoration(shape: BoxShape.circle,
+            gradient: LinearGradient(colors: [th.$3, th.$2]),
+            border: Border.all(color: sel ? (C.light ? Colors.black : Colors.white) : Colors.transparent, width: 3),
+            boxShadow: [BoxShadow(color: th.$2.withValues(alpha: 0.5), blurRadius: sel ? 14 : 6)]),
+          child: sel ? Icon(Icons.check, size: 18, color: C.light ? Colors.black : Colors.white) : null,
+        ),
       ),
     );
   }
@@ -120,7 +127,8 @@ extension ShellSettings on ShellState {
           maxLines: 4,
           style: mono(12, c: C.text),
           cursorColor: C.accent,
-          decoration: InputDecoration(hintText: tr('Вставь ключ vless://…'), hintStyle: mono(12, c: C.muted)),
+          // хинт перечисляет схемы честно: принимаются все kSupportedKeySchemes, не только vless
+          decoration: InputDecoration(hintText: tr('Вставь ключ vless://, trojan://, ss://…'), hintMaxLines: 2, hintStyle: mono(12, c: C.muted)),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Отмена'), style: mono(13, c: C.muted))),
@@ -260,7 +268,9 @@ extension ShellSettings on ShellState {
             const SizedBox(height: 2),
             Text(sub, style: mono(11)),
           ])),
-          Switch(value: v, onChanged: onCh, activeThumbColor: C.accent),
+          // activeTrackColor от текущего акцента: дефолтный трек — colorScheme.primary, а он
+          // не пересобирается при смене акцента (ThemeData слушает только смену яркости).
+          Switch(value: v, onChanged: onCh, activeThumbColor: C.accent, activeTrackColor: C.accent.withValues(alpha: 0.35)),
         ])),
       );
 }

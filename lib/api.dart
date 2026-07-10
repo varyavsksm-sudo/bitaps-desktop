@@ -97,7 +97,8 @@ extension ShellApi on ShellState {
               body: jsonEncode({'telegram_id': tgId, 'token': appToken}))
           .timeout(const Duration(seconds: 20));
       if (!mounted) return;
-      if (r.statusCode == 401 || r.statusCode == 403) { _doLogout(); _toast(tr('Сессия истекла — войди снова')); return; }
+      // silent: свой тост уже показываем ниже — иначе «Вышли из аккаунта» тут же перебивался бы
+      if (r.statusCode == 401 || r.statusCode == 403) { _doLogout(silent: true); _toast(tr('Сессия истекла — войди снова')); return; }
       if (r.statusCode >= 500) { _toast(_srvErr(r.statusCode)); return; } // 5xx → «сервер недоступен», а не «нет интернета»
       final d = _asObj(r.body);
       if (d == null) { _toast(_badRespErr); return; }
@@ -154,9 +155,12 @@ extension ShellApi on ShellState {
         // 403 use_login_secret: у аккаунта уже есть «Код входа» — вход по ключу закрыт (вектор захвата).
         // Ведём юзера на «Код входа», а не показываем невнятное «ключ не подошёл».
         final d403 = _asObj(r.body);
+        // ошибка говорит про то, что юзер реально вводил: ключ или «Код входа»
         _loginError(d403 != null && d403['error'] == 'use_login_secret'
             ? tr('Вход по VPN-ключу отключён. Вставь «Код входа» (UUID) из бота или письма.')
-            : tr('Этот ключ не подошёл. Возьми актуальный ключ в боте.'));
+            : (isKey
+                ? tr('Этот ключ не подошёл. Возьми актуальный ключ в боте.')
+                : tr('Этот код не подошёл. Возьми актуальный в боте (/start → Код входа).')));
         return;
       }
       if (r.statusCode == 429) {
@@ -175,7 +179,9 @@ extension ShellApi on ShellState {
         _save();
         _toast(tr('Вход выполнен ✓'));
       } else {
-        _loginError(tr('Ключ не найден. Возьми актуальный ключ в боте.'));
+        _loginError(isKey
+            ? tr('Ключ не найден. Возьми актуальный ключ в боте.')
+            : tr('Код не найден. Возьми актуальный в боте (/start → Код входа).'));
       }
     } on TimeoutException catch (e) {
       debugPrint('_login timeout: $e');
@@ -335,7 +341,7 @@ extension ShellApi on ShellState {
         return;
       }
       if (r.statusCode == 401 || r.statusCode == 403) {
-        if (!silent) _toast(tr('Сессия истекла — войди заново'));
+        if (!silent) _toast(tr('Сессия истекла — войди снова'));
         _doLogout(silent: true);
         return;
       }

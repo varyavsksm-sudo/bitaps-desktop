@@ -11,9 +11,11 @@ class C {
   static Color field = const Color(0x59000000);  // фон полей/код-блоков (тема-зависимая)
   static Color accent = const Color(0xFFFF7A1A);
   static Color accentSoft = const Color(0xFFFFB347);
-  static const ok = Color(0xFF39D98A);
-  static const warn = Color(0xFFFFAE3D);
-  static const danger = Color(0xFFFF5470);
+  // Статусные цвета тоже тема-зависимые: неоновые ok/warn/danger подобраны под тёмный фон,
+  // на светлом #EAEEF6 они выцветали до нечитаемости (контраст <2:1) — в светлой теме затемняем.
+  static Color ok = const Color(0xFF39D98A);
+  static Color warn = const Color(0xFFFFAE3D);
+  static Color danger = const Color(0xFFFF5470);
 
   static bool light = false;
   static void applyTheme(bool isLight) {
@@ -25,6 +27,9 @@ class C {
     line = isLight ? const Color(0x1A101A30) : const Color(0x14FFFFFF);
     fill = isLight ? const Color(0x0D000000) : const Color(0x0AFFFFFF);
     field = isLight ? const Color(0x0A000000) : const Color(0x59000000);
+    ok = isLight ? const Color(0xFF0E9F63) : const Color(0xFF39D98A);
+    warn = isLight ? const Color(0xFFB87400) : const Color(0xFFFFAE3D);
+    danger = isLight ? const Color(0xFFD8324E) : const Color(0xFFFF5470);
     // Уведомляем Material-слой (MaterialApp выше Shell) о смене яркости — иначе ThemeData
     // остаётся тёмной в светлом режиме (selection handles / курсор / ripple / дефолты диалогов).
     // Обновляем ПОСЛЕ применения C.*, чтобы билд ThemeData читал уже актуальные цвета.

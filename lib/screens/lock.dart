@@ -38,8 +38,8 @@ extension ShellLock on ShellState {
             opacity: _pinLockSecs > 0 ? 0.45 : 1.0, // во время локаута кнопка приглушена — видно, что она неактивна
             child: _btn(tr('Разблокировать'), kind: 0, icon: Icons.lock_open, onTap: _pinLockSecs > 0 ? null : _tryUnlock)))),
           const SizedBox(height: 16),
-          GestureDetector(behavior: HitTestBehavior.opaque, onTap: _forgotPin,
-            child: Text(tr('Не помню PIN — сбросить'), style: mono(12, c: C.muted))),
+          Semantics(button: true, child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: _forgotPin,
+            child: Text(tr('Не помню PIN — сбросить'), style: mono(12, c: C.muted)))),
         ]))),
       ),
     );
@@ -134,8 +134,9 @@ extension ShellLock on ShellState {
   Future<void> _enableLock() async {
     final c1 = TextEditingController(), c2 = TextEditingController();
     final ok = await showDialog<bool>(context: context, builder: (dctx) => AlertDialog(
-      backgroundColor: C.bg2, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-      title: Text(tr('Задай PIN для входа'), style: disp(16, w: FontWeight.w700, c: C.text)),
+      // единый стиль диалогов приложения: радиус 16 + рамка C.line + заголовок disp(18)
+      backgroundColor: C.bg2, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
+      title: Text(tr('Задай PIN для входа'), style: disp(18, w: FontWeight.w700)),
       content: Column(mainAxisSize: MainAxisSize.min, children: [
         TextField(controller: c1, obscureText: true, keyboardType: TextInputType.number, maxLength: 8,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
