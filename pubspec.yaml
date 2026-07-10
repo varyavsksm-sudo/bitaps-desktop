@@ -39,14 +39,15 @@ flutter:
 # а Dock показывает asset как есть. Мастер — assets/icon_macos.png (скруглённый квадрат
 # 824/1024 по HIG); macos/ не в git, поэтому после flutter create --platforms=macos
 # разложить его в AppIcon.appiconset: sips -z N N assets/icon_macos.png (N=16…1024).
+# iOS тоже НЕ здесь: CI создаёт только windows/android (ios/ нет → генератор падает,
+# уронил run 84). iOS-иконки генерятся локально из отдельного конфига:
+#   dart run flutter_launcher_icons -f flutter_launcher_icons-ios.yaml
 flutter_launcher_icons:
   image_path: "assets/icon.png"
   android: true
   min_sdk_android: 24
   adaptive_icon_background: "#0C0A14"
   adaptive_icon_foreground: "assets/icon_fg.png"
-  ios: true
-  remove_alpha_ios: true
   windows:
     generate: true
     image_path: "assets/icon.png"
