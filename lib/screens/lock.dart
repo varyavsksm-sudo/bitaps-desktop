@@ -133,31 +133,38 @@ extension ShellLock on ShellState {
 
   Future<void> _enableLock() async {
     final c1 = TextEditingController(), c2 = TextEditingController();
-    final ok = await showDialog<bool>(context: context, builder: (dctx) => AlertDialog(
+    final ok = await showDialog<bool>(context: context, builder: (dctx) {
+      // логика включения вынесена в closure: её зовут и кнопка «Включить», и Enter в поле повтора
+      void submit() {
+        final p1 = c1.text.trim(), p2 = c2.text.trim();
+        if (p1.length < 4) { _toast(tr('PIN — минимум 4 цифры')); return; }
+        if (p1 != p2) { _toast(tr('PIN не совпадает')); return; }
+        appPin = p1;
+        Navigator.pop(dctx, true);
+      }
+      return AlertDialog(
       // единый стиль диалогов приложения: радиус 16 + рамка C.line + заголовок disp(18)
       backgroundColor: C.bg2, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
       title: Text(tr('Задай PIN для входа'), style: disp(18, w: FontWeight.w700)),
       content: Column(mainAxisSize: MainAxisSize.min, children: [
+        // autofocus на первое поле + Enter: next → фокус на повтор, done → включить (было только мышью)
         TextField(controller: c1, obscureText: true, keyboardType: TextInputType.number, maxLength: 8,
+          autofocus: true, textInputAction: TextInputAction.next,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           style: mono(15, c: C.text), cursorColor: C.accent,
           decoration: InputDecoration(counterText: '', hintText: tr('PIN (4–8 цифр)'), hintStyle: mono(12, c: C.muted))),
         TextField(controller: c2, obscureText: true, keyboardType: TextInputType.number, maxLength: 8,
+          textInputAction: TextInputAction.done, onSubmitted: (_) => submit(),
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           style: mono(15, c: C.text), cursorColor: C.accent,
           decoration: InputDecoration(counterText: '', hintText: tr('Повтори PIN'), hintStyle: mono(12, c: C.muted))),
       ]),
       actions: [
         TextButton(onPressed: () => Navigator.pop(dctx, false), child: Text(tr('Отмена'), style: mono(13, c: C.muted))),
-        TextButton(onPressed: () {
-          final p1 = c1.text.trim(), p2 = c2.text.trim();
-          if (p1.length < 4) { _toast(tr('PIN — минимум 4 цифры')); return; }
-          if (p1 != p2) { _toast(tr('PIN не совпадает')); return; }
-          appPin = p1;
-          Navigator.pop(dctx, true);
-        }, child: Text(tr('Включить'), style: mono(13, c: C.accent))),
+        TextButton(onPressed: submit, child: Text(tr('Включить'), style: mono(13, c: C.accent))),
       ],
-    ));
+    );
+    });
     rebuild(() => tgl1 = (ok == true));
     _save();
     // освобождаем контроллеры ПОСЛЕ того, как маршрут диалога полностью снят (пост-фрейм) —

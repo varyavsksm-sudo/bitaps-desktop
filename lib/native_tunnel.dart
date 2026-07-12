@@ -56,6 +56,9 @@ class NativeTunnel {
   static Stream<Map<String, dynamic>> events() {
     return _evt.receiveBroadcastStream().map<Map<String, dynamic>>(
       (e) => e is Map ? Map<String, dynamic>.from(e) : <String, dynamic>{},
-    ).handleError((_) {});
+    // Гасим ТОЛЬКО MissingPluginException (нет нативной стороны). Настоящие ошибки канала
+    // (смерть процесса движка) пропускаем дальше — их ловит onError в connection.dart и
+    // честно роняет туннель, иначе UI навсегда завис бы в «Подключено».
+    ).handleError((_) {}, test: (e) => e is MissingPluginException);
   }
 }

@@ -158,13 +158,21 @@ extension ShellAccount on ShellState {
             const SizedBox(height: 12),
             Container(padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(color: C.field, borderRadius: BorderRadius.circular(10)),
-              child: TextField(
-                controller: _support,
-                maxLines: 3,
-                style: mono(13, c: C.text),
-                cursorColor: C.accent,
-                decoration: InputDecoration(isDense: true, border: InputBorder.none,
-                  contentPadding: EdgeInsets.zero, hintText: tr('Опиши проблему…'), hintStyle: mono(13, c: C.muted)),
+              // Ctrl/Cmd+Enter отправляет (обычный Enter оставляем для переноса — сообщение
+              // многострочное): control для Win/Linux, meta для macOS. _sendSupport сам гвардит пустое.
+              child: CallbackShortcuts(
+                bindings: {
+                  const SingleActivator(LogicalKeyboardKey.enter, control: true): _sendSupport,
+                  const SingleActivator(LogicalKeyboardKey.enter, meta: true): _sendSupport,
+                },
+                child: TextField(
+                  controller: _support,
+                  maxLines: 3,
+                  style: mono(13, c: C.text),
+                  cursorColor: C.accent,
+                  decoration: InputDecoration(isDense: true, border: InputBorder.none,
+                    contentPadding: EdgeInsets.zero, hintText: tr('Опиши проблему…'), hintStyle: mono(13, c: C.muted)),
+                ),
               )),
             const SizedBox(height: 12),
             _btn(tr('Отправить'), kind: 0, icon: Icons.send, onTap: _supportSending ? null : _sendSupport),
@@ -193,7 +201,9 @@ extension ShellAccount on ShellState {
             ? subName!
             : (appLang == 'en' ? 'Account (#$tgId)' : 'Аккаунт (#$tgId)'))
         : tr('Вход не выполнен');
-    final initial = name.isNotEmpty ? name.substring(0, 1).toUpperCase() : 'A';
+    // characters.first — целый графемный кластер: Telegram-имена часто начинаются с эмодзи/флага
+    // (суррогатная пара), а substring(0,1) резал бы её пополам → «�» в аватаре.
+    final initial = name.isNotEmpty ? name.characters.first.toUpperCase() : 'A';
     return _card(strong: true, child: Row(children: [
       Container(width: 60, height: 60, alignment: Alignment.center,
         decoration: BoxDecoration(shape: BoxShape.circle, gradient: accentGrad,
@@ -201,7 +211,8 @@ extension ShellAccount on ShellState {
         child: Text(initial, style: disp(26, w: FontWeight.w800, c: C.bg))),
       const SizedBox(width: 14),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(name, style: disp(20, w: FontWeight.w700)),
+        // maxLines/ellipsis: длинное имя из Telegram (до ~64 симв.) иначе разворачивало карточку в 3 строки
+        Text(name, style: disp(20, w: FontWeight.w700), maxLines: 1, overflow: TextOverflow.ellipsis),
         const SizedBox(height: 3),
         // нейтральное «Вход выполнен»: способов входа три (Telegram-пейринг / ключ / код) —
         // не угадываем, каким именно вошли
@@ -240,7 +251,7 @@ extension ShellAccount on ShellState {
         const SizedBox(height: 10),
         Text(tr('Войди через Telegram — приложение само подхватит твою подписку и ключ. Без ручного копирования.'), style: mono(12)),
         const SizedBox(height: 12),
-        SizedBox(width: double.infinity, child: _btn(tr('Войти через Telegram'), kind: 0, icon: Icons.send, onTap: _pairLogin)),
+        SizedBox(width: double.infinity, child: _btn(tr('Войти через Telegram'), kind: 0, icon: Icons.send, onTap: _pairing ? null : _pairLogin)),
         const SizedBox(height: 14),
         // Вход по VPN-ключу снова разрешён на сервере (решение владельца 2026-07-10): ключ —
         // основной credential, «Код входа» (UUID) работает как раньше. _login сам различает:
@@ -249,7 +260,10 @@ extension ShellAccount on ShellState {
         const SizedBox(height: 8),
         Container(padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(color: C.field, borderRadius: BorderRadius.circular(10)),
+          // textInputAction.done: Enter логинит вместо вставки переноса строки (двойной вход гасит
+          // внутренний гвард _loggingIn); при maxLines:2 done не мешает вставке многострочного ключа
           child: TextField(controller: _loginCtrl, maxLines: 2, style: mono(11, c: C.text), cursorColor: C.accent,
+            textInputAction: TextInputAction.done, onSubmitted: (_) => _login(),
             decoration: InputDecoration(isDense: true, border: InputBorder.none, contentPadding: EdgeInsets.zero,
               hintText: tr('VPN-ключ (vless://…) или Код входа'), hintStyle: mono(12, c: C.muted)))),
         const SizedBox(height: 10),
@@ -279,7 +293,8 @@ extension ShellAccount on ShellState {
                 icon: Icon(Icons.refresh, color: C.accent))]),
       const SizedBox(height: 16),
       Row(children: [
-        _ring(dleft, ringFrac),
+        // активная подписка без даты окончания → «—» с полным кольцом (а не обманчивые «0 дн.»)
+        _ring(days == null ? '—' : '$dleft', days == null ? (subActive ? 1.0 : 0.0) : ringFrac),
         const SizedBox(width: 20),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(_planLabel(subPlan), style: disp(20, w: FontWeight.w700, c: subActive ? C.accent : C.muted)),
@@ -314,8 +329,10 @@ extension ShellAccount on ShellState {
         const SizedBox(height: 12),
         Container(padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(color: C.field, borderRadius: BorderRadius.circular(10)),
+          // SelectableText: выделение мышью само доскролливает до хвоста длинного ключа и даёт
+          // контекстное меню копирования (обычный Text в гориз. скролле хвост мышью не достать)
           child: SingleChildScrollView(scrollDirection: Axis.horizontal,
-            child: Text(keyStr, style: mono(11, c: C.text), maxLines: 1, softWrap: false))),
+            child: SelectableText(keyStr, style: mono(11, c: C.text), maxLines: 1))),
         const SizedBox(height: 12),
         Row(children: [
           Expanded(child: _btn(tr('Скопировать'), kind: 1, icon: Icons.copy, onTap: () => _copy(keyStr, tr('Ключ')))),
@@ -340,7 +357,7 @@ extension ShellAccount on ShellState {
           Row(children: [
             Expanded(child: _btn(tr('Скопировать'), kind: 1, icon: Icons.copy, onTap: () => _copy(loginSecret!, tr('Код входа')))),
             const SizedBox(width: 12),
-            Expanded(child: _btn(tr('Сменить'), kind: 2, icon: Icons.refresh, onTap: _rotateSecret)),
+            Expanded(child: _btn(tr('Сменить'), kind: 2, icon: Icons.refresh, onTap: _rotating ? null : _rotateSecret)),
           ]),
         ],
       ]));
@@ -371,15 +388,19 @@ extension ShellAccount on ShellState {
       ]));
 
   Widget _deviceRow(Map<String, dynamic> d) {
-    final name = (d['name'] as String?) ?? tr('Устройство');
-    final id = d['id'] as String?;
+    // name на бэкенде NOT NULL, но пустая строка '' допустима (?? ловит только null) → пустая
+    // строка в списке; toString() страхует от нестрокового значения (иначе as String? → TypeError).
+    final raw = d['name']?.toString().trim() ?? '';
+    final name = raw.isEmpty ? tr('Устройство') : raw;
+    final id = d['id']?.toString();
     return Padding(padding: const EdgeInsets.symmetric(vertical: 7), child: Row(children: [
       Icon(Icons.smartphone, size: 18, color: C.muted),
       const SizedBox(width: 10),
       Expanded(child: Text(name, style: disp(14, w: FontWeight.w600), overflow: TextOverflow.ellipsis)),
-      // Тап-таргет удаления ≥40px (было 19px)
+      // Тап-таргет удаления ≥40px (было 19px). Гасим во время обновления (_subLoading): иначе
+      // подтверждённое удаление молча упёрлось бы в re-entrancy-гвард _refreshSub и потерялось.
       IconButton(
-        onPressed: id == null ? null : () => _confirmDelDevice(id, name),
+        onPressed: (id == null || _subLoading) ? null : () => _confirmDelDevice(id, name),
         iconSize: 19,
         padding: EdgeInsets.zero,
         visualDensity: VisualDensity.compact,

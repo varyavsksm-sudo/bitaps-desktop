@@ -117,7 +117,8 @@ extension ShellSettings on ShellState {
     // ещё смонтирован → в debug «used after being disposed»). onPressed читает ctrl.text до pop.
     showDialog<void>(
       context: context,
-      barrierDismissible: false,
+      // Esc закрывает (barrierDismissible:false заодно глушил Esc; защита от клика-мимо иллюзорна —
+      // «Отмена» теряет текст ровно так же, а ctrl.dispose висит на .then и отработает любой выход).
       builder: (_) => AlertDialog(
         backgroundColor: C.bg2,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
@@ -125,6 +126,7 @@ extension ShellSettings on ShellState {
         content: TextField(
           controller: ctrl,
           maxLines: 4,
+          autofocus: true, // фокус сразу в поле — Cmd+V вставляет ключ без предварительного клика
           style: mono(12, c: C.text),
           cursorColor: C.accent,
           // хинт перечисляет схемы честно: принимаются все kSupportedKeySchemes, не только vless

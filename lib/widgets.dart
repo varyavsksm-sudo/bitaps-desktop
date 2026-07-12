@@ -137,13 +137,16 @@ extension ShellWidgets on ShellState {
         Text(label, style: mono(11)),
       ]));
 
-  Widget _ring(int days, double frac) => SizedBox(
+  // label — уже готовая строка в центре кольца (число дней или «—» для активной подписки без
+  // даты): FittedBox страхует от переполнения, если строка окажется длиннее ожидаемого.
+  Widget _ring(String label, double frac) => SizedBox(
         width: 78, height: 78,
         child: Stack(alignment: Alignment.center, children: [
           SizedBox(width: 78, height: 78, child: CircularProgressIndicator(
             value: frac, strokeWidth: 7, backgroundColor: C.line, color: C.accent)),
           Column(mainAxisSize: MainAxisSize.min, children: [
-            Text('$days', style: disp(24, w: FontWeight.w800)),
+            SizedBox(width: 46, child: FittedBox(fit: BoxFit.scaleDown,
+              child: Text(label, style: disp(24, w: FontWeight.w800)))),
             Text(tr('дн.'), style: mono(10)),
           ]),
         ]),

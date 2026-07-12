@@ -46,7 +46,7 @@ class ConnectionController extends ChangeNotifier {
     if (secs >= 86400) {
       final d = secs ~/ 86400;
       final h = (secs % 86400) ~/ 3600;
-      return '${d}d ${h}h';
+      return appLang == 'en' ? '${d}d ${h}h' : '$dд $hч';
     }
     final h = (secs ~/ 3600).toString().padLeft(2, '0');
     final m = ((secs % 3600) ~/ 60).toString().padLeft(2, '0');
@@ -73,13 +73,15 @@ class ConnectionController extends ChangeNotifier {
 
       if (kRealTunnel) {
         // БОЕВОЙ режим: поднимаем НАСТОЯЩИЙ туннель через нативный движок sing-box.
-        final key = keyOf();
+        // trim + lowercase-схема как в парсере (singboxConfigJson тоже триммит/нормализует): иначе
+        // ключ с ведущим пробелом или «VLESS://» гард отверг бы, хотя парсер его разбирает.
+        final key = keyOf().trim();
         // пускаем все схемы, что умеет singbox_config (не только vless://) — иначе валидный
         // trojan/vmess/ss/hysteria2-ключ ложно отвергался бы «Нужен рабочий VPN-ключ».
-        if (!kSupportedKeySchemes.any((s) => key.startsWith(s))) { _fail(gen, tr('Нужен рабочий VPN-ключ')); return; }
+        if (!kSupportedKeySchemes.any((s) => key.toLowerCase().startsWith(s))) { _fail(gen, tr('Нужен рабочий VPN-ключ')); return; }
         String cfg;
         try {
-          cfg = singboxConfigJson(key);
+          cfg = singboxConfigJson(key); // key уже тримленный
         } catch (e) {
           _fail(gen, appLang == 'en' ? 'Key is corrupted: $e' : 'Ключ повреждён: $e');
           return;
@@ -116,7 +118,9 @@ class ConnectionController extends ChangeNotifier {
           if (e['down'] is num) down = (e['down'] as num).round();
           if (e['up'] is num) up = (e['up'] as num).round();
           notifyListeners();
-        });
+        // ошибка самого канала (смерть процесса движка вместе с EventChannel) не приходит событием
+        // state=='error' — ловим её отдельно, иначе UI навсегда завис бы в «Подключено».
+        }, onError: (_) { _dropped(gen); });
         return;
       }
 

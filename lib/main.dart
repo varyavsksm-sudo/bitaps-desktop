@@ -139,6 +139,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   bool _toolBusy = false; // идёт сетевой инструмент (спид-тест/утечки) — гвард от двойного запуска
   bool _supportSending = false; // идёт отправка в поддержку — гвард от двойной отправки
   bool _loggingIn = false; // идёт вход по ключу — гвард от двойного входа
+  bool _rotating = false; // идёт ротация «Кода входа» — гвард от двойного тапа (два POST)
   List<Map<String, dynamic>> devices = [];
   final TextEditingController _loginCtrl = TextEditingController();
   bool get loggedIn => tgId != null && appToken != null;
@@ -210,7 +211,9 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     );
     // conn мог смениться (подключение/обрыв/таймер) → пересобираем И сверяем анимации здесь,
     // а не пост-фреймом на каждый build (см. _syncAnimations вызовы у мутаторов tab/тема/стиль).
-    _conn.addListener(() { if (mounted) { setState(() {}); _syncAnimations(); } });
+    // !_locked: при замке build() отдаёт _lockScreen(), который conn/hms/скорость не читает —
+    // посекундный тик таймера сессии не должен впустую перестраивать экран блокировки.
+    _conn.addListener(() { if (mounted && !_locked) { setState(() {}); _syncAnimations(); } });
     _load();
     _checkUpdate();
     // Одноразовый пост-фрейм: первичная сверка анимаций после первого кадра (дальше — событийно).
@@ -559,7 +562,9 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
         backgroundColor: C.bg2,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
         title: Text(title, style: disp(18, w: FontWeight.w700)),
-        content: Text(body, style: mono(13, c: C.text)),
+        // фикс. ширина: без неё AlertDialog берёт ширину по самой длинной строке (IntrinsicWidth) —
+        // на развёрнутом окне однострочный текст растягивал бы диалог в полосу почти во весь экран
+        content: SizedBox(width: 360, child: Text(body, style: mono(13, c: C.text))),
         actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Ок'), style: mono(13, c: C.accent)))],
       ),
     );
@@ -627,9 +632,16 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
         if (!C.light) const Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(
           gradient: RadialGradient(center: Alignment(1.0, -0.9), radius: 0.8,
             colors: [Color(0x1A2D8BFF), Color(0x002D8BFF)])))),
-        SafeArea(bottom: false, child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 280),
-          child: KeyedSubtree(key: ValueKey(tab), child: screen))),
+        // На развёрнутом/широком десктоп-окне контент ограничиваем колонкой 560px по центру:
+        // фоны (Positioned.fill) и боттом-бар остаются во всю ширину, иначе карточки-«плиты» и
+        // Row-со-Spacer разъезжались бы на 2000px. При ширине ≤560 — no-op (мобильные не меняются).
+        SafeArea(bottom: false, child: Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 280),
+              child: KeyedSubtree(key: ValueKey(tab), child: screen))))),
       ]),
       bottomNavigationBar: _bottomBar(),
     );
@@ -647,11 +659,16 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
       child: Container(
         decoration: BoxDecoration(color: C.bg2.withValues(alpha: 0.7), border: Border(top: BorderSide(color: C.line))),
-        child: SafeArea(top: false, child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 9),
-          child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [for (int i = 0; i < 4; i++) _tabItem(items[i].$1, items[i].$2, i)]),
-        )),
+        // Стеклянная подложка бара — во всю ширину, но сами вкладки держим в той же 560px-колонке,
+        // что и контент (иначе на широком окне 4 таба разъезжались бы по краям на сотни px).
+        child: SafeArea(top: false, child: Center(child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 9),
+            child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [for (int i = 0; i < 4; i++) _tabItem(items[i].$1, items[i].$2, i)]),
+          ),
+        ))),
       ),
     ));
   }

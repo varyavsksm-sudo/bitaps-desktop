@@ -73,6 +73,8 @@ const Map<String, String> _kEn = {
   'Удаляю устройство…': 'Removing device…',
   'Обновляю…': 'Refreshing…',
   'Уже обновляю — секунду': 'Still refreshing — one sec',
+  'Идёт обновление — удаление не выполнено, повтори через секунду': 'Refresh in progress — removal not done, retry in a second',
+  'Уже выполняю — секунду': 'Still running — one sec',
   'Чтобы удалить устройство, нужен «Код входа». Открой его в боте (/start → Код входа) и войди по нему.':
       'To remove a device, you need your login code. Get it in the bot (/start → Login code) and sign in with it.',
   'Не удалось подтвердить «Код входа» для удаления.': "Couldn't confirm the login code for removal.",

@@ -19,7 +19,9 @@ extension ShellApi on ShellState {
   // Инструмент с сетью: окно с крутилкой → результат прямо в окне (видно всегда)
   // Ре-entrancy-гвард: двойной тап по «Спид-тест»/«Проверка утечек» не стартует 2 запроса + 2 диалога.
   Future<void> _runTool(String title, Future<String> Function() work) async {
-    if (_toolBusy) return;
+    // молчаливый гвард сбивал с толку: закрыл окно тапом по фону — кнопка «не реагирует» до 25с.
+    // Подсказываем, что инструмент ещё работает.
+    if (_toolBusy) { _toast(tr('Уже выполняю — секунду')); return; }
     _toolBusy = true;
     final fut = work().whenComplete(() => _toolBusy = false);
     if (!mounted) return;
@@ -33,7 +35,8 @@ extension ShellApi on ShellState {
             backgroundColor: C.bg2,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
             title: Text(title, style: disp(18, w: FontWeight.w700)),
-            content: !done
+            // фикс. ширина: иначе однострочный результат растягивал бы диалог в полосу на широком окне
+            content: SizedBox(width: 360, child: !done
                 ? Row(mainAxisSize: MainAxisSize.min, children: [
                     SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: C.accent)),
                     const SizedBox(width: 14),
@@ -43,7 +46,7 @@ extension ShellApi on ShellState {
                     snap.hasError
                         ? (appLang == 'en' ? "Couldn't run this.\n${snap.error}" : 'Не удалось выполнить.\n${snap.error}')
                         : (snap.data ?? ''),
-                    style: mono(13, c: C.text)),
+                    style: mono(13, c: C.text))),
             actions: done
                 ? [TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('Ок'), style: mono(13, c: C.accent)))]
                 : null,
@@ -89,6 +92,8 @@ extension ShellApi on ShellState {
   // Ротация кода входа: старый код перестаёт работать, показываем новый.
   Future<void> _rotateSecret() async {
     if (tgId == null || appToken == null) { _toast(tr('Сначала войди')); return; }
+    if (_rotating) return; // гвард от двойного тапа: без него двойной тап слал два POST
+    rebuild(() => _rotating = true);
     _toast(tr('Меняю код…'));
     // Снимок сессии на момент запроса: за 20с таймаута юзер мог выйти и войти в ДРУГОЙ аккаунт —
     // поздний ответ старой сессии не должен ни разлогинить новую (401-ветка), ни подсадить ей
@@ -118,6 +123,8 @@ extension ShellApi on ShellState {
     } catch (e) {
       debugPrint('_rotateSecret error: $e');
       if (mounted) _toast(_netErr);
+    } finally {
+      if (mounted) { rebuild(() => _rotating = false); } else { _rotating = false; }
     }
   }
 
@@ -204,11 +211,13 @@ extension ShellApi on ShellState {
   // Гвард от двойного тапа: пока идёт привязка, повторный вызов игнорируем (иначе два диалога-ожидания).
   Future<void> _pairLogin() async {
     if (_pairing) return;
-    _pairing = true;
+    // rebuild: первая фаза (POST action:start, до 15с) шла без индикации — кнопка выглядела мёртвой,
+    // повторный тап молча глотался. Теперь кнопка гаснет через штатный disabled-стиль _btn.
+    rebuild(() => _pairing = true);
     try {
       await _pairLoginInner();
     } finally {
-      _pairing = false;
+      if (mounted) { rebuild(() => _pairing = false); } else { _pairing = false; }
     }
   }
 
@@ -255,7 +264,7 @@ extension ShellApi on ShellState {
       barrierDismissible: false,
       builder: (dctx) => AlertDialog(
         backgroundColor: C.bg2,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           const SizedBox(height: 6),
           SizedBox(width: 34, height: 34, child: CircularProgressIndicator(color: C.accent, strokeWidth: 3)),
@@ -327,7 +336,16 @@ extension ShellApi on ShellState {
     // Re-entrancy-гвард (по образцу _pinging/_loggingIn): без него параллельные refresh
     // перезаписывали друг друга последним ответом — удалённое устройство «воскресало»,
     // а первый завершившийся гасил спиннер при ещё летящем втором.
-    if (_subLoading) { if (!silent) _toast(tr('Уже обновляю — секунду')); return; }
+    if (_subLoading) {
+      // при удалении гвард роняет запрос молча → юзер думает, что устройство удалено. Явно
+      // говорим, что не выполнено (кнопки корзины также гаснут по _subLoading в _deviceRow).
+      if (!silent) {
+        _toast(del != null
+            ? tr('Идёт обновление — удаление не выполнено, повтори через секунду')
+            : tr('Уже обновляю — секунду'));
+      }
+      return;
+    }
     if (!silent) _toast(del != null ? tr('Удаляю устройство…') : tr('Обновляю…'));
     if (mounted) rebuild(() => _subLoading = true);
     // Снимок сессии: за 20с таймаута юзер мог выйти и войти в другой аккаунт — поздний ответ
