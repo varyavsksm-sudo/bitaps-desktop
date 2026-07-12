@@ -21,11 +21,12 @@ class StarPainter extends CustomPainter {
   StarPainter(this.t);
   @override
   void paint(Canvas canvas, Size size) {
+    final p = Paint(); // один Paint на кадр вместо 120 аллокаций (painter гоняет 60 fps)
     for (int i = 0; i < _stars.length; i++) {
       final s = _stars[i];
       final twinkle = 0.7 + 0.3 * math.sin(t * 0.8 + i * 1.7);
-      final col = (s.accent ? C.accent : Colors.white).withValues(alpha: (s.o * twinkle).clamp(0, 1));
-      canvas.drawCircle(Offset(s.x * size.width, s.y * size.height), s.r, Paint()..color = col);
+      p.color = (s.accent ? C.accent : Colors.white).withValues(alpha: (s.o * twinkle).clamp(0, 1));
+      canvas.drawCircle(Offset(s.x * size.width, s.y * size.height), s.r, p);
     }
   }
 
@@ -72,27 +73,28 @@ extension ShellWidgets on ShellState {
   Widget _card({required Widget child, double padding = 16, bool strong = false}) {
     final r = BorderRadius.circular(18);
     final lt = C.light;
+    // В светлой теме заливка карточки практически непрозрачная (белый/0.96) — блюр за ней
+    // не виден, но оплачивается GPU на каждый кадр. Гоняем BackdropFilter только в тёмной,
+    // где стекло реально просвечивает звёзды.
+    final inner = Container(
+      padding: EdgeInsets.all(padding),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: lt
+              ? (strong ? [Colors.white, Colors.white] : [Colors.white, Colors.white.withValues(alpha: 0.96)])
+              : (strong ? [Colors.white.withValues(alpha: 0.13), Colors.white.withValues(alpha: 0.05)] : [Colors.white.withValues(alpha: 0.08), Colors.white.withValues(alpha: 0.025)]),
+          begin: Alignment.topLeft, end: Alignment.bottomRight),
+        borderRadius: r,
+        border: Border.all(color: lt ? Colors.black.withValues(alpha: 0.07) : Colors.white.withValues(alpha: 0.14)),
+      ),
+      child: child,
+    );
     return Container(
       decoration: BoxDecoration(borderRadius: r,
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: lt ? 0.10 : 0.44), blurRadius: lt ? 26 : 20, offset: Offset(0, lt ? 8 : 12))]),
       child: ClipRRect(
         borderRadius: r,
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-          child: Container(
-            padding: EdgeInsets.all(padding),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: lt
-                    ? (strong ? [Colors.white, Colors.white] : [Colors.white, Colors.white.withValues(alpha: 0.96)])
-                    : (strong ? [Colors.white.withValues(alpha: 0.13), Colors.white.withValues(alpha: 0.05)] : [Colors.white.withValues(alpha: 0.08), Colors.white.withValues(alpha: 0.025)]),
-                begin: Alignment.topLeft, end: Alignment.bottomRight),
-              borderRadius: r,
-              border: Border.all(color: lt ? Colors.black.withValues(alpha: 0.07) : Colors.white.withValues(alpha: 0.14)),
-            ),
-            child: child,
-          ),
-        ),
+        child: lt ? inner : BackdropFilter(filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16), child: inner),
       ),
     );
   }

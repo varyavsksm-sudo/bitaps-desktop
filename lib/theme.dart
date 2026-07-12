@@ -44,6 +44,16 @@ final ValueNotifier<bool> themeLight = ValueNotifier<bool>(false);
 LinearGradient get accentGrad =>
     LinearGradient(colors: [C.accentSoft, C.accent], begin: Alignment.topLeft, end: Alignment.bottomRight);
 
+// «Чернильный» вариант accentSoft для светлой темы: пастельные тона палитр (например #FFB347)
+// на белых карточках дают контраст ~1.5-2:1 и сливаются с фоном. Затемняем lightness до ≤0.38 —
+// это даёт ≥~4:1 на белом для всех пяти палитр, не трогая палитру акцентов глобально.
+// В тёмной теме — исходный accentSoft без изменений.
+Color get accentSoftInk {
+  if (!C.light) return C.accentSoft;
+  final h = HSLColor.fromColor(C.accentSoft);
+  return h.withLightness(math.min(h.lightness, 0.38)).toColor();
+}
+
 TextStyle disp(double s, {FontWeight w = FontWeight.w700, Color? c}) =>
     TextStyle(fontFamily: 'SpaceGrotesk', fontSize: s, fontWeight: w, color: c ?? C.text, letterSpacing: -0.3, height: 1.15);
 TextStyle mono(double s, {FontWeight w = FontWeight.w500, Color? c}) =>

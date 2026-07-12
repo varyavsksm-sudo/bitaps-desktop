@@ -168,7 +168,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       AnimationController(vsync: this, duration: const Duration(milliseconds: 2600));
   late final AnimationController _twinkle =
       AnimationController(vsync: this, duration: const Duration(seconds: 4));
-  bool _foreground = true; // приложение на переднем плане (обновляется в didChangeAppLifecycleState)
+  bool _foreground = true; // окно ВИДИМО (не свёрнуто); расфокус (inactive) — тоже видимо, см. lifecycle
 
   // Запускать/останавливать анимации по факту видимости — экономит CPU/GPU/батарею.
   // Вызывается пост-фрейм из build() (ловит смену вкладки/темы/стиля/подключения) и из lifecycle.
@@ -231,7 +231,10 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     // авто-замок при сворачивании. paused (мобильный) + hidden (десктоп свёрнут). НЕ inactive —
     // он срабатывает на ЛЮБУЮ потерю фокуса (в т.ч. открытие внешней ссылки) и ложно блокировал бы.
     final bg = state == AppLifecycleState.paused || state == AppLifecycleState.hidden;
-    _foreground = state == AppLifecycleState.resumed;
+    // inactive = потеря фокуса при ВИДИМОМ окне (клик в браузер/Telegram, в т.ч. наша же ссылка
+    // пейринга) — анимации не гасим, иначе шестерёнка/кольца замирают на полукадре и окно
+    // выглядит зависшим. Фон для анимаций — только paused/hidden/detached (свёрнуто/скрыто).
+    _foreground = state == AppLifecycleState.resumed || state == AppLifecycleState.inactive;
     _syncAnimations(); // свернули → гасим анимации; вернулись → поднимаем нужные
     if (bg && tgl1 && (appPin?.isNotEmpty ?? false) && !_locked) {
       setState(() => _locked = true);
@@ -424,7 +427,9 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
         // Фон тоже тема-зависимый (C.bg2): белый в светлой, near-black в тёмной — читается в обеих.
         backgroundColor: C.bg2,
         behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 18),
+        // фиксированная ширина вместо margin: на развёрнутом окне тост растягивался во весь экран;
+        // width сам центрирует SnackBar (width и margin вместе задавать нельзя)
+        width: math.min(420.0, MediaQuery.of(context).size.width - 32),
         elevation: 10,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14), side: BorderSide(color: C.accent.withValues(alpha: 0.45))),
@@ -603,15 +608,19 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
 
   Widget _buildBody() {
     if (_locked) return _lockScreen();
-    final screens = [_home(), _servers(), _account(), _settings()];
+    // Строим ТОЛЬКО активный экран: раньше каждый setState (включая посекундный тик таймера
+    // подключения) собирал все четыре — вчетверо дороже без какой-либо пользы.
+    final screen = switch (tab) { 0 => _home(), 1 => _servers(), 2 => _account(), _ => _settings() };
     return Scaffold(
       backgroundColor: C.bg,
       body: Stack(children: [
         Positioned.fill(child: ColoredBox(color: C.bg)),
-        if (!C.light) Positioned.fill(child: AnimatedBuilder(
+        // RepaintBoundary: starfield анимирует 60 fps — без собственного слоя он инвалидировал
+        // бы отрисовку всего экрана каждый кадр; с ним композитор переиспользует остальные слои.
+        if (!C.light) Positioned.fill(child: RepaintBoundary(child: AnimatedBuilder(
           animation: _twinkle,
           builder: (_, __) => CustomPaint(painter: StarPainter(_twinkle.value * 2 * math.pi)),
-        )),
+        ))),
         Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(
           gradient: RadialGradient(center: const Alignment(0, -0.95), radius: 0.95,
             colors: [C.accent.withValues(alpha: C.light ? 0.16 : 0.17), C.accent.withValues(alpha: 0)])))),
@@ -620,7 +629,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
             colors: [Color(0x1A2D8BFF), Color(0x002D8BFF)])))),
         SafeArea(bottom: false, child: AnimatedSwitcher(
           duration: const Duration(milliseconds: 280),
-          child: KeyedSubtree(key: ValueKey(tab), child: screens[tab]))),
+          child: KeyedSubtree(key: ValueKey(tab), child: screen))),
       ]),
       bottomNavigationBar: _bottomBar(),
     );

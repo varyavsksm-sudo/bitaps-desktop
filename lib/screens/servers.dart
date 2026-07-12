@@ -16,7 +16,8 @@ extension ShellServers on ShellState {
         children: [
           Text(tr('Серверы'), style: disp(26, w: FontWeight.w800)),
           const SizedBox(height: 18),
-          Row(children: [
+          // IntrinsicHeight + stretch: плитки одной высоты (тексты в 1 и 2 строки давали рваные края)
+          IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Expanded(child: _infoTile('${avail.length}', appLang == 'en'
                 ? (avail.length == 1 ? 'server\navailable' : 'servers\navailable')
                 : '${_ruPlural(avail.length, 'сервер', 'сервера', 'серверов')}\nдоступно')),
@@ -24,7 +25,7 @@ extension ShellServers on ShellState {
             Expanded(child: _infoTile('$locations', appLang == 'en'
                 ? (locations == 1 ? 'location' : 'locations')
                 : _ruPlural(locations, 'локация', 'локации', 'локаций'))),
-          ]),
+          ])),
           const SizedBox(height: 16),
           // Кнопка «Пинг»: живой замер отклика по всем доступным серверам (_pingServers в api.dart).
           // Semantics: во время замера кнопка неактивна — сообщаем это и скринридеру.
@@ -37,7 +38,7 @@ extension ShellServers on ShellState {
               onTap: _pinging ? null : _pingServers,
               child: _card(strong: true, child: Row(children: [
                 _gIcon(Icons.network_ping),
-                const SizedBox(width: 14),
+                const SizedBox(width: 12),
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(tr('Пинг серверов'), style: disp(16, w: FontWeight.w700)),
                   const SizedBox(height: 3),
@@ -141,7 +142,7 @@ extension ShellServers on ShellState {
                 const SizedBox(height: 2),
                 Row(children: [
                   Flexible(child: Text(tr(s.country), style: mono(12), overflow: TextOverflow.ellipsis)),
-                  if (s.premium) ...[const SizedBox(width: 6), _badge('PRO', C.accentSoft)],
+                  if (s.premium) ...[const SizedBox(width: 6), _badge('PRO', accentSoftInk)],
                 ]),
               ])),
               Tooltip(message: '$pingLabel · $ping ms',
@@ -163,7 +164,7 @@ extension ShellServers on ShellState {
                 splashRadius: 22,
                 tooltip: tr('избранное'),
                 icon: Icon(favs.contains(s.id) ? Icons.star : Icons.star_border,
-                  color: favs.contains(s.id) ? C.accentSoft : C.muted)),
+                  color: favs.contains(s.id) ? accentSoftInk : C.muted)),
               const SizedBox(width: 2),
               Icon(sel ? Icons.check_circle : Icons.circle_outlined, size: 20, color: sel ? C.accent : C.muted),
             ]),

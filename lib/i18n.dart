@@ -72,8 +72,9 @@ const Map<String, String> _kEn = {
   'Сначала войди по ключу': 'Sign in with your key first',
   'Удаляю устройство…': 'Removing device…',
   'Обновляю…': 'Refreshing…',
-  'Удаление требует «Код входа». Открой его в боте (/start → Код входа) и войди по нему.':
-      'Removing needs your login code. Get it in the bot (/start → Login code) and sign in with it.',
+  'Уже обновляю — секунду': 'Still refreshing — one sec',
+  'Чтобы удалить устройство, нужен «Код входа». Открой его в боте (/start → Код входа) и войди по нему.':
+      'To remove a device, you need your login code. Get it in the bot (/start → Login code) and sign in with it.',
   'Не удалось подтвердить «Код входа» для удаления.': "Couldn't confirm the login code for removal.",
   'Устройство удалено ✓': 'Device removed ✓',
   'Обновлено ✓': 'Updated ✓',
@@ -84,7 +85,7 @@ const Map<String, String> _kEn = {
   'Отправлено в поддержку ✓': 'Sent to support ✓',
   'Проверка утечек': 'Leak check',
   'IP не получен': "Couldn't get IP",
-  'Спид-тест': 'Speed test',
+  'Тест скорости': 'Speed test',
 
   // ---- home.dart ----
   'Доступна новая версия': 'New version available',
@@ -132,9 +133,9 @@ const Map<String, String> _kEn = {
   'Германия': 'Germany',
   'Финляндия': 'Finland',
   'Турция': 'Turkey',
-  'быстрый отклик': 'fast response',
-  'средний отклик': 'medium response',
-  'медленный отклик': 'slow response',
+  'быстрый отклик': 'low latency',
+  'средний отклик': 'medium latency',
+  'медленный отклик': 'high latency',
 
   // ---- account.dart (тарифы/подписка/ключ/устройства) ----
   '1 месяц': '1 month',
@@ -191,7 +192,7 @@ const Map<String, String> _kEn = {
   'Продлить': 'Renew',
   'Обновить': 'Refresh',
   'ключ доступа': 'access key',
-  'твой ключ из аккаунта': 'your key from the account',
+  'твой ключ из аккаунта': 'the key from your account',
   'для роутера и ручной настройки': 'for routers and manual setup',
   'Скопировать': 'Copy',
   'Вставить': 'Paste',
@@ -226,7 +227,7 @@ const Map<String, String> _kEn = {
   'PIN при открытии приложения': 'PIN when opening the app',
   'Обрыв соединения': 'Connection drop',
   'Уведомлять, если VPN отвалился': 'Notify if the VPN drops',
-  'Напомнить за пару дней': 'Remind a couple days ahead',
+  'Напомнить за пару дней': 'Remind me a couple of days ahead',
   'Лимит трафика': 'Traffic limit',
   'Сигнал при расходе от 5 ГБ за сессию': 'Alert at 5 GB+ used per session',
   'Авто-подключение': 'Auto-connect',

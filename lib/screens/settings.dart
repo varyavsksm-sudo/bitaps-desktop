@@ -213,7 +213,7 @@ extension ShellSettings on ShellState {
           _kicker(tr('инструменты')),
           const SizedBox(height: 10),
           _card(padding: 6, child: Column(children: [
-            _navRow(Icons.speed, tr('Спид-тест'), _speedTest),
+            _navRow(Icons.speed, tr('Тест скорости'), _speedTest),
             _divider(),
             _navRow(Icons.bar_chart, tr('Статистика'), _showStats),
             _divider(),
@@ -224,7 +224,8 @@ extension ShellSettings on ShellState {
           const SizedBox(height: 22),
           _kicker(tr('подключение')),
           const SizedBox(height: 10),
-          _card(child: Padding(
+          // padding 6+8=14 — инсет строки как у _navRow-строк карточки «Инструменты» выше
+          _card(padding: 6, child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
             child: Row(children: [
               Icon(Icons.bolt, size: 19, color: C.accent),

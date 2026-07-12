@@ -90,6 +90,11 @@ extension ShellApi on ShellState {
   Future<void> _rotateSecret() async {
     if (tgId == null || appToken == null) { _toast(tr('Сначала войди')); return; }
     _toast(tr('Меняю код…'));
+    // Снимок сессии на момент запроса: за 20с таймаута юзер мог выйти и войти в ДРУГОЙ аккаунт —
+    // поздний ответ старой сессии не должен ни разлогинить новую (401-ветка), ни подсадить ей
+    // чужой login_secret (ok-ветка).
+    final reqTgId = tgId;
+    final reqToken = appToken;
     try {
       final r = await http
           .post(Uri.parse(kRotateSecret),
@@ -97,6 +102,7 @@ extension ShellApi on ShellState {
               body: jsonEncode({'telegram_id': tgId, 'token': appToken}))
           .timeout(const Duration(seconds: 20));
       if (!mounted) return;
+      if (tgId != reqTgId || appToken != reqToken) return; // сессия сменилась во время запроса
       // silent: свой тост уже показываем ниже — иначе «Вышли из аккаунта» тут же перебивался бы
       if (r.statusCode == 401 || r.statusCode == 403) { _doLogout(silent: true); _toast(tr('Сессия истекла — войди снова')); return; }
       if (r.statusCode >= 500) { _toast(_srvErr(r.statusCode)); return; } // 5xx → «сервер недоступен», а не «нет интернета»
@@ -318,8 +324,16 @@ extension ShellApi on ShellState {
       if (!silent) _toast(tr('Сначала войди по ключу'));
       return;
     }
+    // Re-entrancy-гвард (по образцу _pinging/_loggingIn): без него параллельные refresh
+    // перезаписывали друг друга последним ответом — удалённое устройство «воскресало»,
+    // а первый завершившийся гасил спиннер при ещё летящем втором.
+    if (_subLoading) { if (!silent) _toast(tr('Уже обновляю — секунду')); return; }
     if (!silent) _toast(del != null ? tr('Удаляю устройство…') : tr('Обновляю…'));
     if (mounted) rebuild(() => _subLoading = true);
+    // Снимок сессии: за 20с таймаута юзер мог выйти и войти в другой аккаунт — поздний ответ
+    // старой сессии не должен ни применяться к новой, ни разлогинивать её (см. проверку ниже).
+    final reqTgId = tgId;
+    final reqToken = appToken;
     try {
       final r = await http
           .post(Uri.parse(kAppSub),
@@ -331,11 +345,12 @@ extension ShellApi on ShellState {
                 if (del != null && loginSecret != null) 'secret': loginSecret}))
           .timeout(const Duration(seconds: 20));
       if (!mounted) return;
+      if (tgId != reqTgId || appToken != reqToken) return; // сессия сменилась во время запроса
       // 403 при удалении — не протухшая сессия, а требование «Кода входа»: не разлогиниваем.
       if (r.statusCode == 403 && del != null) {
         if (!silent) {
           _toast(loginSecret == null
-              ? tr('Удаление требует «Код входа». Открой его в боте (/start → Код входа) и войди по нему.')
+              ? tr('Чтобы удалить устройство, нужен «Код входа». Открой его в боте (/start → Код входа) и войди по нему.')
               : tr('Не удалось подтвердить «Код входа» для удаления.'));
         }
         return;
@@ -453,7 +468,7 @@ extension ShellApi on ShellState {
             : 'Твой текущий внешний IP:\n\n$ip\n\nС включённым VPN он сменится на адрес сервера — так видно, что трафик идёт через туннель.';
       });
 
-  Future<void> _speedTest() => _runTool(tr('Спид-тест'), () async {
+  Future<void> _speedTest() => _runTool(tr('Тест скорости'), () async {
         final sw = Stopwatch()..start();
         final r = await http.get(Uri.parse('https://speed.cloudflare.com/__down?bytes=4000000')).timeout(const Duration(seconds: 25));
         if (r.statusCode != 200) {

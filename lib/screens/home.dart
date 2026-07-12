@@ -9,18 +9,19 @@ extension ShellHome on ShellState {
         child: MergeSemantics(child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () => _open(kDownloadUrl),
+        // геометрия согласована с _expiryBanner в Кабинете (16/14, радиус 14, иконка 20, gap 12)
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
             color: C.accent.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(14),
             border: Border.all(color: C.accent.withValues(alpha: 0.5)),
           ),
           child: Row(children: [
-            Icon(Icons.system_update, size: 18, color: C.accent),
-            const SizedBox(width: 10),
+            Icon(Icons.system_update, size: 20, color: C.accent),
+            const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(tr('Доступна новая версия'), style: disp(13, w: FontWeight.w700, c: C.accent)),
+              Text(tr('Доступна новая версия'), style: disp(14, w: FontWeight.w700, c: C.accent)),
               const SizedBox(height: 2),
               Text(tr('Нажми, чтобы скачать обновление'), style: mono(11, c: C.muted)),
             ])),
@@ -61,7 +62,7 @@ extension ShellHome on ShellState {
         const SizedBox(height: 14),
         _card(child: Row(children: [
           Text(server.flag, style: const TextStyle(fontSize: 24)),
-          const SizedBox(width: 13),
+          const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(tr(server.city), style: disp(16, w: FontWeight.w700)),
             const SizedBox(height: 2),
@@ -124,7 +125,7 @@ extension ShellHome on ShellState {
           onTap: () => _setBestServer(!bestServer),
           child: _card(child: MergeSemantics(child: Row(children: [
             _gIcon(Icons.bolt),
-            const SizedBox(width: 13),
+            const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(tr('Подключаться к лучшему серверу'), style: disp(15, w: FontWeight.w600)),
               const SizedBox(height: 2),

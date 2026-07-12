@@ -149,7 +149,7 @@ extension ShellAccount on ShellState {
                 const SizedBox(height: 3),
                 Text(tr('устройство для дома · 15 000 ₽'), style: mono(12, c: C.accent)),
               ])),
-              Icon(Icons.chevron_right, color: C.muted),
+              Icon(Icons.chevron_right, size: 18, color: C.muted),
             ])),
           ),
           const SizedBox(height: 14),
