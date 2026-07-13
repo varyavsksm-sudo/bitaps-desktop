@@ -159,14 +159,43 @@ extension ShellHome on ShellState {
       kbps >= 1000 ? '${(kbps / 1000).toStringAsFixed(1)} Mbps' : '$kbps kbps';
 
   Widget _logo() => Row(children: [
-        Container(width: 30, height: 30, alignment: Alignment.center,
-          decoration: BoxDecoration(gradient: accentGrad, borderRadius: BorderRadius.circular(9),
-            boxShadow: [BoxShadow(color: C.accent.withValues(alpha: 0.5), blurRadius: 12)]),
-          child: Text('₿', style: disp(17, w: FontWeight.w900, c: C.bg))),
+        // Пасхалка «Фосфор»: 7 быстрых тапов по ₿-квадрату разблокируют секретную 6-ю палитру.
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: _tapLogoForPhosphor,
+          child: Container(width: 30, height: 30, alignment: Alignment.center,
+            decoration: BoxDecoration(gradient: accentGrad, borderRadius: BorderRadius.circular(9),
+              boxShadow: [BoxShadow(color: C.accent.withValues(alpha: 0.5), blurRadius: 12)]),
+            child: Text('₿', style: disp(17, w: FontWeight.w900, c: C.bg))),
+        ),
         const SizedBox(width: 9),
         Text('bit', style: disp(22, w: FontWeight.w800)),
         Text('aps', style: disp(22, w: FontWeight.w800, c: C.accent)),
       ]);
+
+  // Считаем серию быстрых тапов (<1.2с между) по лого; на 7-м — разблокируем «Фосфор» и включаем её.
+  void _tapLogoForPhosphor() {
+    final now = DateTime.now();
+    if (_lastLogoTap == null || now.difference(_lastLogoTap!).inMilliseconds > 1200) {
+      _logoTaps = 0; // серия прервалась — начинаем заново
+    }
+    _lastLogoTap = now;
+    _logoTaps++;
+    if (phosphorUnlocked) return; // уже открыта — не спамим
+    if (_logoTaps >= 7) {
+      _logoTaps = 0;
+      rebuild(() {
+        phosphorUnlocked = true;
+        accentIdx = kPhosphorAccent;
+        C.accent = accentThemes[kPhosphorAccent].$2;
+        C.accentSoft = accentThemes[kPhosphorAccent].$3;
+        _applyThemeMode(); // включаем люминофорную палитру
+      });
+      _syncAnimations();
+      _save();
+      _toast(appLang == 'en' ? '☘ Phosphor theme unlocked' : '☘ Тема «Фосфор» разблокирована');
+    }
+  }
 
   // ---------------- PREMIUM POWER BUTTON ----------------
   Widget _powerButton() {

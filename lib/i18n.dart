@@ -324,6 +324,58 @@ const Map<String, String> _kEn = {
   'Показать окно': 'Show window',
   'Скрыть окно': 'Hide window',
   'Выйти из bitaps': 'Quit bitaps',
+  'Подключить': 'Connect',
+  'Режим': 'Mode',
+  'Открыть bitaps': 'Open bitaps',
+  'Не вошёл': 'Not signed in',
+  'Подписка активна': 'Subscription active',
+  'Подписка неактивна': 'Subscription inactive',
+
+  // ---- deep-link / share / QR (native.dart, account.dart) ----
+  'Ты уже вошёл': "You're already signed in",
+  'Не удалось разобрать ссылку': "Couldn't parse the link",
+  'Это не VPN-ключ': 'This is not a VPN key',
+  'Показать QR': 'Show QR',
+  'QR ключа': 'Key QR',
+  'QR кода входа': 'Login code QR',
+  'Реферальный QR': 'Referral QR',
+  'Наведи камеру другого устройства': 'Point another device\'s camera at it',
+  'Отсканируй в VPN-клиенте или другом устройстве': 'Scan it in a VPN client or another device',
+  'Отсканируй в приложении bitaps на другом устройстве': 'Scan it in the bitaps app on another device',
+  'Друг наводит камеру — и попадает в бота по твоей ссылке': 'A friend points their camera — and lands in the bot via your link',
+  'Отправить на другое устройство': 'Send to another device',
+  'Скопировано для отправки': 'Copied for sharing',
+
+  // ---- автозапуск / хоткей (settings.dart, native.dart) ----
+  'система': 'system',
+  'Запускать при входе': 'Launch at login',
+  'Автостарт вместе с системой': 'Start automatically with the system',
+  'Старт свёрнутым': 'Start minimized',
+  'При автозапуске — сразу в трей': 'On autostart — straight to the tray',
+  'Не удалось изменить автозапуск': "Couldn't change autostart",
+  'Хоткей подключения': 'Connect hotkey',
+  'Нажми сочетание клавиш…': 'Press a key combination…',
+  'Глобально включает/выключает VPN': 'Globally toggles the VPN',
+  'Добавь модификатор (Cmd/Ctrl/Shift)': 'Add a modifier (Cmd/Ctrl/Shift)',
+  'Подключаю…': 'Connecting…',
+  'Отключаю…': 'Disconnecting…',
+  'Демо-подключение…': 'Demo connection…',
+
+  // ---- самодиагностика (settings.dart) ----
+  'Проверить мой доступ': 'Check my access',
+  'Проверка доступа': 'Access check',
+  'Не вошёл — войди в Кабинете': 'Not signed in — sign in on the Account tab',
+  'Подписка неактивна — продли в Кабинете': 'Subscription inactive — renew on the Account tab',
+  'Ключ доступа получен': 'Access key received',
+  'Ключ ещё не подтянут — нажми «Обновить»': 'Key not pulled yet — tap "Refresh"',
+  'Код входа доступен (для входа без ключа)': 'Login code available (to sign in without a key)',
+  'Кода входа нет — получи в боте (/start → Код входа)': 'No login code — get one in the bot (/start → Login code)',
+  'Диагностика проверяет доступ к аккаунту, не качество канала.': 'Diagnostics checks account access, not channel quality.',
+  'Подключение сейчас демонстрационное — реального туннеля нет.': 'The connection is currently a demo — no real tunnel.',
+
+  // ---- что нового (settings.dart) ----
+  'Что нового': "What's new",
+  'Список изменений пока недоступен. Загляни позже.': 'The changelog is unavailable right now. Check back later.',
 
   // ---- faq (account) ----
   'Сколько устройств можно подключить?': 'How many devices can I connect?',

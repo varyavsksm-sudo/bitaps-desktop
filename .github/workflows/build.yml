@@ -88,6 +88,26 @@ jobs:
           grep -q 'android:allowBackup="false"' android/app/src/main/AndroidManifest.xml && echo "allowBackup ok" || (echo "allowBackup MISSING" && exit 1)
           sed -i.bak 's/minSdk = flutter.minSdkVersion/minSdk = 24/; s/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' android/app/build.gradle.kts 2>/dev/null || true
           sed -i.bak 's/minSdk = flutter.minSdkVersion/minSdk = 24/; s/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' android/app/build.gradle 2>/dev/null || true
+      - name: Patch Android manifest (deep-link bitaps:// + Quick Settings Tile)
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          # deep-link intent-filter внутри <activity> MainActivity: схема bitaps:// (import/login)
+          perl -0pi -e 's#(</activity>)#            <intent-filter android:autoVerify="false">\n                <action android:name="android.intent.action.VIEW"/>\n                <category android:name="android.intent.category.DEFAULT"/>\n                <category android:name="android.intent.category.BROWSABLE"/>\n                <data android:scheme="bitaps"/>\n            </intent-filter>\n        $1#' $MANIFEST
+          grep -q 'android:scheme="bitaps"' $MANIFEST && echo "deep-link ok" || (echo "deep-link MISSING" && exit 1)
+          # Quick Settings Tile: сервис-плитка «bitaps VPN» в шторке (открывает приложение)
+          perl -0pi -e 's#(</application>)#        <service\n            android:name=".BitapsTileService"\n            android:exported="true"\n            android:icon="\@mipmap/ic_launcher"\n            android:label="bitaps VPN"\n            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">\n            <intent-filter>\n                <action android:name="android.service.quicksettings.action.QS_TILE"/>\n            </intent-filter>\n        </service>\n    $1#' $MANIFEST
+          grep -q 'BitapsTileService' $MANIFEST && echo "QS tile ok" || (echo "QS tile MISSING" && exit 1)
+          # Kotlin TileService: кладём рядом с MainActivity (пакет резолвим по каталогу MainActivity).
+          # Тело кладём из base64 — heredoc в YAML block-scalar ломается на отступах терминатора.
+          MAIN=$(find android/app/src/main/kotlin -name MainActivity.kt | head -1)
+          if [ -z "$MAIN" ]; then echo "MainActivity.kt not found" && exit 1; fi
+          PKG=$(grep -m1 '^package ' "$MAIN" | sed 's/package //; s/[[:space:]]*$//')
+          DIR=$(dirname "$MAIN")
+          printf 'package %s\n' "$PKG" > "$DIR/BitapsTileService.kt"
+          # base64-строкой (одна строка → без heredoc, безопасно для YAML block-scalar отступов)
+          B64='CmltcG9ydCBhbmRyb2lkLmFwcC5QZW5kaW5nSW50ZW50CmltcG9ydCBhbmRyb2lkLmNvbnRlbnQuSW50ZW50CmltcG9ydCBhbmRyb2lkLm9zLkJ1aWxkCmltcG9ydCBhbmRyb2lkLnNlcnZpY2UucXVpY2tzZXR0aW5ncy5UaWxlCmltcG9ydCBhbmRyb2lkLnNlcnZpY2UucXVpY2tzZXR0aW5ncy5UaWxlU2VydmljZQoKLy8gUXVpY2sgU2V0dGluZ3Mg0L/Qu9C40YLQutCwIGJpdGFwcyBWUE46INC/0L4g0YLQsNC/0YMg0L7RgtC60YDRi9Cy0LDQtdGCINC/0YDQuNC70L7QttC10L3QuNC1LiDQotGD0L3QvdC10LvRjCDQtNC10LzQviAt0L/Qu9C40YLQutCwINC90LUg4oCe0LLQutC70Y7Rh9Cw0LXRgiBWUE7igJwsINGH0LXRgdGC0L3QviDRgtC+0LvRjNC60L4g0L7RgtC60YDRi9Cy0LDQtdGCINC+0LrQvdC+LgpjbGFzcyBCaXRhcHNUaWxlU2VydmljZSA6IFRpbGVTZXJ2aWNlKCkgewogICAgb3ZlcnJpZGUgZnVuIG9uU3RhcnRMaXN0ZW5pbmcoKSB7CiAgICAgICAgcXNUaWxlPy5sZXQgewogICAgICAgICAgICBpdC5zdGF0ZSA9IFRpbGUuU1RBVEVfSU5BQ1RJVkUKICAgICAgICAgICAgaXQubGFiZWwgPSAiYml0YXBzIFZQTiIKICAgICAgICAgICAgaXQudXBkYXRlVGlsZSgpCiAgICAgICAgfQogICAgfQogICAgb3ZlcnJpZGUgZnVuIG9uQ2xpY2soKSB7CiAgICAgICAgc3VwZXIub25DbGljaygpCiAgICAgICAgdmFsIGxhdW5jaCA9IHBhY2thZ2VNYW5hZ2VyLmdldExhdW5jaEludGVudEZvclBhY2thZ2UocGFja2FnZU5hbWUpPy5hcHBseSB7CiAgICAgICAgICAgIGFkZEZsYWdzKEludGVudC5GTEFHX0FDVElWSVRZX05FV19UQVNLIG9yIEludGVudC5GTEFHX0FDVElWSVRZX1NJTkdMRV9UT1ApCiAgICAgICAgfSA/OiByZXR1cm4KICAgICAgICBpZiAoQnVpbGQuVkVSU0lPTi5TREtfSU5UID49IEJ1aWxkLlZFUlNJT05fQ09ERVMuVVBTSURFX0RPV05fQ0FLRSkgewogICAgICAgICAgICBzdGFydEFjdGl2aXR5QW5kQ29sbGFwc2UoUGVuZGluZ0ludGVudC5nZXRBY3Rpdml0eSh0aGlzLCAwLCBsYXVuY2gsIFBlbmRpbmdJbnRlbnQuRkxBR19JTU1VVEFCTEUpKQogICAgICAgIH0gZWxzZSB7CiAgICAgICAgICAgIEBTdXBwcmVzcygiREVQUkVDQVRJT04iKQogICAgICAgICAgICBzdGFydEFjdGl2aXR5QW5kQ29sbGFwc2UobGF1bmNoKQogICAgICAgIH0KICAgIH0KfQo='
+          echo "$B64" | base64 -d >> "$DIR/BitapsTileService.kt"
+          echo "TileService written to $DIR (package $PKG)"
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: yes | flutter doctor --android-licenses || true

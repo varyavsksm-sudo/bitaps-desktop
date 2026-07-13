@@ -27,6 +27,20 @@ const int kBuildNumber = int.fromEnvironment('BUILD_NUMBER', defaultValue: 0);
 const kBuildNumberUrl = 'https://github.com/varyavsksm-sudo/bitaps-desktop/releases/latest/download/build_number.txt';
 const kDownloadUrl = 'https://bitapsvpn.com/app.html';
 
+// «Что нового»: changelog.json на сайте (репо bitaps-web). Формат: {"entries":[{"build":N,
+// "date":"YYYY-MM-DD","ru":["…"],"en":["…"]}]}. Фетч fail-soft: сбой → экран показывает
+// последнюю закэшированную версию или дружелюбную заглушку.
+const kChangelogUrl = 'https://bitapsvpn.com/changelog.json';
+
+// Кастомная URL-схема приложения (deep-link): bitaps://import?key=… и bitaps://login?secret=…
+// Нативная регистрация схемы — CI-патчами платформ (см. build.yml) / .desktop+reg при первом
+// запуске; приём — через app_links в ShellState._initDeepLinks().
+const kUrlScheme = 'bitaps';
+
+// Дефолтный глобальный хоткей подключения (десктоп): Cmd+Shift+B (macOS) / Ctrl+Shift+B (иначе).
+// Хранится в prefs как строка вида "meta+shift+keyB"; рекордер в Настройках переопределяет.
+const kDefaultHotkey = 'mod+shift+keyB';
+
 // ── Тарифы (КАНОН, зеркало _shared/plans.ts бэкенда) ──
 // Сетевого источника цен у приложения нет (edge-функции прайс не отдают), поэтому конструктор
 // пейвола использует константы канона: 399/999/1790/2990 ₽, +50 ₽/мес за доп-устройство,
@@ -47,14 +61,20 @@ const int kExtraPerMonthRub = 50; // доп-устройство = +50 ₽ за 
 const int kMaxDevices = 10;       // максимум устройств («не обсуждается»)
 const kPayUrl = 'https://bitapsvpn.com/pay.html'; // веб-оплата (аккаунты с отрицательным tgId)
 
-// Персонализация: акцентные темы (имя, основной, мягкий) + стили кнопки
+// Персонализация: акцентные темы (имя, основной, мягкий) + стили кнопки.
+// 6-я «Phosphor» (CRT-зелёный) — СЕКРЕТНАЯ: свотч скрыт в Настройках, пока не разблокирована
+// пасхалкой (7 тапов по мини-лого шапки). Индекс палитры = kPhosphorAccent.
 const List<(String, Color, Color)> accentThemes = [
   ('Sunset', Color(0xFFFF7A1A), Color(0xFFFFB347)),
   ('Neon', Color(0xFF2DE2FF), Color(0xFF6AA8FF)),
   ('Emerald', Color(0xFF19D98A), Color(0xFF6FF0BD)),
   ('Lavender', Color(0xFFA779FF), Color(0xFFD0B3FF)),
   ('Crimson', Color(0xFFFF4D6D), Color(0xFFFF9BAD)),
+  ('Phosphor', Color(0xFF33FF66), Color(0xFF8BFFA8)), // секретная — люминофор ЭЛТ
 ];
+// Индекс секретной палитры «Phosphor» в accentThemes (последний элемент). Свотч показывается
+// в Настройках только после разблокировки (флаг phosphorUnlocked, персист в prefs).
+const int kPhosphorAccent = 5;
 const btnStyleNames = ['Шестерёнка', 'Кольцо', 'Орб', 'Пульс'];
 // Порог разового предупреждения о большом расходе за сессию (тумблер «Лимит трафика»)
 const double kTrafficWarnMB = 5120; // 5 ГБ
@@ -87,12 +107,19 @@ Future<String?> _secRead(SharedPreferences p, String k) async {
 
 // Запись секрета: в secure + удаляем plaintext-копию из prefs. Сбой secure → пишем в prefs (не теряем сессию).
 Future<void> _secWrite(SharedPreferences p, String k, String? v) async {
+  // Раздельные try: plaintext-фолбэк выполняется ТОЛЬКО при сбое самой secure-записи, а НЕ при
+  // сбое очистки prefs. Иначе (secure записал, а p.remove упал) в catch дописывался plaintext —
+  // секрет оказывался И в secure, И в открытых prefs, ровно та утечка, что _secWrite предотвращает.
+  bool secureOk = false;
   try {
     if (v != null && v.isNotEmpty) { await _secure.write(key: k, value: v); } else { await _secure.delete(key: k); }
-    await p.remove(k);
+    secureOk = true;
   } catch (_) {
+    // secure реально недоступно (напр. нет libsecret) → фолбэк в prefs, чтобы не потерять сессию
     if (v != null && v.isNotEmpty) { await p.setString(k, v); } else { await p.remove(k); }
   }
+  // secure-запись прошла → только чистим plaintext-копию; её отсутствие НЕ триггерит дозапись секрета
+  if (secureOk) { try { await p.remove(k); } catch (_) {/* не критично: секрет уже в secure */} }
 }
 
 // ============================ MODELS / MOCK ============================

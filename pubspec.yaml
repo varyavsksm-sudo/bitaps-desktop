@@ -16,6 +16,18 @@ dependencies:
   flutter_secure_storage: ^9.2.2
   http: ^1.2.0
   tray_manager: ^0.5.3
+  # QR-пейринг (кабинет): показать QR ключа/кода входа + реф-QR (только рисование, без камеры)
+  qr_flutter: ^4.1.0
+  # share-sheet ключа «Отправить на другое устройство» (нативный на iOS/Android/macOS; фолбэк — копирование)
+  share_plus: ^10.1.4
+  # deep-link bitaps://import?key=… / bitaps://login?secret=… — приём кастомной схемы
+  app_links: ^6.3.2
+  # автозапуск при входе (десктоп) — 2 тумблера в Настройках
+  launch_at_startup: ^0.5.1
+  # глобальный хоткей подключения (десктоп) + рекордер в Настройках
+  hotkey_manager: ^0.2.3
+  # нужен launch_at_startup на macOS/Windows для определения пути к бинарю
+  package_info_plus: ^8.1.2
 
 dev_dependencies:
   flutter_test:

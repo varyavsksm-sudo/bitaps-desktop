@@ -66,6 +66,24 @@ class GearPainter extends CustomPainter {
   bool shouldRepaint(GearPainter old) => old.col != col;
 }
 
+// ============================ PHOSPHOR SCANLINES (секретная CRT-тема) ============================
+// Тонкие горизонтальные сканлайны + слабое зелёное свечение — только когда активна тема «Фосфор».
+// Статичный painter (без анимации, чтобы не жечь батарею и не мельтешить); repaint не нужен.
+class ScanlinePainter extends CustomPainter {
+  const ScanlinePainter();
+  @override
+  void paint(Canvas canvas, Size size) {
+    final p = Paint()..color = const Color(0x0A000000);
+    // каждые 3px — тёмная линия в 1px: даёт эффект люминофорной развёртки, но текст остаётся читаем
+    for (double y = 0; y < size.height; y += 3) {
+      canvas.drawRect(Rect.fromLTWH(0, y, size.width, 1), p);
+    }
+  }
+
+  @override
+  bool shouldRepaint(ScanlinePainter old) => false;
+}
+
 // ============================ SHARED WIDGET BUILDERS ============================
 // Переиспользуемые «строительные блоки» интерфейса (стекло-карточка, кнопки, бейджи и т.д.).
 extension ShellWidgets on ShellState {

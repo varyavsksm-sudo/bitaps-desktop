@@ -18,8 +18,27 @@ class C {
   static Color danger = const Color(0xFFFF5470);
 
   static bool light = false;
-  static void applyTheme(bool isLight) {
-    light = isLight;
+  // Активна ли секретная тема «Фосфор» (CRT-зелёный). Форсит почти-чёрный люминофорный фон
+  // поверх обычного тёмного и включает лёгкое зелёное свечение/сканлайны (см. home.dart, main.dart).
+  static bool phosphor = false;
+  static void applyTheme(bool isLight, {bool phosphorOn = false}) {
+    light = isLight && !phosphorOn; // Фосфор — только тёмный: светлую яркость игнорируем
+    phosphor = phosphorOn;
+    if (phosphorOn) {
+      // Люминофорная палитра: почти-чёрный зеленоватый фон, зелёный текст/акценты.
+      bg = const Color(0xFF04070A);
+      bg2 = const Color(0xFF081109);
+      text = const Color(0xFFB9FFCB);
+      muted = const Color(0xFF4E8A5E);
+      line = const Color(0x2233FF66);
+      fill = const Color(0x1433FF66);
+      field = const Color(0x66020604);
+      ok = const Color(0xFF33FF66);
+      warn = const Color(0xFFFFE14D);
+      danger = const Color(0xFFFF5470);
+      themeLight.value = false;
+      return;
+    }
     bg = isLight ? const Color(0xFFEAEEF6) : const Color(0xFF06040C);
     bg2 = isLight ? const Color(0xFFFFFFFF) : const Color(0xFF0C0A14);
     text = isLight ? const Color(0xFF0F1828) : const Color(0xFFEDF1F8);

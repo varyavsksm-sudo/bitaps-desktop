@@ -98,6 +98,7 @@ extension ShellApi on ShellState {
     statPaidDays = asInt(d['total_paid_days']) ?? statPaidDays;
     statRefs = asInt(d['referral_count']) ?? statRefs;
     statTokens = asInt(d['token_balance']) ?? statTokens;
+    _refreshTray(); // подписка/дни в меню трея (десктоп) — обновляем под новые данные аккаунта
   }
 
   // Ротация кода входа: старый код перестаёт работать, показываем новый.
@@ -126,7 +127,9 @@ extension ShellApi on ShellState {
       if (d == null) { _toast(_badRespErr); return; }
       if (d['ok'] == true && d['login_secret'] is String) {
         rebuild(() => loginSecret = d['login_secret'] as String);
-        _save();
+        // fire-and-forget, но с обработчиком: _save может бросить при двойном сбое хранилища
+        // (secure + prefs) — без catchError это была бы необработанная async-ошибка после success-тоста
+        _save().catchError((e) => debugPrint('_save after rotate failed: $e'));
         _toast(tr('Код входа обновлён ✓'));
       } else {
         _toast(tr('Не удалось сменить код'));
@@ -200,7 +203,7 @@ extension ShellApi on ShellState {
           _applySub(d, fresh: true);
           _loginCtrl.clear();
         });
-        _save();
+        _save().catchError((e) => debugPrint('_save after login failed: $e'));
         _toast(tr('Вход выполнен ✓'));
         // app-login не отдаёт статистику/стрик (это поля app-sub) → тихо дотягиваем сразу после
         // входа, чтобы карточка «// статистика» и стрик-подсказка пейвола не ждали ручного «Обновить»
@@ -305,6 +308,9 @@ extension ShellApi on ShellState {
                   headers: {'content-type': 'application/json', 'apikey': kApiKey},
                   body: jsonEncode({'action': 'check', 'token': token}))
               .timeout(const Duration(seconds: 10));
+          // 429 у app-pair — ВРЕМЕННЫЙ (общий IP-бакет start+check, делится за NAT), а не «истёк/ошибка».
+          // Тело {ok:false} иначе упало бы в break ниже и порвало живую привязку (TTL 15 мин) — ждём.
+          if (cr.statusCode == 429) continue;
           final cd = _asObj(cr.body);
           if (cd == null) continue; // непонятный ответ — не рушим опрос, ждём следующей итерации
           // cd['key'] несёт login_secret (UUID) — вход по vpn_key закрыт на сервере (app-login → 403).
@@ -405,7 +411,7 @@ extension ShellApi on ShellState {
         // не воскрешаем подписку/ключ/устройства вышедшего аккаунта поздним ответом.
         if (!loggedIn) return;
         rebuild(() => _applySub(d));
-        _save();
+        _save().catchError((e) => debugPrint('_save after refresh failed: $e'));
         if (!silent) _toast(del != null ? tr('Устройство удалено ✓') : tr('Обновлено ✓'));
       } else if (!silent) {
         _toast(tr('Не удалось обновить'));

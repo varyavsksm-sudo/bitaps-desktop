@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform, File;
+import 'dart:io' show Platform, File, Directory, Process;
 import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -15,6 +15,12 @@ import 'singbox_config.dart';
 import 'native_tunnel.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:tray_manager/tray_manager.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:app_links/app_links.dart';
+import 'package:launch_at_startup/launch_at_startup.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:hotkey_manager/hotkey_manager.dart';
 
 // Приложение разбито на модули; все они — части одной библиотеки (part/part of),
 // чтобы приватные имена (_secRead, _load, _conn и т.п.) и extension'ы на ShellState
@@ -23,6 +29,7 @@ part 'i18n.dart';        // локализация RU/EN
 part 'theme.dart';       // тема/токены/шрифты
 part 'models.dart';      // модели, константы/эндпоинты, токены+secure storage
 part 'connection.dart';  // ConnectionController — жизненный цикл VPN-туннеля (вынесен из god-object)
+part 'native.dart';      // deep-link (bitaps://), автозапуск при входе, глобальный хоткей — десктоп
 part 'widgets.dart';     // painters + общие виджеты-строители
 part 'api.dart';         // сетевые вызовы к edge-функциям + сетевые инструменты
 part 'screens/home.dart';
@@ -33,14 +40,20 @@ part 'screens/lock.dart';
 part 'screens/onboarding.dart';
 part 'screens/paywall.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Автозапуск при входе может передать флаг «старт свёрнутым» (launch_at_startup args / OS).
+  // Тогда окно не показываем — приложение живёт в трее до клика по иконке.
+  final bootMinimized = args.contains('--minimized') || args.contains('--hidden');
   // Тему применяем СИНХРОННО до первого кадра и до WindowOptions: иначе backgroundColor окна
   // читает дефолтную тёмную C.bg, и у пользователей светлой темы мелькает тёмный фон на старте.
   await _applyStoredThemeEarly();
   // window_manager — только десктоп (на Android/iOS его нет → иначе краш на старте)
   if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
     await windowManager.ensureInitialized();
+    // hotkey_manager требует сброса «залипших» с прошлого запуска хоткеев на старте (десктоп).
+    // fail-soft: на платформе без нативной стороны бросит — глотаем, живём без хоткея.
+    try { await hotKeyManager.unregisterAll(); } catch (_) {}
     // Десктоп больше не «растянутый телефон» 440px: окно по умолчанию широкое (виден боковой
     // рейл навигации, см. LayoutBuilder в _buildBody), максимума нет — ресайз свободный.
     // Узкое окно (<720) продолжает работать мобильной раскладкой с нижним таб-баром.
@@ -52,8 +65,14 @@ Future<void> main() async {
       title: 'bitaps VPN',
     );
     windowManager.waitUntilReadyToShow(opts, () async {
-      await windowManager.show();
-      await windowManager.focus();
+      if (bootMinimized) {
+        // старт свёрнутым: окно не показываем (только трей); skipTaskbar чтобы не мигало в доке/панели
+        try { await windowManager.setSkipTaskbar(true); } catch (_) {}
+        await windowManager.hide();
+      } else {
+        await windowManager.show();
+        await windowManager.focus();
+      }
     });
   }
   runApp(const BitApp());
@@ -90,16 +109,21 @@ Future<void> _applyStoredThemeEarly() async {
   try {
     final p = await SharedPreferences.getInstance();
     final tm = (p.getInt('themeMode') ?? 0).clamp(0, 2);
-    final light = tm == 1 ||
-        (tm == 2 &&
-            WidgetsBinding.instance.platformDispatcher.platformBrightness == Brightness.light);
-    C.applyTheme(light);
     // Акцент тоже применяем ДО первого кадра (зеркалит _load): иначе у сменившего акцент
     // юзера первые кадры рисуются дефолтным Sunset-оранжевым и скачком перекрашиваются.
     final ai = (p.getInt('accent') ?? 0).clamp(0, accentThemes.length - 1);
     final th = accentThemes[ai];
     C.accent = th.$2;
     C.accentSoft = th.$3;
+    // Секретный «Фосфор» форсит люминофорную палитру ДО первого кадра (иначе мелькает обычный фон).
+    if (ai == kPhosphorAccent) {
+      C.applyTheme(false, phosphorOn: true);
+      return;
+    }
+    final light = tm == 1 ||
+        (tm == 2 &&
+            WidgetsBinding.instance.platformDispatcher.platformBrightness == Brightness.light);
+    C.applyTheme(light);
   } catch (_) {
     // не удалось прочитать настройку — оставляем дефолтную тему, окно всё равно откроется
   }
@@ -252,6 +276,25 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
 
   // ----- tray (десктоп): иконка в меню-баре/трее, показать/скрыть окно -----
   bool _trayReady = false;
+  int _lastTrayConn = -1; // фаза conn, под которую последний раз пересобрано трей-меню (анти-спам)
+
+  // ----- автозапуск (десктоп): «запускать при входе» + «старт свёрнутым» -----
+  bool autoLaunch = false;   // приложение стартует при входе в систему
+  bool startMinimized = false; // при автозапуске окно не показываем (только трей)
+
+  // ----- глобальный хоткей подключения (десктоп) -----
+  String hotkeyStr = kDefaultHotkey; // сериализованный хоткей (persist prefs)
+  bool _recordingHotkey = false;     // рекордер в Настройках ждёт нажатия
+  HotKey? _registeredHotkey;         // текущий зарегистрированный (для unregister при смене)
+
+  // ----- секретная тема «Фосфор» -----
+  bool phosphorUnlocked = false; // свотч Phosphor виден в Настройках
+  int _logoTaps = 0;             // счётчик тапов по мини-лого шапки (пасхалка)
+  DateTime? _lastLogoTap;        // сброс серии, если между тапами >1.2с
+
+  // ----- deep-link (bitaps://): приём кастомной схемы -----
+  // Подписку держим в поле — она удерживает AppLinks живым и отменяется в dispose.
+  StreamSubscription<Uri>? _linkSub;
 
   @override
   void initState() {
@@ -270,12 +313,22 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     // а не пост-фреймом на каждый build (см. _syncAnimations вызовы у мутаторов tab/тема/стиль).
     // !_locked: при замке build() отдаёт _lockScreen(), который conn/hms/скорость не читает —
     // посекундный тик таймера сессии не должен впустую перестраивать экран блокировки.
-    _conn.addListener(() { if (mounted && !_locked) { setState(() {}); _syncAnimations(); } });
+    _conn.addListener(() {
+      if (mounted && !_locked) {
+        setState(() {});
+        _syncAnimations();
+        // трей-меню пересобираем ТОЛЬКО при смене фазы conn (0/1/2), а не на каждый тик таймера сессии
+        if (_conn.conn != _lastTrayConn) { _lastTrayConn = _conn.conn; _refreshTray(); }
+      }
+    });
     _load();
     _checkUpdate();
     // Tray — только десктоп; вся инициализация fail-soft (без нативной стороны/библиотеки
     // приложение просто живёт без трея, не падая).
     if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) _initTray();
+    // deep-link (bitaps://) — все платформы; автозапуск+хоткей — только десктоп. Всё fail-soft.
+    _initDeepLinks();
+    if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) _initNativeDesktop();
     // Одноразовый пост-фрейм: первичная сверка анимаций после первого кадра (дальше — событийно).
     WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _syncAnimations(); });
   }
@@ -299,18 +352,66 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     }
   }
 
-  // Меню трея строится из tr() → пересобираем при смене языка (см. _langChip в settings.dart).
+  // Меню трея = мини-пульт: статус (демо-гейт как везде), подключить/отключить, дни подписки,
+  // режимы, окно, выход. Пересобираем при смене языка (_langChip) И при смене состояния —
+  // подключения/подписки/режима (см. _refreshTray, зовём из слушателя _conn и _applySub/_save).
   Future<void> _updateTrayMenu() async {
     try {
+      // строка статуса — тот же honesty-гейт, что и на Главной: в демо не пишем «Подключено»
+      final statusLabel = conn == 0
+          ? tr('Отключено')
+          : conn == 1
+              ? tr('Подключение…')
+              : (kRealTunnel ? tr('Подключено') : tr('Демо-режим'));
+      // дни подписки в меню (если вошёл и знаем срок)
+      final days = _trayDaysLeft();
+      final subLabel = !loggedIn
+          ? tr('Не вошёл')
+          : (days != null
+              ? (appLang == 'en' ? '$days days left' : 'осталось $days ${_trayPluralDays(days)}')
+              : (subActive ? tr('Подписка активна') : tr('Подписка неактивна')));
+      final connected = conn == 2;
       await trayManager.setContextMenu(Menu(items: [
-        MenuItem(key: 'show', label: tr('Показать окно')),
-        MenuItem(key: 'hide', label: tr('Скрыть окно')),
+        MenuItem(key: 'status', label: '● $statusLabel', disabled: true),
+        MenuItem(key: 'sub', label: '  $subLabel', disabled: true),
         MenuItem.separator(),
+        // одна строка-тумблер: подключить при отключённом, отключить при активном
+        MenuItem(key: 'toggle', label: connected ? tr('Отключить') : tr('Подключить')),
+        // подменю выбора режима (Авто/Стрим/Игры/Прив.)
+        MenuItem.submenu(
+          key: 'mode',
+          label: tr('Режим'),
+          submenu: Menu(items: [
+            for (int i = 0; i < modeLabels.length; i++)
+              MenuItem.checkbox(key: 'mode_$i', label: tr(modeLabels[i]), checked: mode == i),
+          ]),
+        ),
+        MenuItem.separator(),
+        MenuItem(key: 'show', label: tr('Открыть bitaps')),
         MenuItem(key: 'quit', label: tr('Выйти из bitaps')),
       ]));
     } catch (e) {
       debugPrint('tray menu failed: $e');
     }
+  }
+
+  // Пересобрать меню трея под текущее состояние (fail-soft; только если трей готов).
+  void _refreshTray() { if (_trayReady) _updateTrayMenu(); }
+
+  // дни до конца подписки для меню трея (дублирует логику account._daysLeft, но без extension-зависимости)
+  int? _trayDaysLeft() {
+    if (subExpires == null) return null;
+    final e = DateTime.tryParse(subExpires!);
+    if (e == null) return null;
+    final d = (e.toUtc().difference(DateTime.now().toUtc()).inMinutes / 1440).ceil();
+    return d < 0 ? 0 : d;
+  }
+
+  String _trayPluralDays(int n) {
+    final n10 = n % 10, n100 = n % 100;
+    if (n10 == 1 && n100 != 11) return 'день';
+    if (n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14)) return 'дня';
+    return 'дней';
   }
 
   @override
@@ -330,19 +431,37 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
 
   @override
   void onTrayMenuItemClick(MenuItem menuItem) async {
-    switch (menuItem.key) {
+    final key = menuItem.key;
+    switch (key) {
       case 'show':
+        // старт-свёрнутым мог поставить skipTaskbar — снимаем при явном открытии
+        try { await windowManager.setSkipTaskbar(false); } catch (_) {}
         await windowManager.show();
         await windowManager.focus();
         break;
       case 'hide':
         await windowManager.hide();
         break;
+      case 'toggle':
+        // тот же ConnectionController.toggle, что у большой кнопки и хоткея
+        toggle();
+        _refreshTray();
+        break;
       case 'quit':
         // сначала убираем иконку из трея, затем закрываем окно/процесс
         try { await trayManager.destroy(); } catch (_) {}
         await windowManager.destroy();
         break;
+      default:
+        // выбор режима из подменю (mode_0..mode_3): только при отключённом туннеле (как _modeChip)
+        if (key != null && key.startsWith('mode_')) {
+          final i = int.tryParse(key.substring(5));
+          if (i == null || i < 0 || i >= modeLabels.length) return;
+          if (conn != 0) { _toast(tr('Отключись, чтобы сменить режим')); return; }
+          setState(() { mode = i; bestServer = true; server = serverForMode(i); });
+          _save();
+          _refreshTray();
+        }
     }
   }
 
@@ -387,6 +506,8 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     if (_trayReady) trayManager.removeListener(this);
+    _linkSub?.cancel();
+    _disposeHotkey();
     _onbCtrl.dispose();
     _pinLockTimer?.cancel();
     _conn.dispose();
@@ -417,7 +538,14 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     appLang = savedLang ??
         (WidgetsBinding.instance.platformDispatcher.locale.languageCode == 'ru' ? 'ru' : 'en');
     setState(() {
-      accentIdx = (p.getInt('accent') ?? 0).clamp(0, accentThemes.length - 1);
+      phosphorUnlocked = p.getBool('phosphorUnlocked') ?? false;
+      // Секретную «Фосфор» можно восстановить, ТОЛЬКО если она уже разблокирована — иначе
+      // потерянный флаг оставил бы выбранным недоступный акцент. Клампим к обычным палитрам.
+      final maxAccent = phosphorUnlocked ? accentThemes.length - 1 : kPhosphorAccent - 1;
+      accentIdx = (p.getInt('accent') ?? 0).clamp(0, maxAccent);
+      autoLaunch = p.getBool('autoLaunch') ?? false;
+      startMinimized = p.getBool('startMinimized') ?? false;
+      hotkeyStr = p.getString('hotkey') ?? kDefaultHotkey;
       btnStyle = (p.getInt('btnStyle') ?? 0).clamp(0, btnStyleNames.length - 1);
       mode = (p.getInt('mode') ?? 0).clamp(0, modeLabels.length - 1);
       themeMode = (p.getInt('themeMode') ?? 0).clamp(0, 2);
@@ -510,8 +638,11 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     });
   }
 
-  // тема: 0 тёмная · 1 светлая · 2 системная (следует за настройкой ОС)
+  // тема: 0 тёмная · 1 светлая · 2 системная (следует за настройкой ОС).
+  // Секретный акцент «Фосфор» (accentIdx == kPhosphorAccent) форсит люминофорную тёмную палитру
+  // независимо от режима яркости — она сама по себе законченная тема.
   void _applyThemeMode() {
+    if (accentIdx == kPhosphorAccent) { C.applyTheme(false, phosphorOn: true); return; }
     final light = themeMode == 1 ||
         (themeMode == 2 &&
             WidgetsBinding.instance.platformDispatcher.platformBrightness == Brightness.light);
@@ -527,6 +658,10 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   Future<void> _save() async {
     final p = await SharedPreferences.getInstance();
     await p.setInt('accent', accentIdx);
+    await p.setBool('phosphorUnlocked', phosphorUnlocked);
+    await p.setBool('autoLaunch', autoLaunch);
+    await p.setBool('startMinimized', startMinimized);
+    await p.setString('hotkey', hotkeyStr);
     await p.setInt('btnStyle', btnStyle);
     await p.setInt('mode', mode);
     await p.setInt('themeMode', themeMode);
@@ -619,10 +754,20 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     }
   }
 
-  Future<void> _copy(String text, String label) async {
+  Future<void> _copy(String text, String label, {bool secret = false}) async {
     // ждём фактической записи в буфер, потом сообщаем «скопировано» — иначе тост мог опередить запись
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
+    // Секреты (vpn_key / «Код входа») чистим из системного буфера через 90с — иначе они лежат
+    // там бессрочно (Windows Clipboard History, Universal Clipboard, менеджеры буфера). Стираем
+    // только если там всё ещё НАШЕ значение (юзер мог скопировать что-то другое). Вставить в
+    // роутер/клиент успевают за секунды. Реф-ссылка и прочее (secret:false) не трогаются.
+    if (secret) {
+      Future.delayed(const Duration(seconds: 90), () async {
+        final d = await Clipboard.getData('text/plain');
+        if (d?.text == text) await Clipboard.setData(const ClipboardData(text: ''));
+      });
+    }
     _toast(appLang == 'en' ? '$label · copied to clipboard' : '$label · скопировано в буфер');
   }
 
@@ -702,6 +847,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       customCfg = null;
     });
     _save();
+    _refreshTray(); // сбрасываем «дни/подписка» в меню трея после выхода
     if (!silent) _toast(tr('Вышли из аккаунта'));
   }
 
@@ -820,7 +966,8 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
           Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(
             gradient: RadialGradient(center: const Alignment(0, -0.95), radius: 0.95,
               colors: [C.accent.withValues(alpha: C.light ? 0.16 : 0.17), C.accent.withValues(alpha: 0)])))),
-          if (!C.light) const Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(
+          // синий угловой градиент — только обычная тёмная тема (в Фосфоре синий спорит с зелёным)
+          if (!C.light && !C.phosphor) const Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(
             gradient: RadialGradient(center: Alignment(1.0, -0.9), radius: 0.8,
               colors: [Color(0x1A2D8BFF), Color(0x002D8BFF)])))),
           // Фоны (Positioned.fill) — во всю ширину; контент — колонкой 560px по центру,
@@ -828,6 +975,9 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
           SafeArea(bottom: false, child: wide
             ? Row(children: [_navRail(), Expanded(child: content)])
             : content),
+          // CRT-сканлайны — поверх контента, только в теме «Фосфор». IgnorePointer: не перехватывает тапы.
+          if (C.phosphor) const Positioned.fill(child: IgnorePointer(
+            child: RepaintBoundary(child: CustomPaint(painter: ScanlinePainter())))),
         ]),
         bottomNavigationBar: wide ? null : _bottomBar(),
       );

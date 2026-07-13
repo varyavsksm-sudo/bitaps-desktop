@@ -21,11 +21,18 @@ extension ShellAccount on ShellState {
   Future<void> _importKey() async {
     final data = await Clipboard.getData('text/plain');
     final t = (data?.text ?? '').trim();
+    await _importKeyString(t, fromClipboard: true);
+  }
+
+  // Общее ядро импорта ключа: используется и вставкой из буфера (_importKey), и deep-link'ом
+  // (bitaps://import?key=…). Один и тот же trusted-host гейт и путь входа для обоих источников.
+  Future<void> _importKeyString(String raw, {bool fromClipboard = false}) async {
+    final t = raw.trim();
     // Принимаем только сам VPN-ключ (любая схема из kSupportedKeySchemes — как гард коннекта и
     // «Свой конфиг»). Fetch подписки по http(s)-ссылке не реализован — раньше ссылка молча
     // сохранялась как ключ и коннект падал, поэтому http(s) не принимаем.
     if (!kSupportedKeySchemes.any((s) => t.startsWith(s))) {
-      _toast(tr('В буфере нет VPN-ключа'));
+      _toast(fromClipboard ? tr('В буфере нет VPN-ключа') : tr('Это не VPN-ключ'));
       return;
     }
     final host = _hostOf(t);
@@ -36,7 +43,10 @@ extension ShellAccount on ShellState {
       if (!mounted) return;
       rebuild(() {
         keyStr = t;
-        importedHost = host;
+        // sentinel '?' когда хост не распарсился: importedHost==null означало бы «ключ не импортирован»,
+        // и после рестарта авто-рефреш (_applySub гард importedHost==null) молча перетёр бы ручной
+        // ключ ключом аккаунта. Непустой маркер защищает импорт (importedHost нигде не отображается).
+        importedHost = host ?? '?';
       });
       _save();
       _toast(host != null
@@ -132,11 +142,22 @@ extension ShellAccount on ShellState {
             // бот реально начисляет и дни, и токены (TOKENS_PER_REFERRAL=100) — не занижаем обещание
             Text(tr('▸ +14 дней и +100 🪙 за каждого друга, кто оформит первую подписку\n▸ начисляем автоматически'), style: mono(12, c: C.muted)),
             const SizedBox(height: 12),
-            _btn(tr('Поделиться ссылкой'), kind: 1, icon: Icons.share, onTap: () {
-              if (!loggedIn) { _toast(tr('Войди, чтобы получить свою реферальную ссылку')); return; }
-              if (tgId != null && tgId! < 0) { _toast(tr('Рефералы — через нашего Telegram-бота')); _open(kBot); return; } // веб-аккаунт: реф работает только в Telegram
-              _copy('https://t.me/bitaps_vpn_auth_bot?start=ref$tgId', tr('Реферальная ссылка'));
-            }),
+            Row(children: [
+              Expanded(child: _btn(tr('Поделиться ссылкой'), kind: 1, icon: Icons.share, onTap: () {
+                if (!loggedIn) { _toast(tr('Войди, чтобы получить свою реферальную ссылку')); return; }
+                if (tgId != null && tgId! < 0) { _toast(tr('Рефералы — через нашего Telegram-бота')); _open(kBot); return; } // веб-аккаунт: реф работает только в Telegram
+                _copy('https://t.me/bitaps_vpn_auth_bot?start=ref$tgId', tr('Реферальная ссылка'));
+              })),
+              const SizedBox(width: 12),
+              // Реф-QR: друг наводит камеру → сразу в бота с реф-параметром. Веб-аккаунт (tgId<0)
+              // и гость реф-ссылки не имеют — показываем осмысленный тост вместо пустого QR.
+              SizedBox(width: 52, child: _btn('QR', kind: 2, onTap: () {
+                if (!loggedIn) { _toast(tr('Войди, чтобы получить свою реферальную ссылку')); return; }
+                if (tgId != null && tgId! < 0) { _toast(tr('Рефералы — через нашего Telegram-бота')); return; }
+                _showQr('https://t.me/bitaps_vpn_auth_bot?start=ref$tgId', tr('Реферальный QR'),
+                    hint: tr('Друг наводит камеру — и попадает в бота по твоей ссылке'));
+              })),
+            ]),
           ])),
           const SizedBox(height: 14),
           GestureDetector(
@@ -323,11 +344,73 @@ extension ShellAccount on ShellState {
     ]));
   }
 
+  // ---------------- QR + SHARE ----------------
+  // QR-код содержимого (ключ/код/реф-ссылка): диалог с крупным сканируемым QR. qr_flutter рисует
+  // локально (без камеры/сети). Тёмный фон карточки → белая подложка под QR для контраста сканера.
+  void _showQr(String data, String title, {String? hint}) {
+    showDialog<void>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: C.bg2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
+        title: Text(title, style: disp(17, w: FontWeight.w700)),
+        content: SizedBox(width: 300, child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
+            // белые модули на белом фоне не считаются — QR всегда тёмный на белом, вне зависимости от темы
+            child: QrImageView(
+              data: data,
+              version: QrVersions.auto,
+              size: 232,
+              backgroundColor: Colors.white,
+              eyeStyle: const QrEyeStyle(eyeShape: QrEyeShape.square, color: Color(0xFF0C0A14)),
+              dataModuleStyle: const QrDataModuleStyle(dataModuleShape: QrDataModuleShape.square, color: Color(0xFF0C0A14)),
+              errorCorrectionLevel: QrErrorCorrectLevel.M,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(hint ?? tr('Наведи камеру другого устройства'), textAlign: TextAlign.center, style: mono(11, c: C.muted)),
+        ])),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Закрыть'), style: mono(13, c: C.accent)))],
+      ),
+    );
+  }
+
+  // «Отправить на другое устройство»: нативный share-sheet (iOS/Android/macOS). Первой строкой —
+  // deep-link bitaps://import?key=… (тап на устройстве с приложением → мгновенный импорт), второй —
+  // сырой ключ для ручной вставки. На платформах без нативного шаринга (часть Win/Linux) share_plus
+  // сам делает разумный фолбэк; дополнительно кладём в буфер, чтобы отправка не «проглотилась».
+  Future<void> _shareKey() async {
+    final deep = 'bitaps://import?key=${Uri.encodeComponent(keyStr)}';
+    final text = appLang == 'en'
+        ? 'Open in bitaps VPN:\n$deep\n\nOr paste this key manually:\n$keyStr'
+        : 'Открыть в bitaps VPN:\n$deep\n\nИли вставь ключ вручную:\n$keyStr';
+    try {
+      // sharePositionOrigin обязателен для iPad-поповера; на десктопе игнорируется.
+      final box = context.findRenderObject() as RenderBox?;
+      final origin = box != null ? box.localToGlobal(Offset.zero) & box.size : null;
+      await Share.share(text, subject: 'bitaps VPN', sharePositionOrigin: origin);
+    } catch (e) {
+      debugPrint('_shareKey failed: $e');
+      // фолбэк: в буфер + честный тост «скопировано для отправки»
+      await Clipboard.setData(ClipboardData(text: text));
+      if (mounted) _toast(appLang == 'en' ? 'Copied for sharing' : 'Скопировано для отправки');
+    }
+  }
+
   Widget _keyCard() => _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [_gIcon(Icons.qr_code_2), const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             _kicker(tr('ключ доступа')), const SizedBox(height: 3),
-            Text(loggedIn ? tr('твой ключ из аккаунта') : tr('для роутера и ручной настройки'), style: mono(11))]))]),
+            Text(loggedIn ? tr('твой ключ из аккаунта') : tr('для роутера и ручной настройки'), style: mono(11))])),
+          // Показать QR ключа — быстрый перенос на телефон/роутер сканером
+          IconButton(
+            onPressed: () => _showQr(keyStr, tr('QR ключа'),
+                hint: tr('Отсканируй в VPN-клиенте или другом устройстве')),
+            iconSize: 22, padding: EdgeInsets.zero, visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 40), splashRadius: 22,
+            tooltip: tr('Показать QR'), icon: Icon(Icons.qr_code_2, color: C.accent))]),
         const SizedBox(height: 12),
         Container(padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(color: C.field, borderRadius: BorderRadius.circular(10)),
@@ -337,12 +420,15 @@ extension ShellAccount on ShellState {
             child: SelectableText(keyStr, style: mono(11, c: C.text), maxLines: 1))),
         const SizedBox(height: 12),
         Row(children: [
-          Expanded(child: _btn(tr('Скопировать'), kind: 1, icon: Icons.copy, onTap: () => _copy(keyStr, tr('Ключ')))),
+          Expanded(child: _btn(tr('Скопировать'), kind: 1, icon: Icons.copy, onTap: () => _copy(keyStr, tr('Ключ'), secret: true))),
           const SizedBox(width: 12),
           Expanded(child: loggedIn
               ? _btn(tr('Обновить'), kind: 2, icon: Icons.refresh, onTap: () => _refreshSub())
               : _btn(tr('Вставить'), kind: 2, icon: Icons.content_paste, onTap: _importKey)),
         ]),
+        const SizedBox(height: 10),
+        // «Отправить на другое устройство» — deep-link + сырой ключ через share-sheet
+        _btn(tr('Отправить на другое устройство'), kind: 2, icon: Icons.ios_share, onTap: _shareKey),
         if (loggedIn && loginSecret != null) ...[
           const SizedBox(height: 12),
           _divider(), // единый разделитель как в остальном UI (было голое Divider(...))
@@ -350,14 +436,21 @@ extension ShellAccount on ShellState {
           Row(children: [_gIcon(Icons.lock_outline), const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               _kicker(tr('код входа')), const SizedBox(height: 3),
-              Text(tr('для входа в приложение — не вставляй в VPN-клиенты'), style: mono(11))]))]),
+              Text(tr('для входа в приложение — не вставляй в VPN-клиенты'), style: mono(11))])),
+            // QR кода входа = deep-link bitaps://login?secret=… — вход на другом устройстве сканером
+            IconButton(
+              onPressed: () => _showQr('bitaps://login?secret=${Uri.encodeComponent(loginSecret!)}', tr('QR кода входа'),
+                  hint: tr('Отсканируй в приложении bitaps на другом устройстве')),
+              iconSize: 22, padding: EdgeInsets.zero, visualDensity: VisualDensity.compact,
+              constraints: const BoxConstraints(minWidth: 40, minHeight: 40), splashRadius: 22,
+              tooltip: tr('Показать QR'), icon: Icon(Icons.qr_code_2, color: C.accent))]),
           const SizedBox(height: 10),
           Container(padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(color: C.field, borderRadius: BorderRadius.circular(10)),
             child: Text(loginSecret!, style: mono(11, c: C.text), maxLines: 1, overflow: TextOverflow.ellipsis)),
           const SizedBox(height: 10),
           Row(children: [
-            Expanded(child: _btn(tr('Скопировать'), kind: 1, icon: Icons.copy, onTap: () => _copy(loginSecret!, tr('Код входа')))),
+            Expanded(child: _btn(tr('Скопировать'), kind: 1, icon: Icons.copy, onTap: () => _copy(loginSecret!, tr('Код входа'), secret: true))),
             const SizedBox(width: 12),
             Expanded(child: _btn(tr('Сменить'), kind: 2, icon: Icons.refresh, onTap: _rotating ? null : _rotateSecret)),
           ]),

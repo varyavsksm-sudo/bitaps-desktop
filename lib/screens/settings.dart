@@ -11,7 +11,11 @@ extension ShellSettings on ShellState {
           accentIdx = i;
           C.accent = th.$2;
           C.accentSoft = th.$3;
+          // Вход/выход из «Фосфор» переключает всю палитру фона (люминофор ↔ обычная тема),
+          // поэтому пере-применяем тему после смены акцента.
+          _applyThemeMode();
         });
+        _syncAnimations(); // starfield гасится в Фосфоре (тёмная спец-палитра) — сверить
         _save();
       },
       // Semantics: свотч — кнопка с именем акцента (Sunset/Neon/…) и признаком выбора,
@@ -183,7 +187,12 @@ extension ShellSettings on ShellState {
           _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(tr('Цвет акцента'), style: disp(15, w: FontWeight.w600)),
             const SizedBox(height: 12),
-            Row(children: [for (int i = 0; i < accentThemes.length; i++) _accentSwatch(i)]),
+            // Секретная «Phosphor» (kPhosphorAccent) в ряду только после разблокировки пасхалкой.
+            // Wrap: 6-й свотч не влезал бы в Row на узком окне — переносим.
+            Wrap(children: [
+              for (int i = 0; i < accentThemes.length; i++)
+                if (i != kPhosphorAccent || phosphorUnlocked) _accentSwatch(i)
+            ]),
             const SizedBox(height: 18),
             Text(tr('Кнопка подключения'), style: disp(15, w: FontWeight.w600)),
             const SizedBox(height: 10),
@@ -211,6 +220,19 @@ extension ShellSettings on ShellState {
             _divider(),
             _toggle(tr('Авто-подключение'), tr('Подключаться сразу при запуске'), autoConnect, (v) { rebuild(() => autoConnect = v); _save(); }),
           ])),
+          // Автозапуск/хоткей — только десктоп (на мобильных нет launch_at_startup/глобальных хоткеев)
+          if (_isDesktop) ...[
+            const SizedBox(height: 22),
+            _kicker(tr('система')),
+            const SizedBox(height: 10),
+            _card(child: Column(children: [
+              _toggle(tr('Запускать при входе'), tr('Автостарт вместе с системой'), autoLaunch, _setAutoLaunch),
+              _divider(),
+              _toggle(tr('Старт свёрнутым'), tr('При автозапуске — сразу в трей'), startMinimized, _setStartMinimized),
+              _divider(),
+              _hotkeyRow(),
+            ])),
+          ],
           const SizedBox(height: 22),
           _kicker(tr('инструменты')),
           const SizedBox(height: 10),
@@ -222,6 +244,12 @@ extension ShellSettings on ShellState {
             _navRow(Icons.shield, tr('Проверка утечек'), _leakCheck),
             _divider(),
             _navRow(Icons.upload_file, customCfg == null ? tr('Свой конфиг') : tr('Свой конфиг ✓'), _customConfig),
+            _divider(),
+            // 🩺 самодиагностика — локальный чек аккаунта/подписки/ключа из app-sub (без сети)
+            _navRow(Icons.health_and_safety_outlined, tr('Проверить мой доступ'), _selfDiagnose),
+            _divider(),
+            // 🆕 что нового — фетч changelog.json с сайта (fail-soft)
+            _navRow(Icons.new_releases_outlined, tr('Что нового'), _showChangelog),
             _divider(),
             // повторный показ онбординга (3 карточки-знакомства)
             _navRow(Icons.auto_awesome, tr('Показать знакомство'), _replayOnboarding),
@@ -279,4 +307,169 @@ extension ShellSettings on ShellState {
           Switch(value: v, onChanged: onCh, activeThumbColor: C.accent, activeTrackColor: C.accent.withValues(alpha: 0.35)),
         ])),
       );
+
+  bool get _isDesktop => Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+
+  // ---------------- ГЛОБАЛЬНЫЙ ХОТКЕЙ (строка + рекордер) ----------------
+  Widget _hotkeyRow() => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(children: [
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(tr('Хоткей подключения'), style: disp(15, w: FontWeight.w600)),
+            const SizedBox(height: 2),
+            Text(_recordingHotkey ? tr('Нажми сочетание клавиш…') : tr('Глобально включает/выключает VPN'), style: mono(11)),
+          ])),
+          const SizedBox(width: 10),
+          // чип-рекордер: тап → ловим следующее сочетание (RawKeyboardListener внутри), долгий тап/× — сброс
+          _hotkeyChip(),
+        ]),
+      );
+
+  Widget _hotkeyChip() {
+    final label = _recordingHotkey ? '…' : hotkeyLabel(hotkeyStr);
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      // Focus+KeyboardListener: пока идёт запись, ловим первое сочетание с модификатором
+      Focus(
+        autofocus: _recordingHotkey,
+        onKeyEvent: (node, ev) {
+          if (!_recordingHotkey) return KeyEventResult.ignored;
+          if (ev is KeyDownEvent) {
+            _recordHotkey(ev.logicalKey, ev.physicalKey,
+                HardwareKeyboard.instance.logicalKeysPressed);
+            return KeyEventResult.handled;
+          }
+          return KeyEventResult.ignored;
+        },
+        child: GestureDetector(
+          onTap: () => rebuild(() => _recordingHotkey = !_recordingHotkey),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: _recordingHotkey ? C.accent.withValues(alpha: 0.16) : C.fill,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: _recordingHotkey ? C.accent : C.line)),
+            child: Text(label, style: mono(12, c: _recordingHotkey ? C.accent : C.text, w: FontWeight.w600)),
+          ),
+        ),
+      ),
+      IconButton(
+        onPressed: _resetHotkey,
+        iconSize: 16, padding: EdgeInsets.zero, visualDensity: VisualDensity.compact,
+        constraints: const BoxConstraints(minWidth: 34, minHeight: 34), splashRadius: 18,
+        tooltip: tr('Сбросить'), icon: Icon(Icons.restart_alt, color: C.muted)),
+    ]);
+  }
+
+  // ---------------- 🩺 САМОДИАГНОСТИКА ----------------
+  // Локальный чек аккаунта БЕЗ сети: собран из уже загруженного состояния (app-sub/app-login).
+  // Каждая строка — факт с иконкой ✓/⚠; проблемные ведут к действию (войти/продлить/скопировать код).
+  void _selfDiagnose() {
+    final rows = <Widget>[];
+    Widget row(bool ok, String text) => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Icon(ok ? Icons.check_circle : Icons.error_outline, size: 17, color: ok ? C.ok : C.warn),
+        const SizedBox(width: 10),
+        Expanded(child: Text(text, style: mono(12, c: C.text))),
+      ]),
+    );
+    rows.add(row(loggedIn, loggedIn ? tr('Вход выполнен') : tr('Не вошёл — войди в Кабинете')));
+    if (loggedIn) {
+      final days = _daysLeft();
+      final subOk = subActive && (days == null || days > 0);
+      rows.add(row(subOk, subOk
+          ? (days != null ? (appLang == 'en' ? 'Subscription active · $days days left' : 'Подписка активна · осталось $days ${_pluralDays(days)}') : tr('Подписка активна'))
+          : tr('Подписка неактивна — продли в Кабинете')));
+      final hasKey = keyStr.isNotEmpty && keyStr != kDemoKey;
+      rows.add(row(hasKey, hasKey ? tr('Ключ доступа получен') : tr('Ключ ещё не подтянут — нажми «Обновить»')));
+      final devOk = subLimit == null || devices.length <= subLimit!;
+      rows.add(row(devOk, appLang == 'en'
+          ? 'Devices: ${devices.length} / $_limitStr'
+          : 'Устройств: ${devices.length} / $_limitStr'));
+      rows.add(row(loginSecret != null, loginSecret != null
+          ? tr('Код входа доступен (для входа без ключа)')
+          : tr('Кода входа нет — получи в боте (/start → Код входа)')));
+    }
+    // честный дисклеймер про демо-туннель — чтобы «всё зелёное» не читалось как «VPN защищает»
+    showDialog<void>(context: context, builder: (_) => AlertDialog(
+      backgroundColor: C.bg2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
+      title: Text(tr('Проверка доступа'), style: disp(18, w: FontWeight.w700)),
+      content: SizedBox(width: 340, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        ...rows,
+        const SizedBox(height: 10),
+        _divider(),
+        const SizedBox(height: 8),
+        Text(
+          kRealTunnel ? tr('Диагностика проверяет доступ к аккаунту, не качество канала.')
+                      : tr('Подключение сейчас демонстрационное — реального туннеля нет.'),
+          style: mono(10.5, c: C.muted)),
+      ])),
+      actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Ок'), style: mono(13, c: C.accent)))],
+    ));
+  }
+
+  // ---------------- 🆕 ЧТО НОВОГО ----------------
+  // Фетч changelog.json с сайта (fail-soft). Формат: {"entries":[{"build","date","ru":[],"en":[]}]}.
+  void _showChangelog() {
+    final fut = _fetchChangelog();
+    showDialog<void>(context: context, builder: (ctx) => FutureBuilder<List<_ChangeEntry>>(
+      future: fut,
+      builder: (c, snap) {
+        final done = snap.connectionState == ConnectionState.done;
+        Widget body;
+        if (!done) {
+          body = Row(mainAxisSize: MainAxisSize.min, children: [
+            SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: C.accent)),
+            const SizedBox(width: 12), Text(tr('Минутку…'), style: mono(13, c: C.muted)),
+          ]);
+        } else if (snap.hasError || snap.data == null || snap.data!.isEmpty) {
+          body = Text(tr('Список изменений пока недоступен. Загляни позже.'), style: mono(13, c: C.muted));
+        } else {
+          body = SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            for (final e in snap.data!) ...[
+              Row(children: [
+                Text(e.build > 0 ? (appLang == 'en' ? 'build ${e.build}' : 'сборка ${e.build}') : '', style: mono(12, c: C.accent, w: FontWeight.w700)),
+                const Spacer(),
+                Text(e.date, style: mono(11, c: C.muted)),
+              ]),
+              const SizedBox(height: 6),
+              for (final line in (appLang == 'en' ? e.en : e.ru))
+                Padding(padding: const EdgeInsets.only(bottom: 4),
+                  child: Text('•  $line', style: mono(12, c: C.text))),
+              const SizedBox(height: 12),
+            ],
+          ]));
+        }
+        return AlertDialog(
+          backgroundColor: C.bg2,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
+          title: Text(tr('Что нового'), style: disp(18, w: FontWeight.w700)),
+          content: SizedBox(width: 360, child: ConstrainedBox(constraints: const BoxConstraints(maxHeight: 380), child: body)),
+          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('Ок'), style: mono(13, c: C.accent)))],
+        );
+      },
+    ));
+  }
+
+  Future<List<_ChangeEntry>> _fetchChangelog() async {
+    final r = await http.get(Uri.parse(kChangelogUrl)).timeout(const Duration(seconds: 12));
+    if (r.statusCode != 200) throw Exception('http ${r.statusCode}');
+    final d = jsonDecode(r.body);
+    final list = (d is Map && d['entries'] is List) ? d['entries'] as List : const [];
+    return list.whereType<Map>().map((e) => _ChangeEntry(
+      build: (e['build'] is num) ? (e['build'] as num).toInt() : 0,
+      date: e['date']?.toString() ?? '',
+      ru: (e['ru'] is List) ? (e['ru'] as List).map((x) => x.toString()).toList() : const [],
+      en: (e['en'] is List) ? (e['en'] as List).map((x) => x.toString()).toList() : const [],
+    )).toList();
+  }
+}
+
+// Одна запись changelog (сборка/дата/строки RU+EN). Внутренняя модель экрана «Что нового».
+class _ChangeEntry {
+  final int build;
+  final String date;
+  final List<String> ru, en;
+  _ChangeEntry({required this.build, required this.date, required this.ru, required this.en});
 }
