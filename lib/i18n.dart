@@ -271,6 +271,60 @@ const Map<String, String> _kEn = {
   'PIN — минимум 4 цифры': 'PIN must be at least 4 digits',
   'PIN не совпадает': "PINs don't match",
 
+  // ---- onboarding.dart ----
+  'Пропустить': 'Skip',
+  'Далее': 'Next',
+  'что такое bitaps': 'what is bitaps',
+  'VPN по одному ключу': 'VPN with a single key',
+  'Подписка живёт в Telegram-боте, а этот клиент — её пульт: ключ, устройства и кабинет в одном окне.':
+      'Your subscription lives in our Telegram bot — this client is its remote: key, devices and account in one window.',
+  'Личный VPN-ключ': 'Personal VPN key',
+  'один ключ — до 10 устройств на одной подписке': 'one key — up to 10 devices on one subscription',
+  'Все платформы': 'All platforms',
+  'Windows, macOS, Linux, Android — одно приложение': 'Windows, macOS, Linux, Android — one app',
+  'Оплата как удобно': 'Pay your way',
+  'Telegram Stars, СБП или крипта — в пару тапов': 'Telegram Stars, SBP or crypto — a couple of taps',
+  'три способа входа': 'three ways to sign in',
+  'Входи как удобно': 'Sign in your way',
+  'Через Telegram': 'With Telegram',
+  'бот сам подтвердит вход — без ручного копирования': 'the bot confirms sign-in for you — no manual copying',
+  'По VPN-ключу': 'With your VPN key',
+  'вставь свой ключ (vless://…) — это и есть вход в аккаунт': 'paste your key (vless://…) — that is your account login',
+  'По Коду входа': 'With a login code',
+  'короткий код из бота — если ключ не под рукой': 'a short code from the bot — when the key is not at hand',
+  'Всё это — на вкладке «Кабинет».': 'All of this lives in the "Account" tab.',
+  'Подключение сейчас — демо, без реального туннеля. Интерфейс можно посмотреть целиком, вход не обязателен.':
+      'The connection is currently a demo — no real tunnel. You can explore the whole interface, no sign-in required.',
+  'VPN-ключ / Код входа': 'VPN key / login code',
+  'Посмотреть без входа': 'Look around without signing in',
+  'Показать знакомство': 'Show intro',
+
+  // ---- paywall.dart ----
+  'Продлить подписку': 'Renew subscription',
+  'тарифы': 'plans',
+  'устройства': 'devices',
+  '+50 ₽/мес за каждое доп-устройство · максимум 10': '+50 ₽/mo per extra device · 10 max',
+  'выбор большинства': 'most popular',
+  'Итого': 'Total',
+  'VIP: цена считается по тарифу на 10 устройств — точный итог покажет бот':
+      'VIP: priced as the 10-device plan — the bot shows the exact total',
+  'Оплатить': 'Pay',
+  'оплата на сайте — СБП или крипта': 'pay on the website — SBP or crypto',
+  'оплата в боте — Stars, СБП, крипта или токены': 'pay in the bot — Stars, SBP, crypto or tokens',
+
+  // ---- stats card (account.dart) ----
+  'статистика': 'stats',
+  'твоя история с bitaps': 'your history with bitaps',
+  'с нами с': 'member since',
+  'оплачено дней': 'days paid',
+  'друзей приглашено': 'friends invited',
+  'токены': 'tokens',
+
+  // ---- tray (main.dart) ----
+  'Показать окно': 'Show window',
+  'Скрыть окно': 'Hide window',
+  'Выйти из bitaps': 'Quit bitaps',
+
   // ---- faq (account) ----
   'Сколько устройств можно подключить?': 'How many devices can I connect?',
   'До 10 устройств одновременно по одной подписке.': 'Up to 10 devices at once on one subscription.',

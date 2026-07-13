@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform;
+import 'dart:io' show Platform, File;
 import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
+import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -12,6 +14,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'singbox_config.dart';
 import 'native_tunnel.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:tray_manager/tray_manager.dart';
 
 // Приложение разбито на модули; все они — части одной библиотеки (part/part of),
 // чтобы приватные имена (_secRead, _load, _conn и т.п.) и extension'ы на ShellState
@@ -27,6 +30,8 @@ part 'screens/servers.dart';
 part 'screens/account.dart';
 part 'screens/settings.dart';
 part 'screens/lock.dart';
+part 'screens/onboarding.dart';
+part 'screens/paywall.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -36,9 +41,12 @@ Future<void> main() async {
   // window_manager — только десктоп (на Android/iOS его нет → иначе краш на старте)
   if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
     await windowManager.ensureInitialized();
+    // Десктоп больше не «растянутый телефон» 440px: окно по умолчанию широкое (виден боковой
+    // рейл навигации, см. LayoutBuilder в _buildBody), максимума нет — ресайз свободный.
+    // Узкое окно (<720) продолжает работать мобильной раскладкой с нижним таб-баром.
     final opts = WindowOptions(
-      size: const Size(440, 900),
-      minimumSize: const Size(390, 760),
+      size: const Size(1024, 800),
+      minimumSize: const Size(390, 700),
       center: true,
       backgroundColor: C.bg, // уже согласован с сохранённой темой (см. _applyStoredThemeEarly)
       title: 'bitaps VPN',
@@ -49,9 +57,34 @@ Future<void> main() async {
     });
   }
   runApp(const BitApp());
+  _maybeStartShotLoop();
 }
 
-// Прочитать сохранённый themeMode (0 тёмная · 1 светлая · 2 системная) и применить тему ДО runApp/окна.
+// ── Самопроверка визуала (ТОЛЬКО debug) ──
+// screencapture/CGWindowListCreateImage требуют TCC-разрешение «запись экрана», которого у
+// автоматизации нет → в debug-сборке с env BITAPS_SHOT=<папка> приложение раз в 2 секунды
+// сохраняет PNG собственного кадра (RepaintBoundary поверх MaterialApp). В release kDebugMode
+// == false → вся ветка мертва и выкидывается компилятором; на поведение приложения не влияет.
+final GlobalKey _shotKey = GlobalKey();
+
+void _maybeStartShotLoop() {
+  if (!kDebugMode) return;
+  final dir = Platform.environment['BITAPS_SHOT'];
+  if (dir == null || dir.isEmpty) return;
+  Timer.periodic(const Duration(seconds: 2), (_) async {
+    try {
+      final ro = _shotKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      if (ro == null) return;
+      final img = await ro.toImage(pixelRatio: 2);
+      final bytes = await img.toByteData(format: ImageByteFormat.png);
+      if (bytes != null) File('$dir/shot.png').writeAsBytesSync(bytes.buffer.asUint8List());
+    } catch (e) {
+      debugPrint('shot loop: $e');
+    }
+  });
+}
+
+// Прочитать сохранённые тему И акцент и применить их ДО runApp/окна.
 // Дешёвое чтение SharedPreferences; при любой ошибке молча остаёмся на дефолте, старт не блокируем.
 Future<void> _applyStoredThemeEarly() async {
   try {
@@ -61,6 +94,12 @@ Future<void> _applyStoredThemeEarly() async {
         (tm == 2 &&
             WidgetsBinding.instance.platformDispatcher.platformBrightness == Brightness.light);
     C.applyTheme(light);
+    // Акцент тоже применяем ДО первого кадра (зеркалит _load): иначе у сменившего акцент
+    // юзера первые кадры рисуются дефолтным Sunset-оранжевым и скачком перекрашиваются.
+    final ai = (p.getInt('accent') ?? 0).clamp(0, accentThemes.length - 1);
+    final th = accentThemes[ai];
+    C.accent = th.$2;
+    C.accentSoft = th.$3;
   } catch (_) {
     // не удалось прочитать настройку — оставляем дефолтную тему, окно всё равно откроется
   }
@@ -76,12 +115,14 @@ class BitApp extends StatelessWidget {
     // ShellState между пересборками MaterialApp (тот же тип виджета → State не пересоздаётся).
     return ValueListenableBuilder<bool>(
       valueListenable: themeLight,
-      builder: (_, light, __) => MaterialApp(
+      // RepaintBoundary(_shotKey) — для debug-самоскриншотов (см. _maybeStartShotLoop);
+      // в release просто лишний no-op слой поверх корня.
+      builder: (_, light, __) => RepaintBoundary(key: _shotKey, child: MaterialApp(
         title: 'bitaps VPN',
         debugShowCheckedModeBanner: false,
         theme: _appTheme(light),
         home: const Shell(),
-      ),
+      )),
     );
   }
 
@@ -102,7 +143,7 @@ class Shell extends StatefulWidget {
   State<Shell> createState() => ShellState();
 }
 
-class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBindingObserver {
+class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBindingObserver, TrayListener {
   int tab = 0;
   int mode = 0;
   Server server = ruServers[0];
@@ -134,7 +175,8 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   String? loginSecret; // код входа (отдельный от vpn_key credential) — для входа в приложение/кабинет
   int? subLimit;
   bool subActive = false;
-  bool _subLoading = false;
+  bool _subLoading = false; // re-entrancy-гвард _refreshSub (в т.ч. тихий фоновый рефреш)
+  bool _subVisibleLoading = false; // спиннеры/дизейбл в UI — ТОЛЬКО для явного (не silent) рефреша
   bool _pairing = false; // идёт авто-вход через бота — гвард от двойного тапа (два диалога подряд)
   bool _toolBusy = false; // идёт сетевой инструмент (спид-тест/утечки) — гвард от двойного запуска
   bool _supportSending = false; // идёт отправка в поддержку — гвард от двойной отправки
@@ -174,7 +216,8 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   // Запускать/останавливать анимации по факту видимости — экономит CPU/GPU/батарею.
   // Вызывается пост-фрейм из build() (ловит смену вкладки/темы/стиля/подключения) и из lifecycle.
   void _syncAnimations() {
-    final vis = _foreground && !_locked; // не гоняем, если свёрнуто или заблокировано
+    // не гоняем, если свёрнуто, заблокировано или поверх экрана онбординг (анимации не видны)
+    final vis = _foreground && !_locked && !_showOnboarding;
     final onHome = tab == 0;
     _drive(_twinkle, vis && onHome && !C.light);         // звёзды: только Главная, тёмная тема
     _drive(_spin, vis && onHome && btnStyle == 0);        // шестерёнка: только Главная, стиль по умолчанию
@@ -196,6 +239,20 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
 
   bool _updateAvail = false; // доступна новая сборка (build_number из релиза > вшитого)
 
+  // ----- онбординг (первый запуск / «Показать знакомство» в Настройках) -----
+  bool _showOnboarding = false; // поверх всего UI (после PIN-замка)
+  int _onbPage = 0;
+  final PageController _onbCtrl = PageController();
+
+  // ----- статистика аккаунта из app-sub (fail-soft: null → в карточке прочерк) -----
+  String? statMemberSince; // ISO-дата первого события аккаунта
+  int? statPaidDays, statRefs, statTokens;
+  int subStreak = 0, subNextBonus = 0; // стрик продлений + бонус за СЛЕДУЮЩЕЕ раннее продление
+  bool subVip = false;
+
+  // ----- tray (десктоп): иконка в меню-баре/трее, показать/скрыть окно -----
+  bool _trayReady = false;
+
   @override
   void initState() {
     super.initState();
@@ -216,8 +273,90 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     _conn.addListener(() { if (mounted && !_locked) { setState(() {}); _syncAnimations(); } });
     _load();
     _checkUpdate();
+    // Tray — только десктоп; вся инициализация fail-soft (без нативной стороны/библиотеки
+    // приложение просто живёт без трея, не падая).
+    if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) _initTray();
     // Одноразовый пост-фрейм: первичная сверка анимаций после первого кадра (дальше — событийно).
     WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _syncAnimations(); });
+  }
+
+  // ---------------- TRAY (десктоп) ----------------
+  Future<void> _initTray() async {
+    try {
+      // ассет-пути (tray_manager сам резолвит их в data/flutter_assets); Windows требует .ico
+      await trayManager.setIcon(
+        Platform.isWindows ? 'assets/tray.ico' : 'assets/tray.png',
+        // macOS: template-иконка перекрашивается системой под светлый/тёмный меню-бар
+        isTemplate: Platform.isMacOS,
+      );
+      await _updateTrayMenu();
+      // setToolTip не реализован на Linux (метод бросает) — зовём только там, где поддержан
+      if (!Platform.isLinux) await trayManager.setToolTip('bitaps VPN');
+      trayManager.addListener(this);
+      _trayReady = true;
+    } catch (e) {
+      debugPrint('tray init failed: $e'); // нет libayatana/нативной стороны → живём без трея
+    }
+  }
+
+  // Меню трея строится из tr() → пересобираем при смене языка (см. _langChip в settings.dart).
+  Future<void> _updateTrayMenu() async {
+    try {
+      await trayManager.setContextMenu(Menu(items: [
+        MenuItem(key: 'show', label: tr('Показать окно')),
+        MenuItem(key: 'hide', label: tr('Скрыть окно')),
+        MenuItem.separator(),
+        MenuItem(key: 'quit', label: tr('Выйти из bitaps')),
+      ]));
+    } catch (e) {
+      debugPrint('tray menu failed: $e');
+    }
+  }
+
+  @override
+  void onTrayIconMouseDown() {
+    // macOS-конвенция: клик по иконке меню-бара открывает меню; Win/Linux — тумблер окна
+    if (Platform.isMacOS) {
+      trayManager.popUpContextMenu();
+    } else {
+      _toggleWindowVisible();
+    }
+  }
+
+  @override
+  void onTrayIconRightMouseDown() {
+    trayManager.popUpContextMenu();
+  }
+
+  @override
+  void onTrayMenuItemClick(MenuItem menuItem) async {
+    switch (menuItem.key) {
+      case 'show':
+        await windowManager.show();
+        await windowManager.focus();
+        break;
+      case 'hide':
+        await windowManager.hide();
+        break;
+      case 'quit':
+        // сначала убираем иконку из трея, затем закрываем окно/процесс
+        try { await trayManager.destroy(); } catch (_) {}
+        await windowManager.destroy();
+        break;
+    }
+  }
+
+  Future<void> _toggleWindowVisible() async {
+    try {
+      if (await windowManager.isVisible()) {
+        await windowManager.hide();
+      } else {
+        await windowManager.show();
+        await windowManager.focus();
+      }
+    } catch (e) {
+      debugPrint('tray toggle window failed: $e');
+    }
   }
 
   // крутить кнопку-шестерёнку: быстро во время коннекта, спокойно в покое/при обрыве.
@@ -247,6 +386,8 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    if (_trayReady) trayManager.removeListener(this);
+    _onbCtrl.dispose();
     _pinLockTimer?.cancel();
     _conn.dispose();
     _spin.dispose();
@@ -300,6 +441,17 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       subName = p.getString('subName');
       subLimit = p.getInt('subLimit');
       subActive = p.getBool('subActive') ?? false;
+      // статистика аккаунта: кэш прошлой сессии, чтобы карточка не мигала прочерками до рефреша
+      statMemberSince = p.getString('stMember');
+      statPaidDays = p.getInt('stDays');
+      statRefs = p.getInt('stRefs');
+      statTokens = p.getInt('stTokens');
+      subStreak = p.getInt('stStreak') ?? 0;
+      subNextBonus = p.getInt('stNextBonus') ?? 0;
+      subVip = p.getBool('stVip') ?? false;
+      // онбординг: показываем при первом запуске; уже залогиненных (обновившихся) не трогаем —
+      // им знакомство доступно из Настроек («Показать знакомство»)
+      _showOnboarding = !(p.getBool('seen_onboarding') ?? false) && !loggedIn;
       try {
         final dl = jsonDecode(p.getString('devices') ?? '[]');
         devices = (dl is List) ? dl.whereType<Map>().map((e) => e.cast<String, dynamic>()).toList() : [];
@@ -333,6 +485,16 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       final lockUntil = int.tryParse(secPinLockUntil ?? '') ?? 0;
       final remainMs = lockUntil - DateTime.now().millisecondsSinceEpoch;
       if (remainMs > 0) _startPinLock((remainMs / 1000).ceil().clamp(1, 60));
+    }
+    // Тест-сессия для визуальной самопроверки (ТОЛЬКО debug, зеркало BITAPS_SHOT): env
+    // BITAPS_TEST_TG + BITAPS_TEST_TOKEN подставляют вход без ручного ввода — экраны кабинета
+    // можно скринить автоматикой. В release kDebugMode==false → ветка мертва и выкидывается.
+    if (kDebugMode) {
+      final ttg = int.tryParse(Platform.environment['BITAPS_TEST_TG'] ?? '');
+      final ttok = Platform.environment['BITAPS_TEST_TOKEN'];
+      if (ttg != null && ttok != null && ttok.isNotEmpty) {
+        setState(() { tgId = ttg; appToken = ttok; tab = 2; });
+      }
     }
     if (loggedIn) _refreshSub(silent: true);
     // Авто-коннект НЕ должен подниматься сквозь блокировку или без логина: если экран заблокирован
@@ -390,6 +552,14 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     if (subName != null) { await p.setString('subName', subName!); } else { await p.remove('subName'); }
     if (subLimit != null) { await p.setInt('subLimit', subLimit!); } else { await p.remove('subLimit'); }
     await p.setBool('subActive', subActive);
+    // статистика аккаунта (кэш для карточки «// статистика»; null — удаляем, как и поля подписки)
+    if (statMemberSince != null) { await p.setString('stMember', statMemberSince!); } else { await p.remove('stMember'); }
+    if (statPaidDays != null) { await p.setInt('stDays', statPaidDays!); } else { await p.remove('stDays'); }
+    if (statRefs != null) { await p.setInt('stRefs', statRefs!); } else { await p.remove('stRefs'); }
+    if (statTokens != null) { await p.setInt('stTokens', statTokens!); } else { await p.remove('stTokens'); }
+    await p.setInt('stStreak', subStreak);
+    await p.setInt('stNextBonus', subNextBonus);
+    await p.setBool('stVip', subVip);
     await p.setString('devices', jsonEncode(devices));
     if (importedHost != null) {
       await p.setString('host', importedHost!);
@@ -517,6 +687,14 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       subLimit = null;
       subActive = false;
       devices = [];
+      // статистика аккаунта — тоже персональные данные: чистим при выходе
+      statMemberSince = null;
+      statPaidDays = null;
+      statRefs = null;
+      statTokens = null;
+      subStreak = 0;
+      subNextBonus = 0;
+      subVip = false;
       keyStr = kDemoKey;
       // сбрасываем импортированный ключ/конфиг — иначе _applySub (гард importedHost==null)
       // не подхватит ключ следующего аккаунта после «тихого» логаута по истечению сессии
@@ -613,48 +791,122 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
 
   Widget _buildBody() {
     if (_locked) return _lockScreen();
+    if (_showOnboarding) return _onboarding(); // знакомство поверх всего (после PIN-замка)
     // Строим ТОЛЬКО активный экран: раньше каждый setState (включая посекундный тик таймера
     // подключения) собирал все четыре — вчетверо дороже без какой-либо пользы.
     final screen = switch (tab) { 0 => _home(), 1 => _servers(), 2 => _account(), _ => _settings() };
-    return Scaffold(
-      backgroundColor: C.bg,
-      body: Stack(children: [
-        Positioned.fill(child: ColoredBox(color: C.bg)),
-        // RepaintBoundary: starfield анимирует 60 fps — без собственного слоя он инвалидировал
-        // бы отрисовку всего экрана каждый кадр; с ним композитор переиспользует остальные слои.
-        if (!C.light) Positioned.fill(child: RepaintBoundary(child: AnimatedBuilder(
-          animation: _twinkle,
-          builder: (_, __) => CustomPaint(painter: StarPainter(_twinkle.value * 2 * math.pi)),
-        ))),
-        Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(
-          gradient: RadialGradient(center: const Alignment(0, -0.95), radius: 0.95,
-            colors: [C.accent.withValues(alpha: C.light ? 0.16 : 0.17), C.accent.withValues(alpha: 0)])))),
-        if (!C.light) const Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(
-          gradient: RadialGradient(center: Alignment(1.0, -0.9), radius: 0.8,
-            colors: [Color(0x1A2D8BFF), Color(0x002D8BFF)])))),
-        // На развёрнутом/широком десктоп-окне контент ограничиваем колонкой 560px по центру:
-        // фоны (Positioned.fill) и боттом-бар остаются во всю ширину, иначе карточки-«плиты» и
-        // Row-со-Spacer разъезжались бы на 2000px. При ширине ≤560 — no-op (мобильные не меняются).
-        SafeArea(bottom: false, child: Align(
-          alignment: Alignment.topCenter,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 560),
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 280),
-              child: KeyedSubtree(key: ValueKey(tab), child: screen))))),
-      ]),
-      bottomNavigationBar: _bottomBar(),
+    // Контентная колонка: центр, максимум 560px (мобильная раскладка не меняется).
+    final content = Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 280),
+          child: KeyedSubtree(key: ValueKey(tab), child: screen))));
+    // Десктоп-каркас: широкое окно (>720) → слева узкий рейл навигации, справа активный экран;
+    // узкое — как раньше (нижний таб-бар). Экраны — те же extension'ы, меняется только каркас.
+    return LayoutBuilder(builder: (context, cons) {
+      final wide = cons.maxWidth > 720;
+      return Scaffold(
+        backgroundColor: C.bg,
+        body: Stack(children: [
+          Positioned.fill(child: ColoredBox(color: C.bg)),
+          // RepaintBoundary: starfield анимирует 60 fps — без собственного слоя он инвалидировал
+          // бы отрисовку всего экрана каждый кадр; с ним композитор переиспользует остальные слои.
+          if (!C.light) Positioned.fill(child: RepaintBoundary(child: AnimatedBuilder(
+            animation: _twinkle,
+            builder: (_, __) => CustomPaint(painter: StarPainter(_twinkle.value * 2 * math.pi)),
+          ))),
+          Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(
+            gradient: RadialGradient(center: const Alignment(0, -0.95), radius: 0.95,
+              colors: [C.accent.withValues(alpha: C.light ? 0.16 : 0.17), C.accent.withValues(alpha: 0)])))),
+          if (!C.light) const Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(
+            gradient: RadialGradient(center: Alignment(1.0, -0.9), radius: 0.8,
+              colors: [Color(0x1A2D8BFF), Color(0x002D8BFF)])))),
+          // Фоны (Positioned.fill) — во всю ширину; контент — колонкой 560px по центру,
+          // на широком десктопе слева добавляется рейл.
+          SafeArea(bottom: false, child: wide
+            ? Row(children: [_navRail(), Expanded(child: content)])
+            : content),
+        ]),
+        bottomNavigationBar: wide ? null : _bottomBar(),
+      );
+    });
+  }
+
+  // Пункты навигации — общие для нижнего бара и десктоп-рейла.
+  List<(String, IconData)> get _navItems => [
+    (tr('Главная'), Icons.power_settings_new),
+    (tr('Серверы'), Icons.public),
+    (tr('Кабинет'), Icons.person_outline),
+    (tr('Настройки'), Icons.settings_outlined),
+  ];
+
+  // ---------------- DESKTOP NAV RAIL ----------------
+  // Узкий стеклянный рейл слева (ширина >720): мини-лого + те же 4 пункта вертикально.
+  Widget _navRail() {
+    final items = _navItems;
+    return ClipRect(child: BackdropFilter(
+      filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+      child: Container(
+        width: 96,
+        decoration: BoxDecoration(
+          color: C.bg2.withValues(alpha: 0.7),
+          border: Border(right: BorderSide(color: C.line))),
+        child: Column(children: [
+          const SizedBox(height: 18),
+          // мини-лого — как в шапке Главной (₿-квадрат с градиентом)
+          Container(width: 34, height: 34, alignment: Alignment.center,
+            decoration: BoxDecoration(gradient: accentGrad, borderRadius: BorderRadius.circular(10),
+              boxShadow: [BoxShadow(color: C.accent.withValues(alpha: 0.5), blurRadius: 12)]),
+            child: Text('₿', style: disp(19, w: FontWeight.w900, c: C.bg))),
+          const SizedBox(height: 20),
+          for (int i = 0; i < items.length; i++) _railItem(items[i].$1, items[i].$2, i),
+          const Spacer(),
+          // статус-пилюля внизу рейла — то же честное состояние, что и на Главной;
+          // FittedBox ужимает «не защищено» в 96px рейла (иначе overflow)
+          Padding(padding: const EdgeInsets.only(bottom: 16, left: 6, right: 6),
+            child: FittedBox(fit: BoxFit.scaleDown, child: _shieldPill(conn == 2))),
+        ]),
+      ),
+    ));
+  }
+
+  Widget _railItem(String label, IconData ic, int i) {
+    final sel = tab == i;
+    return Semantics(
+      button: true,
+      selected: sel,
+      label: label,
+      container: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _goTab(i),
+        child: ExcludeSemantics(
+          child: Container(
+            width: double.infinity,
+            margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            decoration: BoxDecoration(
+              color: sel ? C.accent.withValues(alpha: 0.14) : Colors.transparent,
+              borderRadius: BorderRadius.circular(12),
+              // рамка задана всегда (прозрачная у невыбранных) — размер пункта не прыгает
+              border: Border.all(color: sel ? C.accent.withValues(alpha: 0.45) : Colors.transparent)),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Icon(ic, size: 22, color: sel ? C.accent : C.muted),
+              const SizedBox(height: 4),
+              Text(label, style: mono(10.5, c: sel ? C.accent : C.muted, w: FontWeight.w600),
+                maxLines: 1, overflow: TextOverflow.ellipsis),
+            ]),
+          ),
+        ),
+      ),
     );
   }
 
   // ---------------- BOTTOM NAV ----------------
   Widget _bottomBar() {
-    final items = [
-      (tr('Главная'), Icons.power_settings_new),
-      (tr('Серверы'), Icons.public),
-      (tr('Кабинет'), Icons.person_outline),
-      (tr('Настройки'), Icons.settings_outlined),
-    ];
+    final items = _navItems;
     return ClipRect(child: BackdropFilter(
       filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
       child: Container(

@@ -72,7 +72,7 @@ extension ShellSettings on ShellState {
   Widget _langChip(String code, String label) {
     final sel = appLang == code;
     return GestureDetector(
-      onTap: () { rebuild(() { appLang = code; }); _save(); },
+      onTap: () { rebuild(() { appLang = code; }); _save(); if (_trayReady) _updateTrayMenu(); }, // меню трея тоже на tr()
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
         decoration: BoxDecoration(color: sel ? C.accent.withValues(alpha: 0.16) : C.fill,
@@ -222,6 +222,9 @@ extension ShellSettings on ShellState {
             _navRow(Icons.shield, tr('Проверка утечек'), _leakCheck),
             _divider(),
             _navRow(Icons.upload_file, customCfg == null ? tr('Свой конфиг') : tr('Свой конфиг ✓'), _customConfig),
+            _divider(),
+            // повторный показ онбординга (3 карточки-знакомства)
+            _navRow(Icons.auto_awesome, tr('Показать знакомство'), _replayOnboarding),
           ])),
           const SizedBox(height: 22),
           _kicker(tr('подключение')),

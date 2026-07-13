@@ -87,6 +87,17 @@ extension ShellApi on ShellState {
     if (d['login_secret'] is String) loginSecret = d['login_secret'] as String;
     final dl = d['devices'];
     devices = (dl is List) ? dl.whereType<Map>().map((e) => e.cast<String, dynamic>()).toList() : [];
+    // Статистика аккаунта (карточка «// статистика») + стрик-подсказка пейвола. app-sub отдаёт
+    // их fail-soft (при сбое RPC поля null) — не перетираем закэшированное значение null'ом,
+    // а вот 0 — честное значение, применяем. app-login stats не отдаёт — там поля просто отсутствуют.
+    int? asInt(dynamic v) => (v is num) ? v.toInt() : null;
+    if (d.containsKey('vip')) subVip = d['vip'] == true;
+    subStreak = asInt(d['renewal_streak']) ?? subStreak;
+    subNextBonus = asInt(d['next_renew_bonus']) ?? subNextBonus;
+    if (d['member_since'] is String) statMemberSince = d['member_since'] as String;
+    statPaidDays = asInt(d['total_paid_days']) ?? statPaidDays;
+    statRefs = asInt(d['referral_count']) ?? statRefs;
+    statTokens = asInt(d['token_balance']) ?? statTokens;
   }
 
   // Ротация кода входа: старый код перестаёт работать, показываем новый.
@@ -191,6 +202,9 @@ extension ShellApi on ShellState {
         });
         _save();
         _toast(tr('Вход выполнен ✓'));
+        // app-login не отдаёт статистику/стрик (это поля app-sub) → тихо дотягиваем сразу после
+        // входа, чтобы карточка «// статистика» и стрик-подсказка пейвола не ждали ручного «Обновить»
+        _refreshSub(silent: true);
       } else {
         _loginError(isKey
             ? tr('Ключ не найден. Возьми актуальный ключ в боте.')
@@ -347,7 +361,9 @@ extension ShellApi on ShellState {
       return;
     }
     if (!silent) _toast(del != null ? tr('Удаляю устройство…') : tr('Обновляю…'));
-    if (mounted) rebuild(() => _subLoading = true);
+    // _subVisibleLoading (спиннеры/дизейбл в UI) — только для явного рефреша: тихий фоновый рефреш
+    // на старте (в т.ч. висящий 20с в офлайне) не должен показывать ложное «занято» поверх кэша.
+    if (mounted) rebuild(() { _subLoading = true; if (!silent) _subVisibleLoading = true; });
     // Снимок сессии: за 20с таймаута юзер мог выйти и войти в другой аккаунт — поздний ответ
     // старой сессии не должен ни применяться к новой, ни разлогинивать её (см. проверку ниже).
     final reqTgId = tgId;
@@ -401,7 +417,7 @@ extension ShellApi on ShellState {
       debugPrint('_refreshSub error: $e');
       if (!silent) _toast(_netErr);
     } finally {
-      if (mounted) rebuild(() => _subLoading = false);
+      if (mounted) rebuild(() { _subLoading = false; _subVisibleLoading = false; });
     }
   }
 

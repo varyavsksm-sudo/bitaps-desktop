@@ -72,17 +72,15 @@ extension ShellAccount on ShellState {
   }
 
   // Лимит устройств: число, либо «…» при загрузке, либо «—» если неизвестно
-  String get _limitStr => subLimit != null ? '$subLimit' : (_subLoading ? '…' : '—');
+  String get _limitStr => subLimit != null ? '$subLimit' : (_subVisibleLoading ? '…' : '—');
 
-  // баннер-напоминание при близком/истёкшем сроке (тумблер «Подписка истекает»)
-  // веб-аккаунт (отрицательный telegram_id из app-login по веб-ключу) не может продлить через бота —
-  // ведём его на сайт; обычный (положительный) id — в бота
-  String get _renewUrl => (tgId != null && tgId! < 0) ? 'https://bitapsvpn.com/pay.html' : kBot;
-
+  // баннер-напоминание при близком/истёкшем сроке (тумблер «Подписка истекает») —
+  // ведёт в нативный пейвол (_openPaywall); тот сам различает веб-аккаунт (отрицательный
+  // telegram_id → pay.html) и обычный (deep-link в бота).
   Widget _expiryBanner(int days) {
     final expired = days <= 0;
     return GestureDetector(
-      onTap: () => _open(_renewUrl),
+      onTap: _openPaywall,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(color: C.warn.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(14),
@@ -122,6 +120,9 @@ extension ShellAccount on ShellState {
           const SizedBox(height: 14),
           _keyCard(),
           if (loggedIn) ...[const SizedBox(height: 14), _devicesCard()],
+          // «// статистика» — между подпиской и рефералкой: честные факты аккаунта из app-sub
+          // (никаких трафик-цифр — туннель демо)
+          if (loggedIn) ...[const SizedBox(height: 14), _statsCard()],
           const SizedBox(height: 14),
           _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [_gIcon(Icons.card_giftcard), const SizedBox(width: 12),
@@ -280,7 +281,7 @@ extension ShellAccount on ShellState {
     final ringFrac = total > 0 ? (dleft / total).clamp(0.0, 1.0) : 0.0;
     return _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [_gIcon(Icons.workspace_premium), const SizedBox(width: 12), _kicker(tr('подписка')), const Spacer(),
-        _subLoading
+        _subVisibleLoading
             ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: C.accent))
             : IconButton(
                 onPressed: () => _refreshSub(),
@@ -314,7 +315,8 @@ extension ShellAccount on ShellState {
       ]),
       const SizedBox(height: 16),
       Row(children: [
-        Expanded(child: _btn(tr('Продлить'), kind: 0, icon: Icons.bolt, onTap: () => _open(_renewUrl))),
+        // «Продлить» больше не выкидывает наружу: нативный пейвол с тарифами внутри приложения
+        Expanded(child: _btn(tr('Продлить'), kind: 0, icon: Icons.bolt, onTap: _openPaywall)),
         const SizedBox(width: 12),
         Expanded(child: _btn(tr('Обновить'), kind: 1, icon: Icons.refresh, onTap: () => _refreshSub())),
       ]),
@@ -365,7 +367,7 @@ extension ShellAccount on ShellState {
   Widget _devicesCard() => _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [_gIcon(Icons.devices), const SizedBox(width: 12),
           _kicker(appLang == 'en' ? 'devices · ${devices.length}/$_limitStr' : 'устройства · ${devices.length}/$_limitStr'), const Spacer(),
-          _subLoading
+          _subVisibleLoading
               ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: C.accent))
               : IconButton(
                   onPressed: () => _refreshSub(),
@@ -397,10 +399,11 @@ extension ShellAccount on ShellState {
       Icon(Icons.smartphone, size: 18, color: C.muted),
       const SizedBox(width: 10),
       Expanded(child: Text(name, style: disp(14, w: FontWeight.w600), overflow: TextOverflow.ellipsis)),
-      // Тап-таргет удаления ≥40px (было 19px). Гасим во время обновления (_subLoading): иначе
-      // подтверждённое удаление молча упёрлось бы в re-entrancy-гвард _refreshSub и потерялось.
+      // Тап-таргет удаления ≥40px (было 19px). Гасим во время ЯВНОГО обновления (_subVisibleLoading):
+      // иначе подтверждённое удаление молча упёрлось бы в re-entrancy-гвард _refreshSub и потерялось.
+      // Тихий фоновый рефреш корзину не гасит — иначе на офлайн-старте она была бы мертва 20с.
       IconButton(
-        onPressed: (id == null || _subLoading) ? null : () => _confirmDelDevice(id, name),
+        onPressed: (id == null || _subVisibleLoading) ? null : () => _confirmDelDevice(id, name),
         iconSize: 19,
         padding: EdgeInsets.zero,
         visualDensity: VisualDensity.compact,
@@ -408,6 +411,58 @@ extension ShellAccount on ShellState {
         splashRadius: 22,
         tooltip: tr('Удалить'),
         icon: Icon(Icons.delete_outline, color: C.danger)),
+    ]));
+  }
+
+  // ---------------- «// статистика» ----------------
+  // Честные факты аккаунта из app-sub (member_since / total_paid_days / referral_count /
+  // token_balance / renewal_streak). Цифры — моноширинные; null (данные ещё не пришли) → «—».
+  // Никаких трафик-цифр: туннель в демо, выдумывать нечего.
+  Widget _statsCard() {
+    String since = '—';
+    if (statMemberSince != null) {
+      final t = DateTime.tryParse(statMemberSince!);
+      if (t != null) {
+        final loc = t.toLocal();
+        since = '${loc.day.toString().padLeft(2, '0')}.${loc.month.toString().padLeft(2, '0')}.${loc.year}';
+      }
+    }
+    Widget cell(String val, String label) => Expanded(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(val, style: mono(17, c: C.text, w: FontWeight.w700)),
+          const SizedBox(height: 3),
+          Text(label, style: mono(10.5, c: C.muted)),
+        ]));
+    return _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [_gIcon(Icons.query_stats), const SizedBox(width: 12),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _kicker(tr('статистика')), const SizedBox(height: 3),
+          Text(tr('твоя история с bitaps'), style: mono(11))]))]),
+      const SizedBox(height: 14),
+      Row(children: [
+        cell(since, tr('с нами с')),
+        cell(statPaidDays != null ? '$statPaidDays' : '—', tr('оплачено дней')),
+      ]),
+      const SizedBox(height: 12),
+      Row(children: [
+        cell(statRefs != null ? '$statRefs' : '—', tr('друзей приглашено')),
+        cell(statTokens != null ? '$statTokens 🪙' : '—', tr('токены')),
+      ]),
+      const SizedBox(height: 12),
+      _divider(),
+      const SizedBox(height: 8),
+      // стрик продлений + мягкая продажа раннего продления (реальная механика +3/+5/+7 дней)
+      Row(children: [
+        Icon(Icons.local_fire_department, size: 16, color: subStreak > 0 ? C.accent : C.muted),
+        const SizedBox(width: 8),
+        Expanded(child: Text(
+          subActive && subNextBonus > 0
+              ? (appLang == 'en'
+                  ? 'Renewal streak: $subStreak · renew before expiry for +$subNextBonus bonus days'
+                  : 'Стрик продлений: $subStreak · продли до истечения — +$subNextBonus ${_pluralDays(subNextBonus)} бонусом')
+              : (appLang == 'en' ? 'Renewal streak: $subStreak' : 'Стрик продлений: $subStreak'),
+          style: mono(11.5, c: C.muted))),
+      ]),
     ]));
   }
 

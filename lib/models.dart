@@ -27,6 +27,26 @@ const int kBuildNumber = int.fromEnvironment('BUILD_NUMBER', defaultValue: 0);
 const kBuildNumberUrl = 'https://github.com/varyavsksm-sudo/bitaps-desktop/releases/latest/download/build_number.txt';
 const kDownloadUrl = 'https://bitapsvpn.com/app.html';
 
+// ── Тарифы (КАНОН, зеркало _shared/plans.ts бэкенда) ──
+// Сетевого источника цен у приложения нет (edge-функции прайс не отдают), поэтому конструктор
+// пейвола использует константы канона: 399/999/1790/2990 ₽, +50 ₽/мес за доп-устройство,
+// максимум 10 устройств. Менять ТОЛЬКО синхронно с ~/bitaps-vpn/supabase/functions/_shared/plans.ts.
+class PlanDef {
+  final String code, title; // code = код тарифа бэкенда (mo/q/h/yr), title — по _planNames
+  final int months, base;   // months — срок, base — цена за 1 устройство, ₽
+  const PlanDef(this.code, this.title, this.months, this.base);
+}
+
+const List<PlanDef> kPlanDefs = [
+  PlanDef('mo', '1 месяц', 1, 399),
+  PlanDef('q', '3 месяца', 3, 999),
+  PlanDef('h', '6 месяцев', 6, 1790),
+  PlanDef('yr', '12 месяцев', 12, 2990),
+];
+const int kExtraPerMonthRub = 50; // доп-устройство = +50 ₽ за каждый месяц срока (канон)
+const int kMaxDevices = 10;       // максимум устройств («не обсуждается»)
+const kPayUrl = 'https://bitapsvpn.com/pay.html'; // веб-оплата (аккаунты с отрицательным tgId)
+
 // Персонализация: акцентные темы (имя, основной, мягкий) + стили кнопки
 const List<(String, Color, Color)> accentThemes = [
   ('Sunset', Color(0xFFFF7A1A), Color(0xFFFFB347)),
