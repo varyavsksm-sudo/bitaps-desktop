@@ -89,6 +89,9 @@ extension ShellSettings on ShellState {
   // Честный лейбл протокола: выводим ФАКТИЧЕСКИЙ протокол текущего ключа (парсер умеет
   // vless/trojan/vmess/ss/hysteria2), а не захардкоженный «VLESS + Reality».
   String _protoLabel() {
+    // Подписка несёт сразу несколько узлов разных протоколов — честнее показать это, чем
+    // выводить «https» из схемы ссылки.
+    if (isSubscriptionUrl(keyStr)) return tr('подписка bitaps');
     final scheme = keyStr.split(':').first.toLowerCase();
     switch (scheme) {
       case 'vless':

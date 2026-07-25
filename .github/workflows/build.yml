@@ -9,7 +9,22 @@ permissions:
   contents: write
 
 jobs:
+  # Быстрый гейт качества перед сборками: анализатор + юнит-тесты (генератор конфига туннеля
+  # и разбор подписки). Платформенные каркасы для этого не нужны — только pub get.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      # infos не роняют релиз — блокируют только настоящие ошибки компиляции/анализа
+      - run: flutter analyze --no-fatal-infos
+      - run: flutter test
+
   windows:
+    needs: test
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,6 +51,7 @@ jobs:
             bitaps-windows-x64.zip
 
   linux:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -67,6 +83,7 @@ jobs:
             build_number.txt
 
   android:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

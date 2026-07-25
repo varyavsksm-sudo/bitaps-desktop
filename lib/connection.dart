@@ -14,6 +14,7 @@ part of 'main.dart';
 class ConnectionController extends ChangeNotifier {
   ConnectionController({
     required this.keyOf,
+    required this.hwidOf,
     required this.serverOf,
     required this.dropAlertOn,
     required this.trafWarnOn,
@@ -23,6 +24,8 @@ class ConnectionController extends ChangeNotifier {
   });
 
   final String Function() keyOf;
+  /// Идентификатор устройства для заголовка x-hwid при загрузке подписки (лимит устройств).
+  final String Function() hwidOf;
   final Server Function() serverOf;
   final bool Function() dropAlertOn;
   final bool Function() trafWarnOn;
@@ -76,15 +79,39 @@ class ConnectionController extends ChangeNotifier {
         // trim + lowercase-схема как в парсере (singboxConfigJson тоже триммит/нормализует): иначе
         // ключ с ведущим пробелом или «VLESS://» гард отверг бы, хотя парсер его разбирает.
         final key = keyOf().trim();
+        // Подписка (https://…/u/<token>) — не одиночный ключ: её надо СКАЧАТЬ и собрать конфиг
+        // из всех узлов сразу. Одиночные share-link'и идут прежним путём без изменений.
+        final isSub = isSubscriptionUrl(key);
         // пускаем все схемы, что умеет singbox_config (не только vless://) — иначе валидный
         // trojan/vmess/ss/hysteria2-ключ ложно отвергался бы «Нужен рабочий VPN-ключ».
-        if (!kSupportedKeySchemes.any((s) => key.toLowerCase().startsWith(s))) { _fail(gen, tr('Нужен рабочий VPN-ключ')); return; }
+        if (!isSub && !kSupportedKeySchemes.any((s) => key.toLowerCase().startsWith(s))) { _fail(gen, tr('Нужен рабочий VPN-ключ')); return; }
         String cfg;
-        try {
-          cfg = singboxConfigJson(key); // key уже тримленный
-        } catch (e) {
-          _fail(gen, appLang == 'en' ? 'Key is corrupted: $e' : 'Ключ повреждён: $e');
-          return;
+        if (isSub) {
+          final sub = await fetchSubscription(key, hwid: hwidOf(), deviceOs: Platform.operatingSystem);
+          if (_disposed || gen != _gen) return; // отменили, пока грузилась подписка
+          // Сервис отвечает уведомлением вместо узлов: подписка истекла / исчерпан лимит устройств.
+          // Показываем его текст как есть — он уже написан для пользователя и локализован сервисом.
+          if (sub.notice != null && !sub.ok) { _fail(gen, sub.notice!); return; }
+          if (sub.error != null) { _fail(gen, sub.error!); return; }
+          if (!sub.ok) {
+            _fail(gen, sub.skipped > 0
+                ? tr('Узлы подписки не поддерживаются этой сборкой')
+                : tr('В подписке нет доступных серверов'));
+            return;
+          }
+          try {
+            cfg = singboxConfigJsonFromNodes(sub.nodes);
+          } catch (e) {
+            _fail(gen, appLang == 'en' ? 'Subscription is broken: $e' : 'Подписка повреждена: $e');
+            return;
+          }
+        } else {
+          try {
+            cfg = singboxConfigJson(key); // key уже тримленный
+          } catch (e) {
+            _fail(gen, appLang == 'en' ? 'Key is corrupted: $e' : 'Ключ повреждён: $e');
+            return;
+          }
         }
         try {
           // таймаут: если нативный движок завис и не вернул ни успех, ни ошибку — не залипаем

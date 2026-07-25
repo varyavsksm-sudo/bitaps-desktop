@@ -155,8 +155,12 @@ extension ShellApi on ShellState {
     // остальное — как {secret} (UUID «Кода входа»). 403 use_login_secret остаётся обработан
     // на случай аварийного рубильника DISABLE_KEY_LOGIN на сервере. _pairLogin передаёт сюда
     // UUID → идёт по ветке secret.
-    final isKey = kSupportedKeySchemes.any((s) => key.startsWith(s));
-    // http(s)://-подписки (не share-link) не поддержаны: fetch подписки не реализован → сразу отклоняем.
+    final isShareLink = kSupportedKeySchemes.any((s) => key.startsWith(s));
+    // Ссылка на подписку (https://…/u/<token>) — такой же credential, как ключ: app-login ищет
+    // строку по точному совпадению vpn_key, а после перехода на подписки vpn_key и ЕСТЬ эта
+    // ссылка. Гард isSubscriptionUrl узкий (только доверенный домен bitaps + путь /u/<token>).
+    final isKey = isShareLink || isSubscriptionUrl(key);
+    // Прочие http(s)-ссылки credential'ом не являются — отклоняем, как и раньше.
     if (!isKey && (key.startsWith('http://') || key.startsWith('https://'))) {
       _loginError(tr('Вход по VPN-ключу отключён. Вставь «Код входа» (UUID) из бота или письма.'));
       return;

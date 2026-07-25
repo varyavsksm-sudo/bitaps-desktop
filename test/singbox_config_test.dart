@@ -2,7 +2,57 @@
 // из share-link ключа). Плагинов не тянет → гоняется в обычном test-харнессе.
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:bitaps_vpn/singbox_config.dart';
+
+// Тело подписки в том виде, в каком его отдаёт сервис доставки (/u/<token>): массив ГОТОВЫХ
+// xray-конфигов. Первая запись — узел «белого списка» на транспорте xhttp (движок его не умеет),
+// дальше — прямые VLESS+Reality. Структура один-в-один с живой выдачей.
+const String _subBody = '''
+[
+ {"remarks":"🛡️ Нидерланды · БС",
+  "outbounds":[
+   {"tag":"proxy","protocol":"vless",
+    "settings":{"vnext":[{"address":"cdn2.bit-core.online","port":443,
+      "users":[{"id":"11111111-2222-3333-4444-555555555555","encryption":"none"}]}]},
+    "streamSettings":{"network":"xhttp","security":"tls",
+      "tlsSettings":{"serverName":"cdn2.bit-core.online","alpn":["h2","http/1.1"],"fingerprint":"firefox"},
+      "xhttpSettings":{"mode":"packet-up","path":"/"}}},
+   {"protocol":"freedom","tag":"direct"},
+   {"protocol":"blackhole","tag":"block"}]},
+ {"remarks":"🇫🇮 Финляндия",
+  "outbounds":[
+   {"tag":"proxy","protocol":"vless",
+    "settings":{"vnext":[{"address":"212.237.219.223","port":8443,
+      "users":[{"id":"11111111-2222-3333-4444-555555555555","encryption":"none","flow":"xtls-rprx-vision"}]}]},
+    "streamSettings":{"security":"reality","network":"tcp",
+      "realitySettings":{"serverName":"ya.ru","fingerprint":"firefox",
+        "publicKey":"mRX3TKTKefW4WrXGIEiKQL1aIWVlfZ5I3Xyf0We4skQ","shortId":"974a7f83c1977d80","spiderX":"/"}}},
+   {"protocol":"freedom","tag":"direct"}]},
+ {"remarks":"🇳🇱 Нидерланды",
+  "outbounds":[
+   {"tag":"proxy","protocol":"vless",
+    "settings":{"vnext":[{"address":"176.222.53.193","port":8443,
+      "users":[{"id":"11111111-2222-3333-4444-555555555555","encryption":"none","flow":"xtls-rprx-vision"}]}]},
+    "streamSettings":{"security":"reality","network":"tcp",
+      "realitySettings":{"serverName":"ya.ru","fingerprint":"firefox",
+        "publicKey":"rBOGd3DCzFvk9QVW6jQHg9-FM76F05DBDc7FbwOMhmQ","shortId":"149c1b359327a310"}}},
+   {"protocol":"freedom","tag":"direct"}]}
+]
+''';
+
+// Уведомление вместо узлов: сервис так сообщает «истекла» / «лимит устройств».
+const String _noticeBody = '''
+[
+ {"remarks":"❌ Лимит устройств исчерпан",
+  "outbounds":[
+   {"tag":"proxy","protocol":"vless",
+    "settings":{"vnext":[{"address":"127.0.0.1","port":1,
+      "users":[{"id":"00000000-0000-0000-0000-000000000000","encryption":"none"}]}]},
+    "streamSettings":{"network":"tcp"}}]}
+]
+''';
 
 void main() {
   group('outboundFromKey — VLESS + Reality', () {
@@ -120,6 +170,177 @@ void main() {
 
     test('невалидный ключ → FormatException', () {
       expect(() => singboxConfig('not-a-key'), throwsFormatException);
+    });
+  });
+
+  group('подписка — распознавание ссылки', () {
+    test('ссылка сервиса доставки принимается', () {
+      expect(isSubscriptionUrl('https://origin.bit-core.online/u/u4db1f0bb3e5eda5f5d2ed5'), true);
+      expect(isSubscriptionUrl('  https://origin.bit-core.online/u/abcdefgh  '), true);
+    });
+
+    test('НЕГАТИВ: чужой домен, http, кривой путь и токен отвергаются', () {
+      // чужой хост — иначе произвольная ссылка стала бы «ключом» и подменила конфиг
+      expect(isSubscriptionUrl('https://evil.example.com/u/abcdefghij'), false);
+      // домен-обманка: bit-core.online.evil.com не является поддоменом bit-core.online
+      expect(isSubscriptionUrl('https://bit-core.online.evil.com/u/abcdefghij'), false);
+      expect(isSubscriptionUrl('http://origin.bit-core.online/u/abcdefghij'), false);
+      expect(isSubscriptionUrl('https://origin.bit-core.online/sub/abcdefghij'), false);
+      expect(isSubscriptionUrl('https://origin.bit-core.online/u/short'), false);
+      expect(isSubscriptionUrl('https://origin.bit-core.online/u/имя-с-символами'), false);
+      expect(isSubscriptionUrl('vless://uuid@host:443'), false);
+    });
+  });
+
+  group('подписка — разбор тела', () {
+    test('xhttp-узлы пропускаются, Reality-узлы разбираются', () {
+      final r = parseSubscription(_subBody);
+      // 3 записи: одна xhttp (движку не по зубам) + две Reality
+      expect(r.nodes.length, 2);
+      expect(r.skipped, 1);
+      expect(r.notice, isNull);
+      expect(r.hasNodes, true);
+      expect(r.nodes.map((n) => n.tag).toList(), ['🇫🇮 Финляндия', '🇳🇱 Нидерланды']);
+
+      final fi = r.nodes.first.outbound;
+      expect(fi['type'], 'vless');
+      expect(fi['server'], '212.237.219.223');
+      expect(fi['server_port'], 8443);
+      expect(fi['uuid'], '11111111-2222-3333-4444-555555555555');
+      expect(fi['flow'], 'xtls-rprx-vision');
+      expect(fi['packet_encoding'], 'xudp');
+      final tls = fi['tls'] as Map<String, dynamic>;
+      expect(tls['server_name'], 'ya.ru');
+      expect((tls['utls'] as Map)['fingerprint'], 'firefox');
+      final reality = tls['reality'] as Map<String, dynamic>;
+      expect(reality['enabled'], true);
+      expect(reality['public_key'], 'mRX3TKTKefW4WrXGIEiKQL1aIWVlfZ5I3Xyf0We4skQ');
+      expect(reality['short_id'], '974a7f83c1977d80');
+      // tcp → без блока transport
+      expect(fi.containsKey('transport'), false);
+    });
+
+    test('уведомление сервиса вместо узлов — это НЕ узел', () {
+      final r = parseSubscription(_noticeBody);
+      expect(r.hasNodes, false);
+      expect(r.notice, 'Лимит устройств исчерпан');
+    });
+
+    test('Reality без публичного ключа пропускается, а не рушит конфиг', () {
+      const body = '''
+[{"remarks":"битый","outbounds":[{"tag":"proxy","protocol":"vless",
+  "settings":{"vnext":[{"address":"1.2.3.4","port":443,"users":[{"id":"u"}]}]},
+  "streamSettings":{"security":"reality","network":"tcp","realitySettings":{"serverName":"ya.ru"}}}]}]''';
+      final r = parseSubscription(body);
+      expect(r.hasNodes, false);
+      expect(r.skipped, 1);
+    });
+
+    test('одинаковые remarks дают РАЗНЫЕ теги (иначе конфиг невалиден)', () {
+      final body = _subBody.replaceAll('🇳🇱 Нидерланды', '🇫🇮 Финляндия');
+      final r = parseSubscription(body);
+      expect(r.nodes.length, 2);
+      expect(r.nodes[0].tag == r.nodes[1].tag, false);
+    });
+
+    test('не-массив в теле → FormatException', () {
+      expect(() => parseSubscription('{"remarks":"x"}'), throwsFormatException);
+    });
+  });
+
+  group('подписка — сборка конфига', () {
+    test('selector proxy + urltest auto + узлы + direct', () {
+      final r = parseSubscription(_subBody);
+      final cfg = singboxConfigFromNodes(r.nodes);
+      final outs = (cfg['outbounds'] as List).cast<Map<String, dynamic>>();
+      expect(outs.first['type'], 'selector');
+      expect(outs.first['tag'], 'proxy'); // на этот тег смотрят route.final и DNS-детуры
+      expect(outs.first['outbounds'], ['auto', '🇫🇮 Финляндия', '🇳🇱 Нидерланды']);
+      expect(outs[1]['type'], 'urltest');
+      expect(outs[1]['tag'], 'auto');
+      expect(outs[1]['outbounds'], ['🇫🇮 Финляндия', '🇳🇱 Нидерланды']);
+      expect(outs.last['type'], 'direct');
+      // все теги уникальны — иначе движок отвергнет конфиг
+      final tags = outs.map((o) => o['tag']).toList();
+      expect(tags.toSet().length, tags.length);
+      expect((cfg['route'] as Map)['final'], 'proxy');
+      expect(((cfg['inbounds'] as List).first as Map)['type'], 'tun');
+    });
+
+    test('пустой список узлов → FormatException (а не пустой конфиг)', () {
+      expect(() => singboxConfigFromNodes(const []), throwsFormatException);
+    });
+
+    test('JSON конфига подписки валиден и содержит оба узла', () {
+      final r = parseSubscription(_subBody);
+      final decoded = json.decode(singboxConfigJsonFromNodes(r.nodes));
+      expect(decoded, isA<Map>());
+      expect(json.encode(decoded).contains('212.237.219.223'), true);
+      expect(json.encode(decoded).contains('176.222.53.193'), true);
+      // xhttp-узел в конфиг не попал
+      expect(json.encode(decoded).contains('cdn2.bit-core.online'), false);
+    });
+  });
+
+  group('подписка — загрузка по сети', () {
+    test('200 + тело → узлы, заголовки разобраны', () async {
+      String? sentHwid;
+      final client = MockClient((req) async {
+        sentHwid = req.headers['x-hwid'];
+        return http.Response(_subBody, 200, headers: {
+          'content-type': 'application/json; charset=utf-8',
+          'subscription-userinfo': 'expire=1800000000',
+        });
+      });
+      final res = await fetchSubscription('https://origin.bit-core.online/u/abcdefghij',
+          hwid: 'abcdef0123456789', deviceOs: 'linux', client: client);
+      expect(res.ok, true);
+      expect(res.nodes.length, 2);
+      expect(res.skipped, 1);
+      expect(sentHwid, 'abcdef0123456789'); // без него сервис не посчитает устройство
+      expect(res.expiresAt?.millisecondsSinceEpoch, 1800000000 * 1000);
+    });
+
+    test('уведомление в заголовке base64 доходит до пользователя', () async {
+      const msg = 'Подписка истекла. Продлите её в приложении или боте.';
+      // charset обязателен: без него http.Response кодирует тело latin1 и кириллица падает
+      // (живой сервис отдаёт ровно 'application/json; charset=utf-8').
+      final client = MockClient((_) async => http.Response(_noticeBody, 200, headers: {
+            'content-type': 'application/json; charset=utf-8',
+            'sub-info-text': 'base64:${base64.encode(utf8.encode(msg))}',
+            'sub-info-color': 'red',
+          }));
+      final res = await fetchSubscription('https://origin.bit-core.online/u/abcdefghij',
+          hwid: 'abcdef0123456789', client: client);
+      expect(res.ok, false);
+      expect(res.notice, msg);
+      expect(res.error, isNull); // это не ошибка сети, а осмысленный ответ сервиса
+    });
+
+    test('не-200 и мусор в теле → ошибка, но НЕ исключение', () async {
+      final bad = MockClient((_) async => http.Response('nope', 503));
+      final r1 = await fetchSubscription('https://origin.bit-core.online/u/abcdefghij',
+          hwid: 'abcdef0123456789', client: bad);
+      expect(r1.ok, false);
+      expect(r1.error, contains('503'));
+
+      final garbage = MockClient((_) async => http.Response('<html>not json</html>', 200));
+      final r2 = await fetchSubscription('https://origin.bit-core.online/u/abcdefghij',
+          hwid: 'abcdef0123456789', client: garbage);
+      expect(r2.ok, false);
+      expect(r2.error, isNotNull);
+    });
+
+    test('зависший сервер → таймаут, а не вечное «Подключение…»', () async {
+      final slow = MockClient((_) async {
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        return http.Response(_subBody, 200,
+            headers: {'content-type': 'application/json; charset=utf-8'});
+      });
+      final res = await fetchSubscription('https://origin.bit-core.online/u/abcdefghij',
+          hwid: 'abcdef0123456789', client: slow, timeout: const Duration(milliseconds: 50));
+      expect(res.ok, false);
+      expect(res.error, isNotNull);
     });
   });
 }

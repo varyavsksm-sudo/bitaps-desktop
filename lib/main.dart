@@ -191,6 +191,9 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   String keyStr = kDemoKey;
   String? customCfg;
   String? importedHost;
+  // Идентификатор устройства для подписки (заголовок x-hwid). Создаётся один раз при первом
+  // запуске и живёт в prefs: по нему сервис считает устройства в лимите тарифа.
+  String hwid = '';
   final TextEditingController _support = TextEditingController();
   final Set<String> favs = {};
   // вход / подписка / устройства (реальные данные из Supabase)
@@ -302,6 +305,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     WidgetsBinding.instance.addObserver(this);
     _conn = ConnectionController(
       keyOf: () => keyStr,
+      hwidOf: () => hwid,
       serverOf: () => server,
       dropAlertOn: () => tgl2,
       trafWarnOn: () => tgl4,
@@ -532,6 +536,13 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     // троттлинг PIN переживает рестарт: счётчик ошибок + время окончания локаута (epoch ms)
     final secPinFails = await _secRead(p, 'pinFails');
     final secPinLockUntil = await _secRead(p, 'pinLockUntil');
+    // hwid для подписки: создаём при первом запуске и сразу пишем в prefs — не в _save, иначе
+    // до первого сохранения настроек каждый запуск занимал бы новый слот устройства.
+    var hw = p.getString('hwid') ?? '';
+    if (hw.length < 10) {
+      hw = genHwid();
+      await p.setString('hwid', hw);
+    }
     if (!mounted) return;
     // язык: сохранённый выбор, иначе автоопределение по системной локали (ru → ru, иначе en)
     final savedLang = p.getString('lang');
@@ -560,6 +571,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       _conn.sessions = p.getInt('sessions') ?? 0;
       customCfg = secCfg;
       keyStr = secKey ?? kDemoKey;
+      hwid = hw;
       importedHost = p.getString('host');
       tgId = p.getInt('tgId');
       appToken = secToken;

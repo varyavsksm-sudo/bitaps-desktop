@@ -35,6 +35,9 @@ const Map<String, String> _kEn = {
 
   // ---- connection.dart ----
   'Нужен рабочий VPN-ключ': 'Need a working VPN key',
+  'В подписке нет доступных серверов': 'No servers available in your subscription',
+  'Узлы подписки не поддерживаются этой сборкой': 'This build cannot use the subscription servers',
+  'подписка bitaps': 'bitaps subscription',
   'Соединение разорвано': 'Connection dropped',
 
   // ---- widgets.dart ----

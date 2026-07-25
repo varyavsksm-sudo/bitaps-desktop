@@ -28,9 +28,23 @@ extension ShellAccount on ShellState {
   // (bitaps://import?key=…). Один и тот же trusted-host гейт и путь входа для обоих источников.
   Future<void> _importKeyString(String raw, {bool fromClipboard = false}) async {
     final t = raw.trim();
-    // Принимаем только сам VPN-ключ (любая схема из kSupportedKeySchemes — как гард коннекта и
-    // «Свой конфиг»). Fetch подписки по http(s)-ссылке не реализован — раньше ссылка молча
-    // сохранялась как ключ и коннект падал, поэтому http(s) не принимаем.
+    // Ссылка на подписку bitaps (/u/<token>) — штатный формат ключа с переходом на подписки.
+    // Хост в ней уже проверен isSubscriptionUrl (только доверенные домены bitaps), поэтому
+    // trusted-host гейт ниже ей не нужен: сразу входим по ней либо обновляем кабинет.
+    if (isSubscriptionUrl(t)) {
+      if (!mounted) return;
+      if (!loggedIn) {
+        await _login(t);
+      } else {
+        rebuild(() { keyStr = t; importedHost = null; customCfg = null; });
+        await _save();
+        await _refreshSub();
+      }
+      return;
+    }
+    // Иначе принимаем только сам VPN-ключ (любая схема из kSupportedKeySchemes — как гард
+    // коннекта и «Свой конфиг»). Прочие http(s)-ссылки не принимаем: раньше такая ссылка молча
+    // сохранялась как ключ и коннект падал.
     if (!kSupportedKeySchemes.any((s) => t.startsWith(s))) {
       _toast(fromClipboard ? tr('В буфере нет VPN-ключа') : tr('Это не VPN-ключ'));
       return;
