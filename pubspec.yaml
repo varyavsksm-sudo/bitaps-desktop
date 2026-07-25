@@ -28,6 +28,10 @@ dependencies:
   hotkey_manager: ^0.2.3
   # нужен launch_at_startup на macOS/Windows для определения пути к бинарю
   package_info_plus: ^8.1.2
+  # Android: xray-core внутри VpnService. Именно xray, а не sing-box, потому что узлы «белого
+  # списка» ходят транспортом xhttp, которого в sing-box нет. Пакет принимает СЫРОЙ xray-конфиг —
+  # тот же, что мы собираем для десктопа. Android-часть бесплатна и под MIT.
+  flutter_v2ray_client: ^3.4.1
 
 dev_dependencies:
   flutter_test:

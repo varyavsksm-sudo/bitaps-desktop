@@ -12,6 +12,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'android_engine.dart';
 import 'desktop_engine.dart';
 import 'native_tunnel.dart';
 import 'singbox_config.dart';
@@ -22,7 +23,10 @@ enum EngineKind {
   /// Процесс xray рядом с приложением (десктоп). Умеет все узлы, включая БС.
   desktopXray,
 
-  /// Нативная сторона платформы (Android/iOS). Сейчас sing-box → без БС.
+  /// xray внутри системного VpnService (Android). Тоже умеет все узлы, включая БС.
+  androidXray,
+
+  /// Нативная сторона платформы (iOS/macOS-расширение). Пока sing-box → без БС.
   native,
 
   /// Движка нет — туннель поднять нечем.
@@ -57,16 +61,20 @@ class TunnelEngine {
     }
     // На Android/iOS наличие нативной стороны проверяется только попыткой вызова —
     // считаем, что она есть, и честно падаем с TunnelUnavailable, если нет.
-    if (Platform.isAndroid || Platform.isIOS) return EngineKind.native;
+    if (Platform.isAndroid) return EngineKind.androidXray;
+    // iOS: нативная сторона (NetworkExtension) — её ещё предстоит собрать владельцу.
+    if (Platform.isIOS) return EngineKind.native;
     return EngineKind.none;
   }
 
-  /// Узлы, которые движок этой платформы реально умеет поднять.
+  /// Узлы, которые движок этой платформы реально умеет поднять. У xray — любые,
+  /// у sing-box — только те, чей транспорт он понимает (xhttp «белого списка» он не умеет).
   static List<SubNode> usableNodes(List<SubNode> all) =>
-      kind() == EngineKind.desktopXray ? all : [for (final n in all) if (n.singboxReady) n];
+      supportsWhitelist ? all : [for (final n in all) if (n.singboxReady) n];
 
   /// Доступен ли узел «белого списка» (xhttp) на этой платформе.
-  static bool get supportsWhitelist => kind() == EngineKind.desktopXray;
+  static bool get supportsWhitelist =>
+      kind() == EngineKind.desktopXray || kind() == EngineKind.androidXray;
 
   /// Поднять туннель по узлам подписки. [onlyTag] — если пользователь выбрал сервер вручную.
   /// Бросает [EngineUnavailable] / [TunnelUnavailable] с текстом для пользователя.
@@ -78,6 +86,9 @@ class TunnelEngine {
     switch (kind()) {
       case EngineKind.desktopXray:
         await _connectDesktop(usable, onlyTag);
+        return;
+      case EngineKind.androidXray:
+        await _connectAndroid(usable, onlyTag, server);
         return;
       case EngineKind.native:
         // Нативной стороне отдаём sing-box конфиг — формат, который она ожидает.
@@ -94,10 +105,12 @@ class TunnelEngine {
     if (bin == null) throw EngineUnavailable('VPN-движок не найден в сборке');
     // Порты берём свободные: фиксированные конфликтуют со вторым запуском и чужими клиентами.
     final socksPort = await _freePort();
+    final httpPort = await _freePort();
     final metricsPort = await _freePort();
-    final cfg = xrayConfigJsonFromNodes(nodes, only: onlyTag, socksPort: socksPort, metricsPort: metricsPort);
+    final cfg = xrayConfigJsonFromNodes(nodes,
+        only: onlyTag, socksPort: socksPort, httpPort: httpPort, metricsPort: metricsPort);
     final proc = await XrayProcess.start(cfg, socksPort: socksPort, binaryPath: bin);
-    final proxyOk = await SystemProxy.enable(socksPort);
+    final proxyOk = await SystemProxy.enable(socksPort: socksPort, httpPort: httpPort);
     if (!proxyOk) {
       await proc.stop();
       throw EngineUnavailable('не удалось включить системный прокси');
@@ -113,9 +126,33 @@ class TunnelEngine {
   /// Пинги узлов из последнего замера движка (тег outbound'а → мс; null — узел не отвечает).
   Map<String, int?> nodePings = const {};
 
+  final AndroidXrayEngine _android = AndroidXrayEngine();
+
+  Future<void> _connectAndroid(List<SubNode> nodes, String? onlyTag, String server) async {
+    // Порт метрик берём случайный: постоянный слушатель на устройстве читался бы любым
+    // другим приложением. socks-порт плагин находит в конфиге сам.
+    final metricsPort = await _freePort();
+    final cfg = xrayConfigJsonFromNodes(nodes,
+        only: onlyTag, socksPort: kXraySocksPort, metricsPort: metricsPort);
+    await _android.connect(
+      cfg,
+      remark: server.isEmpty ? 'bitaps VPN' : server,
+      onState: (state) {
+        if (state == 'connected') return; // о подключении сообщаем сами, ниже
+        _events.add(EngineEvent(state));
+      },
+    );
+    _metricsPort = metricsPort;
+    _lastTotals = null;
+    _events.add(const EngineEvent('connected'));
+    _statsTimer = Timer.periodic(const Duration(seconds: 1), (_) => _pollStats());
+  }
+
   Future<void> _pollStats() async {
     final port = _metricsPort;
-    if (port == null || _proc == null) return;
+    // на десктопе статистику снимаем только при живом процессе; на Android процесса у нас нет —
+    // движок живёт в системном сервисе, поэтому проверяем только порт метрик
+    if (port == null || (kind() == EngineKind.desktopXray && _proc == null)) return;
     final r = await XrayStats.read(port);
     if (r == null) return;
     nodePings = r.pings;
@@ -129,11 +166,22 @@ class TunnelEngine {
   }
 
   Future<void> disconnect() async {
-    if (kind() == EngineKind.native) {
-      await NativeTunnel.disconnect();
-      return;
+    switch (kind()) {
+      case EngineKind.native:
+        await NativeTunnel.disconnect();
+        return;
+      case EngineKind.androidXray:
+        _statsTimer?.cancel();
+        _statsTimer = null;
+        _metricsPort = null;
+        _lastTotals = null;
+        await _android.disconnect();
+        return;
+      case EngineKind.desktopXray:
+      case EngineKind.none:
+        await _stopDesktop();
+        return;
     }
-    await _stopDesktop();
   }
 
   Future<void> _stopDesktop() async {

@@ -37,6 +37,7 @@ Map<String, dynamic> xrayConfigFromNodes(
   List<SubNode> nodes, {
   String? only,
   int socksPort = kXraySocksPort,
+  int? httpPort,
   int? metricsPort,
 }) {
   if (nodes.isEmpty) {
@@ -75,6 +76,15 @@ Map<String, dynamic> xrayConfigFromNodes(
     'log': {'loglevel': 'warning'},
     'dns': {'queryStrategy': 'UseIPv4', 'disableCache': false, 'servers': _kDns},
     'inbounds': [
+      if (httpPort != null)
+        // HTTP-вход нужен системному прокси: часть приложений (и сам Windows) ходит только
+        // через http/https-прокси и socks-настройку игнорирует.
+        {
+          'listen': '127.0.0.1',
+          'port': httpPort,
+          'protocol': 'http',
+          'tag': 'http',
+        },
       {
         'listen': '127.0.0.1',
         'port': socksPort,
@@ -135,10 +145,11 @@ String xrayConfigJsonFromNodes(
   List<SubNode> nodes, {
   String? only,
   int socksPort = kXraySocksPort,
+  int? httpPort,
   int? metricsPort,
 }) =>
-    const JsonEncoder.withIndent('  ')
-        .convert(xrayConfigFromNodes(nodes, only: only, socksPort: socksPort, metricsPort: metricsPort));
+    const JsonEncoder.withIndent('  ').convert(xrayConfigFromNodes(nodes,
+        only: only, socksPort: socksPort, httpPort: httpPort, metricsPort: metricsPort));
 
 /// Одиночный share-link (импортированный вручную ключ) → такой же узел, как из подписки.
 /// Так у контроллера подключения остаётся ОДИН путь: узлы → конфиг → движок.

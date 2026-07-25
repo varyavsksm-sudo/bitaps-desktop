@@ -54,10 +54,9 @@ class XrayBinary {
 
 /// Процесс движка с конфигом подписки.
 class XrayProcess {
-  XrayProcess._(this._proc, this._configFile, this.socksPort);
+  XrayProcess._(this._proc, this.socksPort);
 
   final Process _proc;
-  final File _configFile;
   final int socksPort;
   final List<String> _errLines = [];
   bool _stopped = false;
@@ -76,17 +75,27 @@ class XrayProcess {
     if (bin == null) {
       throw EngineUnavailable('VPN-движок не найден в сборке');
     }
-    final dir = await Directory.systemTemp.createTemp('bitaps_engine_');
-    final cfg = File('${dir.path}${Platform.pathSeparator}config.json');
-    await cfg.writeAsString(configJson);
+    // Конфиг отдаём движку через stdin (`-c stdin:`), а не файлом: в нём личный UUID подписки,
+    // и на диске он не должен оказываться даже во временном каталоге.
+    // XRAY_LOCATION_ASSET — каталог с geoip.dat/geosite.dat, они лежат рядом с бинарём;
+    // без них правила «российские сайты мимо туннеля» не сработают.
+    final engineDir = File(bin).parent.path;
     Process proc;
     try {
-      proc = await Process.start(bin, ['run', '-c', cfg.path], runInShell: false);
+      proc = await Process.start(
+        bin,
+        ['run', '-c', 'stdin:'],
+        runInShell: false,
+        workingDirectory: engineDir,
+        environment: {'XRAY_LOCATION_ASSET': engineDir},
+      );
+      proc.stdin.write(configJson);
+      await proc.stdin.flush();
+      await proc.stdin.close();
     } catch (e) {
-      await dir.delete(recursive: true).catchError((_) => dir);
       throw EngineUnavailable('не удалось запустить движок: $e');
     }
-    final p = XrayProcess._(proc, cfg, socksPort);
+    final p = XrayProcess._(proc, socksPort);
     proc.stderr.transform(utf8.decoder).transform(const LineSplitter()).listen(p._onLog);
     proc.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen(p._onLog);
     // Готовность = локальный socks реально принимает соединения. Пока порт не слушает,
@@ -95,7 +104,6 @@ class XrayProcess {
     while (DateTime.now().isBefore(deadline)) {
       if (await p._socksReady()) return p;
       if (p._exited) {
-        await p._cleanup();
         throw EngineUnavailable('движок завершился на старте:\n${p.lastError}');
       }
       await Future<void>.delayed(const Duration(milliseconds: 250));
@@ -133,15 +141,11 @@ class XrayProcess {
       _proc.kill(ProcessSignal.sigkill);
       return -1;
     });
-    await _cleanup();
+    _cleanup();
   }
 
-  Future<void> _cleanup() async {
-    _exited = true;
-    try {
-      final dir = _configFile.parent;
-      if (await dir.exists()) await dir.delete(recursive: true);
-    } catch (_) {/* временный каталог — не критично */}
+  void _cleanup() {
+    _exited = true; // конфиг жил только в stdin — удалять нечего
   }
 }
 
@@ -195,21 +199,27 @@ class SystemProxy {
 
   static bool get enabled => _enabled;
 
-  static Future<bool> enable(int port) async {
+  static Future<bool> enable({required int socksPort, required int httpPort}) async {
     try {
       if (Platform.isMacOS) {
         _macServices = await _macNetworkServices();
         for (final s in _macServices) {
-          await Process.run('/usr/sbin/networksetup', ['-setsocksfirewallproxy', s, '127.0.0.1', '$port']);
+          await Process.run('/usr/sbin/networksetup', ['-setsocksfirewallproxy', s, '127.0.0.1', '$socksPort']);
           await Process.run('/usr/sbin/networksetup', ['-setsocksfirewallproxystate', s, 'on']);
+          await Process.run('/usr/sbin/networksetup', ['-setwebproxy', s, '127.0.0.1', '$httpPort']);
+          await Process.run('/usr/sbin/networksetup', ['-setwebproxystate', s, 'on']);
+          await Process.run('/usr/sbin/networksetup', ['-setsecurewebproxy', s, '127.0.0.1', '$httpPort']);
+          await Process.run('/usr/sbin/networksetup', ['-setsecurewebproxystate', s, 'on']);
         }
         _enabled = _macServices.isNotEmpty;
         return _enabled;
       }
       if (Platform.isWindows) {
-        // WinINet: включаем socks-прокси в реестре пользователя (прав администратора не нужно)
+        // WinINet: прокси пользователя (без прав администратора). http/https обязательны —
+        // многие приложения socks-строку игнорируют.
         const key = r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings';
-        await Process.run('reg', ['add', key, '/v', 'ProxyServer', '/t', 'REG_SZ', '/d', 'socks=127.0.0.1:$port', '/f']);
+        final value = 'http=127.0.0.1:$httpPort;https=127.0.0.1:$httpPort;socks=127.0.0.1:$socksPort';
+        await Process.run('reg', ['add', key, '/v', 'ProxyServer', '/t', 'REG_SZ', '/d', value, '/f']);
         await Process.run('reg', ['add', key, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', '1', '/f']);
         _enabled = true;
         return true;
@@ -217,8 +227,10 @@ class SystemProxy {
       if (Platform.isLinux) {
         // GNOME/GTK-окружения читают gsettings; на прочих DE пользователь настраивает сам.
         await Process.run('gsettings', ['set', 'org.gnome.system.proxy', 'mode', 'manual']);
-        await Process.run('gsettings', ['set', 'org.gnome.system.proxy.socks', 'host', '127.0.0.1']);
-        await Process.run('gsettings', ['set', 'org.gnome.system.proxy.socks', 'port', '$port']);
+        for (final e in {'http': httpPort, 'https': httpPort, 'socks': socksPort}.entries) {
+          await Process.run('gsettings', ['set', 'org.gnome.system.proxy.${e.key}', 'host', '127.0.0.1']);
+          await Process.run('gsettings', ['set', 'org.gnome.system.proxy.${e.key}', 'port', '${e.value}']);
+        }
         _enabled = true;
         return true;
       }
@@ -233,6 +245,8 @@ class SystemProxy {
       if (Platform.isMacOS) {
         for (final s in _macServices) {
           await Process.run('/usr/sbin/networksetup', ['-setsocksfirewallproxystate', s, 'off']);
+          await Process.run('/usr/sbin/networksetup', ['-setwebproxystate', s, 'off']);
+          await Process.run('/usr/sbin/networksetup', ['-setsecurewebproxystate', s, 'off']);
         }
         _macServices = [];
         return;

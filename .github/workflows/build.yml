@@ -49,9 +49,16 @@ jobs:
           $got = (Get-FileHash xray.zip -Algorithm SHA256).Hash.ToLower()
           if ($got -ne $sha) { throw "xray checksum mismatch: $got" }
           Expand-Archive xray.zip -DestinationPath xray-tmp -Force
-          Copy-Item xray-tmp\xray.exe build\windows\x64\runner\Release\xray.exe
-          Copy-Item pkg\THIRD-PARTY.md build\windows\x64\runner\Release\THIRD-PARTY.md
-          if (-not (Test-Path build\windows\x64\runner\Release\xray.exe)) { throw "xray.exe not packaged" }
+          $dest = "build\windows\x64\runner\Release"
+          Copy-Item xray-tmp\xray.exe "$dest\xray.exe"
+          # geoip.dat/geosite.dat обязательны: без них правила «РФ — мимо туннеля» не работают
+          Copy-Item xray-tmp\geoip.dat "$dest\geoip.dat"
+          Copy-Item xray-tmp\geosite.dat "$dest\geosite.dat"
+          Copy-Item xray-tmp\LICENSE "$dest\XRAY-LICENSE.txt"
+          Copy-Item pkg\THIRD-PARTY.md "$dest\THIRD-PARTY.md"
+          foreach ($f in @("xray.exe","geoip.dat","geosite.dat")) {
+            if (-not (Test-Path "$dest\$f")) { throw "$f not packaged" }
+          }
       - name: Portable zip
         run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath bitaps-windows-x64.zip -Force
       - name: Installer (Inno Setup)
@@ -89,9 +96,14 @@ jobs:
           curl -sSL -o xray.zip "https://github.com/XTLS/Xray-core/releases/download/$ver/Xray-linux-64.zip"
           echo "$sha  xray.zip" | sha256sum -c -
           unzip -o -q xray.zip -d xray-tmp
-          install -m 0755 xray-tmp/xray build/linux/x64/release/bundle/xray
-          cp pkg/THIRD-PARTY.md build/linux/x64/release/bundle/THIRD-PARTY.md
-          build/linux/x64/release/bundle/xray version | head -1
+          dest=build/linux/x64/release/bundle
+          install -m 0755 xray-tmp/xray "$dest/xray"
+          # geoip.dat/geosite.dat обязательны: без них правила «РФ — мимо туннеля» не работают
+          install -m 0644 xray-tmp/geoip.dat "$dest/geoip.dat"
+          install -m 0644 xray-tmp/geosite.dat "$dest/geosite.dat"
+          install -m 0644 xray-tmp/LICENSE "$dest/XRAY-LICENSE.txt"
+          cp pkg/THIRD-PARTY.md "$dest/THIRD-PARTY.md"
+          "$dest/xray" version | head -1
       - name: Portable tar.gz
         run: tar -czf bitaps-linux-x64.tar.gz -C build/linux/x64/release/bundle .
       - name: AppImage
@@ -131,6 +143,15 @@ jobs:
           grep -q 'android:allowBackup="false"' android/app/src/main/AndroidManifest.xml && echo "allowBackup ok" || (echo "allowBackup MISSING" && exit 1)
           sed -i.bak 's/minSdk = flutter.minSdkVersion/minSdk = 24/; s/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' android/app/build.gradle.kts 2>/dev/null || true
           sed -i.bak 's/minSdk = flutter.minSdkVersion/minSdk = 24/; s/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' android/app/build.gradle 2>/dev/null || true
+          # VPN-плагин компилируется против API 35 — иначе Gradle падает на «compiled against API 35»
+          sed -i.bak 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/' android/app/build.gradle.kts 2>/dev/null || true
+          sed -i.bak 's/compileSdk flutter.compileSdkVersion/compileSdk 35/' android/app/build.gradle 2>/dev/null || true
+          # Манифест VPN-плагина приносит READ_EXTERNAL_STORAGE — чувствительное разрешение,
+          # которое нам не нужно и которое пришлось бы обосновывать в Google Play. Убираем слиянием.
+          M=android/app/src/main/AndroidManifest.xml
+          perl -0pi -e 's/(<manifest\b)/$1 xmlns:tools="http:\/\/schemas.android.com\/tools"/ unless /xmlns:tools/' $M
+          perl -0pi -e 's/(<manifest\b[^>]*>)/$1\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove"\/>/' $M
+          grep -q 'tools:node="remove"' $M && echo "READ_EXTERNAL_STORAGE strip ok" || (echo "strip FAILED" && exit 1)
       - name: Patch Android manifest (deep-link bitaps:// + Quick Settings Tile)
         run: |
           MANIFEST=android/app/src/main/AndroidManifest.xml
@@ -154,14 +175,21 @@ jobs:
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: yes | flutter doctor --android-licenses || true
-      - run: flutter build apk --release --dart-define=BUILD_NUMBER=${{ github.run_number }}
-      - run: cp build/app/outputs/flutter-apk/app-release.apk bitaps.apk
+      # split-per-abi: с VPN-движком внутри универсальный APK весит вдвое больше нужного
+      - run: flutter build apk --release --split-per-abi --dart-define=BUILD_NUMBER=${{ github.run_number }}
+      - name: APK для релиза (arm64 — основной, armeabi — старые устройства)
+        run: |
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk bitaps.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk bitaps-armv7.apk
+          ls -la bitaps.apk bitaps-armv7.apk
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
           name: Последняя сборка
-          files: bitaps.apk
+          files: |
+            bitaps.apk
+            bitaps-armv7.apk
 
 # ─────────────────────────────────────────────────────────────────────────────
 # macOS-джоба НАМЕРЕННО не добавлена. Почему (чтобы не сломать рабочий CI):
