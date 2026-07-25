@@ -30,7 +30,9 @@ const kRotateSecret = '${kFnBase}rotate-secret';
 // Авто-проверка обновлений: CI вшивает номер сборки через --dart-define и кладёт build_number.txt в релиз.
 // Локальная/дев-сборка → 0 (проверку не делаем, чтобы не звать «обновись» в дебаге).
 const int kBuildNumber = int.fromEnvironment('BUILD_NUMBER', defaultValue: 0);
-const kBuildNumberUrl = 'https://github.com/varyavsksm-sudo/bitaps-desktop/releases/latest/download/build_number.txt';
+// Номер последней сборки и сами файлы отдаём со СВОЕГО сервера: сторонний хостинг для
+// пользователя из РФ — лишние редиректы и риск блокировки, а нам не нужен посредник.
+const kBuildNumberUrl = 'https://origin.bit-core.online/dl/build_number.txt';
 const kDownloadUrl = 'https://bitapsvpn.com/app.html';
 
 // «Что нового»: changelog.json на сайте (репо bitaps-web). Формат: {"entries":[{"build":N,

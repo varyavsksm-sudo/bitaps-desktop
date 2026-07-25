@@ -512,6 +512,14 @@ SubParseResult parseSubscription(String body, {String? headerNotice}) {
       continue;
     }
     if (proxy == null) continue;
+    // Запись-балансировщик («🚀 Авто») содержит ВСЕ узлы сразу и правило balancerTag. Клиентам
+    // подписки она нужна как готовый авто-режим, а нам — нет: приложение собирает балансировку
+    // само из отдельных узлов. Если её не пропустить, первый её узел попал бы в список ещё раз,
+    // уже под именем «Авто», и пользователь видел бы дубль.
+    final routing = entry['routing'];
+    if (routing is Map && routing['balancers'] is List && (routing['balancers'] as List).isNotEmpty) {
+      continue;
+    }
     final host = _xrayHostPort(proxy);
     if (host == null) {
       skipped++; // запись без адреса — разобрать нечего
