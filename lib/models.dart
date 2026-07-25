@@ -162,6 +162,19 @@ const intlServers = [
   Server('tr-ist', 'Стамбул', 'Турция', '🇹🇷', 63, 31, premium: true, available: false),
 ];
 
+/// Узел подписки → строка списка серверов. Раньше список был захардкожен (Москва/СПб/…),
+/// то есть показывал пользователю несуществующие серверы; теперь берём реальные узлы выдачи.
+/// Метка вида «🇫🇮 Финляндия» / «🛡️ Нидерланды · БС» — флаг отделяем от названия по первому пробелу.
+Server serverFromSubNode(SubNode n, {int ping = 0}) {
+  final parts = n.remark.trim().split(' ');
+  final flag = parts.isNotEmpty ? parts.first : '🌐';
+  final city = parts.length > 1 ? parts.sublist(1).join(' ') : n.remark;
+  return Server(
+    n.tag, city, '', flag, ping, 0,
+    proto: n.singboxReady ? 'Reality' : 'БС · CDN',
+  );
+}
+
 class Faq {
   final String q, a;
   const Faq(this.q, this.a);

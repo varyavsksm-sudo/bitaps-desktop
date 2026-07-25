@@ -16,6 +16,8 @@ class ConnectionController extends ChangeNotifier {
     required this.keyOf,
     required this.hwidOf,
     required this.serverOf,
+    required this.onNodes,
+    required this.nodeTagOf,
     required this.dropAlertOn,
     required this.trafWarnOn,
     required this.onToast,
@@ -27,6 +29,11 @@ class ConnectionController extends ChangeNotifier {
   /// Идентификатор устройства для заголовка x-hwid при загрузке подписки (лимит устройств).
   final String Function() hwidOf;
   final Server Function() serverOf;
+  /// Свежие узлы подписки — чтобы список серверов в интерфейсе не расходился с тем,
+  /// к чему реально подключаемся.
+  final void Function(List<SubNode>) onNodes;
+  /// Тег узла при ручном выборе сервера (null — авто-выбор лучшего).
+  final String? Function() nodeTagOf;
   final bool Function() dropAlertOn;
   final bool Function() trafWarnOn;
   final void Function(String msg) onToast;
@@ -97,6 +104,7 @@ class ConnectionController extends ChangeNotifier {
           // Показываем его текст как есть — он уже написан для пользователя и локализован сервисом.
           if (sub.notice != null && !sub.ok) { _fail(gen, sub.notice!); return; }
           if (sub.error != null) { _fail(gen, sub.error!); return; }
+          onNodes(sub.nodes);
           nodes = TunnelEngine.usableNodes(sub.nodes);
           if (nodes.isEmpty) {
             _fail(gen, sub.nodes.isNotEmpty
@@ -118,8 +126,11 @@ class ConnectionController extends ChangeNotifier {
         try {
           // таймаут: если движок завис и не вернул ни успех, ни ошибку — не залипаем
           // навсегда в «Подключение…», а честно откатываемся в «выключено» с тостом.
+          // ручной выбор сервера уважаем: подключаемся ровно к нему, а не к «лучшему»
+          final only = nodeTagOf();
           await TunnelEngine.instance
-              .connect(nodes, server: serverOf().city)
+              .connect(nodes, onlyTag: only != null && nodes.any((n) => n.tag == only) ? only : null,
+                       server: serverOf().city)
               .timeout(const Duration(seconds: 40));
         } on TunnelUnavailable catch (e) {
           _fail(gen, '$e');

@@ -5,7 +5,7 @@ extension ShellServers on ShellState {
   Widget _servers() {
     // Честные цифры из реальных данных (models.dart), а не выдуманные «32 / 12 / 99.9%»:
     // считаем реально доступные серверы и их локации (города). Зарубежные (available:false) не в счёт.
-    final avail = [...ruServers, ...intlServers].where((s) => s.available).toList();
+    final avail = fleet.where((s) => s.available).toList();
     final locations = avail.map((s) => s.city).toSet().length;
     // Пока туннель поднят/поднимается (conn!=0), выбор сервера отбивается тостом. Список при этом
     // выглядит кликабельным → показываем тонкий inline-хинт и приглушаем некликабельные-сейчас строки
@@ -83,8 +83,12 @@ extension ShellServers on ShellState {
   }
 
   List<Widget> _serverSections(bool locked) {
-    final all = [...ruServers, ...intlServers];
+    final all = fleet;
     final favList = _byPing(all.where((s) => favs.contains(s.id)));
+    // Узлы «белого списка» (через CDN) показываем отдельной группой: они нужны, когда прямые
+    // адреса недоступны, но обычно медленнее — пользователю честнее видеть это разделение.
+    final direct = _byPing(all.where((s) => !s.proto.startsWith('БС')));
+    final bs = _byPing(all.where((s) => s.proto.startsWith('БС')));
     return [
       if (favList.isNotEmpty) ...[
         _kicker(tr('⭐ избранное')),
@@ -92,13 +96,18 @@ extension ShellServers on ShellState {
         for (final s in favList) _serverRow(s, locked),
         const SizedBox(height: 22),
       ],
-      _kicker(tr('🇷🇺 Россия')),
-      const SizedBox(height: 10),
-      for (final s in _byPing(ruServers)) _serverRow(s, locked),
-      const SizedBox(height: 22),
-      _kicker(tr('🌍 зарубежные · скоро')),
-      const SizedBox(height: 10),
-      for (final s in _byPing(intlServers)) _serverRow(s, locked),
+      if (direct.isNotEmpty) ...[
+        _kicker(tr('прямые серверы')),
+        const SizedBox(height: 10),
+        for (final s in direct) _serverRow(s, locked),
+      ],
+      if (bs.isNotEmpty) ...[
+        const SizedBox(height: 22),
+        _kicker(tr('обход блокировок · через CDN')),
+        const SizedBox(height: 10),
+        for (final s in bs) _serverRow(s, locked),
+      ],
+      if (all.isEmpty) Text(tr('Войди в аккаунт — здесь появятся твои серверы'), style: mono(12)),
     ];
   }
 

@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform, File, Directory, Process;
+import 'dart:io' show Platform, File, Directory, Process, Socket;
 import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -178,6 +178,8 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   int tab = 0;
   int mode = 0;
   Server server = ruServers[0];
+  /// Узлы из подписки — источник правды для списка серверов и для подключения.
+  List<SubNode> subNodes = const [];
   bool tgl1 = false, tgl2 = true, tgl3 = true, tgl4 = false;
   String? appPin; // PIN блокировки приложения
   bool _locked = false;
@@ -314,6 +316,8 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       keyOf: () => keyStr,
       hwidOf: () => hwid,
       serverOf: () => server,
+      onNodes: _applyNodes,
+      nodeTagOf: () => bestServer ? null : server.id,
       dropAlertOn: () => tgl2,
       trafWarnOn: () => tgl4,
       onToast: _toast,
@@ -621,7 +625,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       // Фолбэк на serverForMode выше, если сохранённый сервер исчез/стал недоступен.
       if (!bestServer) {
         final saved = p.getString('serverId');
-        final match = [...ruServers, ...intlServers].where((s) => s.id == saved && s.available);
+        final match = fleet.where((s) => s.id == saved && s.available);
         if (match.isNotEmpty) server = match.first;
       }
     });
@@ -644,6 +648,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       }
     }
     if (loggedIn) _refreshSub(silent: true);
+    _loadNodes(); // узлы подписки для экрана «Серверы» — до первого подключения
     // Авто-коннект НЕ должен подниматься сквозь блокировку или без логина: если экран заблокирован
     // (_locked) — стартуем после разблокировки (см. _tryUnlock), иначе пробуем сразу.
     if (!_locked) _maybeAutoConnect();
@@ -725,9 +730,25 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   // Пинг сервера: живой замер (кнопка «Пинг» на Серверах), пока его нет — статичный из models.dart.
   int pingOf(Server s) => pingMeasured[s.id] ?? s.ping;
 
+  /// Доступные серверы: реальные узлы подписки, а пока их нет (не вошли / нет сети) —
+  /// прежний статичный список, чтобы экран не был пустым.
+  List<Server> get fleet => subNodes.isEmpty
+      ? [...ruServers, ...intlServers]
+      : [for (final n in subNodes) serverFromSubNode(n, ping: pingMeasured[n.tag] ?? 0)];
+
+  /// Применить свежий список узлов: обновляем парк и следим, чтобы выбранный сервер
+  /// существовал (иначе подключение ушло бы к исчезнувшему узлу).
+  void _applyNodes(List<SubNode> ns) {
+    if (!mounted || ns.isEmpty) return;
+    rebuild(() {
+      subNodes = ns;
+      if (bestServer || !fleet.any((s) => s.id == server.id)) server = serverForMode(mode);
+    });
+  }
+
   // режим реально подбирает сервер: Стрим→мин.нагрузка, Игры/Авто→мин.пинг, Прив→зарубежный (иначе лучший)
   Server serverForMode(int m) {
-    final avail = [...ruServers, ...intlServers].where((s) => s.available).toList();
+    final avail = fleet.where((s) => s.available).toList();
     if (avail.isEmpty) return ruServers[0];
     if (m == 1) { avail.sort((a, b) => a.load.compareTo(b.load)); return avail.first; }
     if (m == 3) {

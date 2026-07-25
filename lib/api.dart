@@ -416,6 +416,7 @@ extension ShellApi on ShellState {
         if (!loggedIn) return;
         rebuild(() => _applySub(d));
         _save().catchError((e) => debugPrint('_save after refresh failed: $e'));
+        _loadNodes(); // список серверов = узлы подписки; тихо, в фоне
         if (!silent) _toast(del != null ? tr('Устройство удалено ✓') : tr('Обновлено ✓'));
       } else if (!silent) {
         _toast(tr('Не удалось обновить'));
@@ -483,20 +484,50 @@ extension ShellApi on ShellState {
     rebuild(() => _pinging = true);
     var okCount = 0;
     try {
-      for (final s in [...ruServers, ...intlServers].where((s) => s.available)) {
-        try {
-          final sw = Stopwatch()..start();
-          await http.get(Uri.parse(kFnBase)).timeout(const Duration(seconds: 4));
-          sw.stop();
-          okCount++;
-          rebuild(() => pingMeasured[s.id] = sw.elapsedMilliseconds.clamp(1, 999));
-        } catch (_) {
-          // таймаут/обрыв на этом замере — оставляем прежнее значение строки, идём дальше
-        }
+      // Замер честный и ПО КАЖДОМУ узлу: TCP-коннект к самому серверу подписки. Раньше здесь
+      // дёргался наш бэкенд — одинаковый хост для всех строк, то есть отклик канала пользователя,
+      // а не сервера. Замеряем параллельно: последовательно 8 узлов ждать слишком долго.
+      final targets = subNodes.where((n) => n.server.isNotEmpty).toList();
+      final results = await Future.wait([
+        for (final n in targets) _tcpPing(n.server, n.port).then((ms) => MapEntry(n.tag, ms)),
+      ]);
+      for (final e in results) {
+        if (e.value == null) continue;
+        okCount++;
+        pingMeasured[e.key] = e.value!;
       }
+      if (mounted) rebuild(() {});
       _toast(okCount > 0 ? tr('Пинг обновлён ✓') : _netErr);
     } finally {
       if (mounted) { rebuild(() => _pinging = false); } else { _pinging = false; }
+    }
+  }
+
+  /// Подтянуть узлы подписки БЕЗ подключения — чтобы список серверов был живым сразу после
+  /// входа, а не только после первого коннекта. Тихо: сбой сети просто оставляет прежний список.
+  /// Идентификатор устройства тот же, что при подключении, — лишний слот не занимаем.
+  Future<void> _loadNodes() async {
+    final key = keyStr.trim();
+    if (!isSubscriptionUrl(key) || hwid.isEmpty) return;
+    try {
+      final sub = await fetchSubscription(key, hwid: hwid, deviceOs: Platform.operatingSystem);
+      if (!mounted || !sub.ok) return;
+      _applyNodes(sub.nodes);
+    } catch (e) {
+      debugPrint('_loadNodes: $e');
+    }
+  }
+
+  /// Отклик узла: время установления TCP-соединения. null — узел не ответил за таймаут.
+  Future<int?> _tcpPing(String host, int port, {Duration timeout = const Duration(seconds: 4)}) async {
+    final sw = Stopwatch()..start();
+    try {
+      final sock = await Socket.connect(host, port, timeout: timeout);
+      sw.stop();
+      sock.destroy();
+      return sw.elapsedMilliseconds.clamp(1, 9999);
+    } catch (_) {
+      return null;
     }
   }
 

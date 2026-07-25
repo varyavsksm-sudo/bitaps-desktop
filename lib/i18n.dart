@@ -128,6 +128,9 @@ const Map<String, String> _kEn = {
   'избранное': 'favorites',
   '🇷🇺 Россия': '🇷🇺 Russia',
   '🌍 зарубежные · скоро': '🌍 international · soon',
+  'прямые серверы': 'direct servers',
+  'обход блокировок · через CDN': 'censorship bypass · via CDN',
+  'Войди в аккаунт — здесь появятся твои серверы': 'Sign in — your servers will appear here',
   // названия локаций серверов (models.dart) — чтобы города/страны переводились в EN
   'Москва': 'Moscow',
   'Санкт-Петербург': 'Saint Petersburg',
