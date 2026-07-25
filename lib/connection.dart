@@ -39,7 +39,7 @@ class ConnectionController extends ChangeNotifier {
   int sessions = 0;
   int _gen = 0; // поколение подключения: гасит «поздние» коллбэки отменённых/сменённых попыток
   Timer? _timer;
-  StreamSubscription<Map<String, dynamic>>? _tunEvents;
+  StreamSubscription<EngineEvent>? _tunEvents;
   double _sessMB = 0;       // накопленный расход за текущую сессию (для «Лимит трафика»)
   bool _trafWarned = false; // предупреждение о большом расходе уже показано в этой сессии
   bool _disposed = false;
@@ -61,7 +61,7 @@ class ConnectionController extends ChangeNotifier {
     if (conn == 1) {
       // отмена во время «Подключение…»: инвалидируем поколение → awaited/отложенный коллбэк отвалится
       _gen++;
-      if (kRealTunnel) await NativeTunnel.disconnect();
+      if (kRealTunnel) { await TunnelEngine.instance.disconnect(); gEngineReal = false; }
       _stopWatch();
       onSpin(false);
       conn = 0;
@@ -74,8 +74,12 @@ class ConnectionController extends ChangeNotifier {
       notifyListeners();
       onSpin(true);
 
-      if (kRealTunnel) {
-        // БОЕВОЙ режим: поднимаем НАСТОЯЩИЙ туннель через нативный движок sing-box.
+      // Боевой режим возможен, только если на этой платформе реально есть движок:
+      // на десктопе — лежащий рядом xray (он умеет и узлы «белого списка»), на мобильных —
+      // нативная сторона. Нет движка → остаёмся в честном демо-режиме, как раньше.
+      final engineKind = TunnelEngine.kind();
+      if (kRealTunnel && engineKind != EngineKind.none) {
+        // БОЕВОЙ режим: поднимаем НАСТОЯЩИЙ туннель.
         // trim + lowercase-схема как в парсере (singboxConfigJson тоже триммит/нормализует): иначе
         // ключ с ведущим пробелом или «VLESS://» гард отверг бы, хотя парсер его разбирает.
         final key = keyOf().trim();
@@ -85,7 +89,7 @@ class ConnectionController extends ChangeNotifier {
         // пускаем все схемы, что умеет singbox_config (не только vless://) — иначе валидный
         // trojan/vmess/ss/hysteria2-ключ ложно отвергался бы «Нужен рабочий VPN-ключ».
         if (!isSub && !kSupportedKeySchemes.any((s) => key.toLowerCase().startsWith(s))) { _fail(gen, tr('Нужен рабочий VPN-ключ')); return; }
-        String cfg;
+        List<SubNode> nodes = const [];
         if (isSub) {
           final sub = await fetchSubscription(key, hwid: hwidOf(), deviceOs: Platform.operatingSystem);
           if (_disposed || gen != _gen) return; // отменили, пока грузилась подписка
@@ -93,57 +97,59 @@ class ConnectionController extends ChangeNotifier {
           // Показываем его текст как есть — он уже написан для пользователя и локализован сервисом.
           if (sub.notice != null && !sub.ok) { _fail(gen, sub.notice!); return; }
           if (sub.error != null) { _fail(gen, sub.error!); return; }
-          if (!sub.ok) {
-            _fail(gen, sub.skipped > 0
+          nodes = TunnelEngine.usableNodes(sub.nodes);
+          if (nodes.isEmpty) {
+            _fail(gen, sub.nodes.isNotEmpty
                 ? tr('Узлы подписки не поддерживаются этой сборкой')
                 : tr('В подписке нет доступных серверов'));
             return;
           }
-          try {
-            cfg = singboxConfigJsonFromNodes(sub.nodes);
-          } catch (e) {
-            _fail(gen, appLang == 'en' ? 'Subscription is broken: $e' : 'Подписка повреждена: $e');
-            return;
-          }
         } else {
-          try {
-            cfg = singboxConfigJson(key); // key уже тримленный
-          } catch (e) {
-            _fail(gen, appLang == 'en' ? 'Key is corrupted: $e' : 'Ключ повреждён: $e');
+          // Одиночный ключ (импортированный вручную) — заворачиваем в такой же узел подписки,
+          // чтобы дальше был один путь подключения для обоих случаев.
+          final one = subNodeFromKey(key);
+          if (one == null) {
+            _fail(gen, appLang == 'en' ? 'Key is corrupted' : 'Ключ повреждён');
             return;
           }
+          nodes = TunnelEngine.usableNodes([one]);
+          if (nodes.isEmpty) { _fail(gen, tr('Этот ключ не поддерживается этой сборкой')); return; }
         }
         try {
-          // таймаут: если нативный движок завис и не вернул ни успех, ни ошибку — не залипаем
+          // таймаут: если движок завис и не вернул ни успех, ни ошибку — не залипаем
           // навсегда в «Подключение…», а честно откатываемся в «выключено» с тостом.
-          await NativeTunnel.connect(cfg, server: serverOf().city)
-              .timeout(const Duration(seconds: 30));
+          await TunnelEngine.instance
+              .connect(nodes, server: serverOf().city)
+              .timeout(const Duration(seconds: 40));
         } on TunnelUnavailable catch (e) {
           _fail(gen, '$e');
           return;
+        } on EngineUnavailable catch (e) {
+          _fail(gen, '$e');
+          return;
         } on TimeoutException {
-          // движок мог зависнуть и подняться уже после таймаута — гасим натив, чтобы не осталось
+          // движок мог зависнуть и подняться уже после таймаута — гасим его, чтобы не осталось
           // «осиротевшего» туннеля при выключенном UI (как ветка disconnect в reset()).
-          if (kRealTunnel) NativeTunnel.disconnect();
+          TunnelEngine.instance.disconnect();
           _fail(gen, appLang == 'en' ? 'Connection timed out' : 'Подключение не удалось — таймаут');
           return;
         } catch (e) {
           _fail(gen, appLang == 'en' ? 'Failed to connect: $e' : 'Не удалось подключиться: $e');
           return;
         }
-        if (_disposed || gen != _gen) { await NativeTunnel.disconnect(); return; } // отменили во время старта
+        if (_disposed || gen != _gen) { await TunnelEngine.instance.disconnect(); return; } // отменили во время старта
+        gEngineReal = true;
         _startSession(down: 0, up: 0);
         _timer = Timer.periodic(const Duration(seconds: 1), (_) {
           if (_disposed) return;
           secs++; _accTraffic(); notifyListeners();
         });
         // РЕАЛЬНАЯ статистика/статус из движка — никаких выдуманных чисел
-        _tunEvents = NativeTunnel.events().listen((e) {
+        _tunEvents = TunnelEngine.instance.events.listen((e) {
           if (_disposed || gen != _gen) return;
-          final st = e['state']?.toString();
-          if (st == 'error' || st == 'disconnected') { _dropped(gen); return; }
-          if (e['down'] is num) down = (e['down'] as num).round();
-          if (e['up'] is num) up = (e['up'] as num).round();
+          if (e.state == 'error' || e.state == 'disconnected') { _dropped(gen); return; }
+          down = e.downKbps;
+          up = e.upKbps;
           notifyListeners();
         // ошибка самого канала (смерть процесса движка вместе с EventChannel) не приходит событием
         // state=='error' — ловим её отдельно, иначе UI навсегда завис бы в «Подключено».
@@ -163,7 +169,7 @@ class ConnectionController extends ChangeNotifier {
       });
     } else {
       _gen++; // отключение инвалидирует любое незавершённое поколение
-      if (kRealTunnel) await NativeTunnel.disconnect();
+      if (kRealTunnel) { await TunnelEngine.instance.disconnect(); gEngineReal = false; }
       _stopWatch();
       onSpin(false);
       conn = 0; secs = 0;
@@ -215,7 +221,7 @@ class ConnectionController extends ChangeNotifier {
     if (_disposed || gen != _gen) return;
     // синхронизируем натив с UI: явно гасим движок, чтобы после обрыва он не остался в
     // полу-поднятом/реконнектящем состоянии (как reset()/disconnect-ветка toggle()).
-    if (kRealTunnel) NativeTunnel.disconnect();
+    if (kRealTunnel) { TunnelEngine.instance.disconnect(); gEngineReal = false; }
     _stopWatch();
     onSpin(false);
     conn = 0; secs = 0;
@@ -230,7 +236,7 @@ class ConnectionController extends ChangeNotifier {
     // боевой режим: гасим и НАСТОЯЩИЙ туннель — иначе после logout трафик продолжал бы идти через
     // движок (reset раньше только обнулял UI). fire-and-forget, как ветка disconnect в toggle().
     // Демо-режим (kRealTunnel=false) туннель не поднимает — там гасить нечего, поведение не меняем.
-    if (kRealTunnel) NativeTunnel.disconnect();
+    if (kRealTunnel) { TunnelEngine.instance.disconnect(); gEngineReal = false; }
     _stopWatch();
     onSpin(false);
     conn = 0; secs = 0;

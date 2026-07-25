@@ -445,32 +445,47 @@ bool isSubscriptionUrl(String value) {
   return seg.length == 2 && seg[0] == 'u' && _kSubToken.hasMatch(seg[1]);
 }
 
-/// Один узел из подписки: как показать пользователю + готовый sing-box outbound.
+/// Один узел из подписки: как показать пользователю + конфиг для каждого движка.
+///
+/// [xray] — СЫРОЙ outbound из подписки: он и есть xray-конфигурация узла, поэтому движок
+/// xray понимает любой узел, включая «белый список» на транспорте xhttp.
+/// [singbox] — тот же узел, переведённый в формат sing-box; null, если этот движок такой
+/// транспорт не умеет (ровно случай xhttp). Так один разбор обслуживает оба движка.
 class SubNode {
   final String remark; // «🇫🇮 Финляндия» — то, что видит пользователь
   final String tag;    // уникальный тег outbound'а внутри конфига
   final String server;
   final int port;
-  final Map<String, dynamic> outbound;
+  final Map<String, dynamic> xray;
+  final Map<String, dynamic>? singbox;
   const SubNode({
     required this.remark,
     required this.tag,
     required this.server,
     required this.port,
-    required this.outbound,
+    required this.xray,
+    this.singbox,
   });
+
+  /// Узел доступен движку sing-box (у xray доступны все).
+  bool get singboxReady => singbox != null;
 }
 
 /// Результат разбора тела подписки.
 class SubParseResult {
+  /// ВСЕ разобранные узлы подписки (для движка xray годятся все).
   final List<SubNode> nodes;
   /// Сервис прислал уведомление вместо узлов («Подписка истекла», «Лимит устройств») —
   /// показываем его пользователю вместо попытки подключения.
   final String? notice;
-  /// Сколько записей движок не понимает (xhttp «БС» и прочее) — для честного сообщения.
+  /// Записи, которые не удалось разобрать вообще (битые), — не путать с узлами,
+  /// которые просто не поддерживает конкретный движок.
   final int skipped;
   const SubParseResult({this.nodes = const [], this.notice, this.skipped = 0});
   bool get hasNodes => nodes.isNotEmpty;
+
+  /// Подмножество, доступное движку sing-box (без xhttp «белого списка»).
+  List<SubNode> get singboxNodes => [for (final n in nodes) if (n.singboxReady) n];
 }
 
 /// Протоколы xray-записей, которые мы вообще рассматриваем как узел.
@@ -497,11 +512,14 @@ SubParseResult parseSubscription(String body, {String? headerNotice}) {
       continue;
     }
     if (proxy == null) continue;
-    final out = _outboundFromXray(proxy);
-    if (out == null) {
-      skipped++; // движок не умеет этот транспорт/протокол (обычно xhttp)
+    final host = _xrayHostPort(proxy);
+    if (host == null) {
+      skipped++; // запись без адреса — разобрать нечего
       continue;
     }
+    // sing-box-версия узла может не получиться (xhttp) — это НЕ причина терять узел:
+    // движку xray он подойдёт как есть.
+    final singbox = _outboundFromXray(proxy);
     var tag = remark.isEmpty ? 'узел ${nodes.length + 1}' : remark;
     if (usedTags.contains(tag)) {
       var n = 2;
@@ -511,13 +529,14 @@ SubParseResult parseSubscription(String body, {String? headerNotice}) {
       tag = '$tag $n';
     }
     usedTags.add(tag);
-    out['tag'] = tag;
+    if (singbox != null) singbox['tag'] = tag;
     nodes.add(SubNode(
       remark: remark.isEmpty ? tag : remark,
       tag: tag,
-      server: (out['server'] ?? '').toString(),
-      port: _int(out['server_port']) ?? 0,
-      outbound: out,
+      server: host.$1,
+      port: host.$2,
+      xray: proxy,
+      singbox: singbox,
     ));
   }
   return SubParseResult(nodes: nodes, notice: notice, skipped: skipped);
@@ -526,12 +545,13 @@ SubParseResult parseSubscription(String body, {String? headerNotice}) {
 /// Полный sing-box конфиг из разобранных узлов подписки: selector «proxy» → urltest «auto»
 /// → сами узлы. Тег proxy сохранён, потому что на него ссылаются route.final и DNS-детуры.
 Map<String, dynamic> singboxConfigFromNodes(
-  List<SubNode> nodes, {
+  List<SubNode> nodesIn, {
   Routing routing = Routing.rules,
   String remoteDns = 'https://1.1.1.1/dns-query',
   String directDns = '8.8.8.8',
   int mtu = 9000,
 }) {
+  final nodes = [for (final n in nodesIn) if (n.singboxReady) n];
   if (nodes.isEmpty) {
     throw const FormatException('в подписке нет узлов, которые понимает движок');
   }
@@ -555,7 +575,7 @@ Map<String, dynamic> singboxConfigFromNodes(
         // не идёт трафик — лишние handshake'и на каждую ноду каждые 3 минуты
         'idle_timeout': '30m',
       },
-      for (final n in nodes) n.outbound,
+      for (final n in nodes) n.singbox!,
       {'type': 'direct', 'tag': 'direct'},
     ],
     'route': _route(routing),
@@ -627,6 +647,20 @@ Future<SubFetchResult> fetchSubscription(
 }
 
 // ---------- разбор одной xray-записи ----------
+
+/// Адрес и порт из xray-outbound (vnext — vless/vmess, servers — trojan/shadowsocks).
+(String, int)? _xrayHostPort(Map<String, dynamic> proxy) {
+  final settings = (proxy['settings'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
+  for (final key in ['vnext', 'servers']) {
+    final list = settings[key];
+    if (list is List && list.isNotEmpty && list.first is Map) {
+      final m = (list.first as Map).cast<String, dynamic>();
+      final host = (m['address'] ?? '').toString();
+      if (host.isNotEmpty) return (host, _int(m['port']) ?? 443);
+    }
+  }
+  return null;
+}
 
 Map<String, dynamic>? _proxyOutboundOf(dynamic outbounds) {
   if (outbounds is! List) return null;

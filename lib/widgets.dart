@@ -133,8 +133,8 @@ extension ShellWidgets on ShellState {
   // в демо (kRealTunnel=false) подключённое состояние НЕ показываем зелёным «защищено» —
   // это ложный сигнал безопасности без реального туннеля. Демо → нейтральный янтарный «демо».
   Widget _shieldPill(bool on) {
-    final green = on && kRealTunnel;
-    final demo = on && !kRealTunnel;
+    final green = on && gEngineReal;
+    final demo = on && !gEngineReal;
     final col = green ? C.ok : (demo ? C.warn : C.muted);
     final label = green ? tr('защищено') : (demo ? tr('демо') : tr('не защищено'));
     return Container(

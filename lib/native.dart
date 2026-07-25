@@ -203,7 +203,7 @@ extension ShellNative on ShellState {
         toggle(); // тот же ConnectionController.toggle, что у большой кнопки
         _toast(conn == 0
             ? tr('Отключаю…')
-            : (kRealTunnel ? tr('Подключаю…') : tr('Демо-подключение…')));
+            : (gEngineReal || TunnelEngine.kind() != EngineKind.none ? tr('Подключаю…') : tr('Демо-подключение…')));
       });
       _registeredHotkey = hk;
     } catch (e) {

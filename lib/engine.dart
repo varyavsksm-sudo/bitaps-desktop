@@ -1,0 +1,158 @@
+// Единая точка входа к движку туннеля: контроллер подключения не должен знать, чем именно
+// поднят туннель на этой платформе.
+//
+// Две реализации:
+//   • ДЕСКТОП (Windows/macOS/Linux) — рядом лежащий xray-core как процесс + системный прокси.
+//     xray понимает ВСЕ узлы подписки, включая «белый список» на транспорте xhttp.
+//   • ПЛАТФОРМЫ С НАТИВНОЙ СТОРОНОЙ (Android/iOS) — движок в платформенном коде через
+//     MethodChannel (native_tunnel.dart). Там сейчас sing-box, поэтому узлы «БС» ему недоступны:
+//     их отдаём только там, где движок их понимает.
+// Если движка нет — честно говорим об этом, а не рисуем фейковое «подключено».
+
+import 'dart:async';
+import 'dart:io';
+
+import 'desktop_engine.dart';
+import 'native_tunnel.dart';
+import 'singbox_config.dart';
+import 'xray_config.dart';
+
+/// Чем поднимаем туннель на этой платформе.
+enum EngineKind {
+  /// Процесс xray рядом с приложением (десктоп). Умеет все узлы, включая БС.
+  desktopXray,
+
+  /// Нативная сторона платформы (Android/iOS). Сейчас sing-box → без БС.
+  native,
+
+  /// Движка нет — туннель поднять нечем.
+  none,
+}
+
+/// Состояние туннеля для интерфейса.
+class EngineEvent {
+  final String state; // connected | disconnected | error
+  final int upKbps;
+  final int downKbps;
+  final String? message;
+  const EngineEvent(this.state, {this.upKbps = 0, this.downKbps = 0, this.message});
+}
+
+class TunnelEngine {
+  TunnelEngine._();
+  static final TunnelEngine instance = TunnelEngine._();
+
+  XrayProcess? _proc;
+  int? _metricsPort;
+  Timer? _statsTimer;
+  (int, int)? _lastTotals;
+  final StreamController<EngineEvent> _events = StreamController<EngineEvent>.broadcast();
+
+  Stream<EngineEvent> get events => _events.stream;
+
+  /// Какой движок доступен ЗДЕСЬ И СЕЙЧАС (для десктопа — реально ли лежит бинарь).
+  static EngineKind kind() {
+    if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+      return XrayBinary.locate() != null ? EngineKind.desktopXray : EngineKind.none;
+    }
+    // На Android/iOS наличие нативной стороны проверяется только попыткой вызова —
+    // считаем, что она есть, и честно падаем с TunnelUnavailable, если нет.
+    if (Platform.isAndroid || Platform.isIOS) return EngineKind.native;
+    return EngineKind.none;
+  }
+
+  /// Узлы, которые движок этой платформы реально умеет поднять.
+  static List<SubNode> usableNodes(List<SubNode> all) =>
+      kind() == EngineKind.desktopXray ? all : [for (final n in all) if (n.singboxReady) n];
+
+  /// Доступен ли узел «белого списка» (xhttp) на этой платформе.
+  static bool get supportsWhitelist => kind() == EngineKind.desktopXray;
+
+  /// Поднять туннель по узлам подписки. [onlyTag] — если пользователь выбрал сервер вручную.
+  /// Бросает [EngineUnavailable] / [TunnelUnavailable] с текстом для пользователя.
+  Future<void> connect(List<SubNode> nodes, {String? onlyTag, String server = ''}) async {
+    final usable = usableNodes(nodes);
+    if (usable.isEmpty) {
+      throw EngineUnavailable('в подписке нет узлов, поддерживаемых этой сборкой');
+    }
+    switch (kind()) {
+      case EngineKind.desktopXray:
+        await _connectDesktop(usable, onlyTag);
+        return;
+      case EngineKind.native:
+        // Нативной стороне отдаём sing-box конфиг — формат, который она ожидает.
+        await NativeTunnel.connect(singboxConfigJsonFromNodes(usable), server: server);
+        return;
+      case EngineKind.none:
+        throw EngineUnavailable('VPN-движок не установлен в этой сборке');
+    }
+  }
+
+  Future<void> _connectDesktop(List<SubNode> nodes, String? onlyTag) async {
+    await _stopDesktop(); // повторный connect не должен плодить процессы
+    final bin = XrayBinary.locate();
+    if (bin == null) throw EngineUnavailable('VPN-движок не найден в сборке');
+    // Порты берём свободные: фиксированные конфликтуют со вторым запуском и чужими клиентами.
+    final socksPort = await _freePort();
+    final metricsPort = await _freePort();
+    final cfg = xrayConfigJsonFromNodes(nodes, only: onlyTag, socksPort: socksPort, metricsPort: metricsPort);
+    final proc = await XrayProcess.start(cfg, socksPort: socksPort, binaryPath: bin);
+    final proxyOk = await SystemProxy.enable(socksPort);
+    if (!proxyOk) {
+      await proc.stop();
+      throw EngineUnavailable('не удалось включить системный прокси');
+    }
+    _proc = proc;
+    _metricsPort = metricsPort;
+    _lastTotals = null;
+    _events.add(const EngineEvent('connected'));
+    // Реальные счётчики движка раз в секунду → скорость в интерфейсе.
+    _statsTimer = Timer.periodic(const Duration(seconds: 1), (_) => _pollStats());
+  }
+
+  /// Пинги узлов из последнего замера движка (тег outbound'а → мс; null — узел не отвечает).
+  Map<String, int?> nodePings = const {};
+
+  Future<void> _pollStats() async {
+    final port = _metricsPort;
+    if (port == null || _proc == null) return;
+    final r = await XrayStats.read(port);
+    if (r == null) return;
+    nodePings = r.pings;
+    final prev = _lastTotals;
+    _lastTotals = (r.up, r.down);
+    if (prev == null) return;
+    // байты за секунду → килобиты в секунду (интерфейс ждёт kbps, см. connection.dart)
+    final up = ((r.up - prev.$1) * 8 / 1000).round();
+    final down = ((r.down - prev.$2) * 8 / 1000).round();
+    _events.add(EngineEvent('connected', upKbps: up < 0 ? 0 : up, downKbps: down < 0 ? 0 : down));
+  }
+
+  Future<void> disconnect() async {
+    if (kind() == EngineKind.native) {
+      await NativeTunnel.disconnect();
+      return;
+    }
+    await _stopDesktop();
+  }
+
+  Future<void> _stopDesktop() async {
+    _statsTimer?.cancel();
+    _statsTimer = null;
+    // Системный прокси снимаем ПЕРВЫМ: если упасть между шагами, лучше остаться без прокси,
+    // чем с прокси в уже мёртвый порт (иначе у пользователя пропадёт интернет).
+    await SystemProxy.disable();
+    final p = _proc;
+    _proc = null;
+    _metricsPort = null;
+    _lastTotals = null;
+    if (p != null) await p.stop();
+  }
+
+  static Future<int> _freePort() async {
+    final s = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final port = s.port;
+    await s.close();
+    return port;
+  }
+}

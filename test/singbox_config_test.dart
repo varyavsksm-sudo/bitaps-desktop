@@ -193,16 +193,20 @@ void main() {
   });
 
   group('подписка — разбор тела', () {
-    test('xhttp-узлы пропускаются, Reality-узлы разбираются', () {
+    test('xhttp-узел достаётся xray, sing-box получает только свои', () {
       final r = parseSubscription(_subBody);
-      // 3 записи: одна xhttp (движку не по зубам) + две Reality
-      expect(r.nodes.length, 2);
-      expect(r.skipped, 1);
+      // 3 записи: одна xhttp («БС») + две Reality. Для xray годятся все три,
+      // для sing-box — только две: транспорта xhttp у него нет.
+      expect(r.nodes.length, 3);
+      expect(r.singboxNodes.length, 2);
+      expect(r.nodes.first.singboxReady, false); // «БС» на xhttp
+      expect(r.nodes.first.xray['streamSettings']['network'], 'xhttp');
+      expect(r.skipped, 0);
       expect(r.notice, isNull);
       expect(r.hasNodes, true);
-      expect(r.nodes.map((n) => n.tag).toList(), ['🇫🇮 Финляндия', '🇳🇱 Нидерланды']);
+      expect(r.singboxNodes.map((n) => n.tag).toList(), ['🇫🇮 Финляндия', '🇳🇱 Нидерланды']);
 
-      final fi = r.nodes.first.outbound;
+      final fi = r.singboxNodes.first.singbox!;
       expect(fi['type'], 'vless');
       expect(fi['server'], '212.237.219.223');
       expect(fi['server_port'], 8443);
@@ -226,21 +230,22 @@ void main() {
       expect(r.notice, 'Лимит устройств исчерпан');
     });
 
-    test('Reality без публичного ключа пропускается, а не рушит конфиг', () {
+    test('Reality без публичного ключа не попадает в sing-box конфиг', () {
       const body = '''
 [{"remarks":"битый","outbounds":[{"tag":"proxy","protocol":"vless",
   "settings":{"vnext":[{"address":"1.2.3.4","port":443,"users":[{"id":"u"}]}]},
   "streamSettings":{"security":"reality","network":"tcp","realitySettings":{"serverName":"ya.ru"}}}]}]''';
       final r = parseSubscription(body);
-      expect(r.hasNodes, false);
-      expect(r.skipped, 1);
+      // узел разобран (xray попробует), но для sing-box он невалиден → в его конфиг не попадёт
+      expect(r.singboxNodes, isEmpty);
+      expect(() => singboxConfigFromNodes(r.nodes), throwsFormatException);
     });
 
     test('одинаковые remarks дают РАЗНЫЕ теги (иначе конфиг невалиден)', () {
       final body = _subBody.replaceAll('🇳🇱 Нидерланды', '🇫🇮 Финляндия');
       final r = parseSubscription(body);
-      expect(r.nodes.length, 2);
-      expect(r.nodes[0].tag == r.nodes[1].tag, false);
+      expect(r.nodes.length, 3);
+      expect(r.nodes.map((n) => n.tag).toSet().length, 3);
     });
 
     test('не-массив в теле → FormatException', () {
@@ -295,8 +300,8 @@ void main() {
       final res = await fetchSubscription('https://origin.bit-core.online/u/abcdefghij',
           hwid: 'abcdef0123456789', deviceOs: 'linux', client: client);
       expect(res.ok, true);
-      expect(res.nodes.length, 2);
-      expect(res.skipped, 1);
+      expect(res.nodes.length, 3);
+      expect(res.skipped, 0);
       expect(sentHwid, 'abcdef0123456789'); // без него сервис не посчитает устройство
       expect(res.expiresAt?.millisecondsSinceEpoch, 1800000000 * 1000);
     });

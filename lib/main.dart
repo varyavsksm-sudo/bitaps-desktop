@@ -12,6 +12,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'singbox_config.dart';
+import 'xray_config.dart';
+import 'engine.dart';
+import 'desktop_engine.dart';
 import 'native_tunnel.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:tray_manager/tray_manager.dart';
@@ -366,7 +369,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
           ? tr('Отключено')
           : conn == 1
               ? tr('Подключение…')
-              : (kRealTunnel ? tr('Подключено') : tr('Демо-режим'));
+              : (gEngineReal ? tr('Подключено') : tr('Демо-режим'));
       // дни подписки в меню (если вошёл и знаем срок)
       final days = _trayDaysLeft();
       final subLabel = !loggedIn

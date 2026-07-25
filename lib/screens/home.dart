@@ -42,7 +42,7 @@ extension ShellHome on ShellState {
         const SizedBox(height: 4),
         Center(child: Text(
           // в демо (kRealTunnel=false) НЕ заявляем «Подключено/под защитой» — реального туннеля нет
-          conn == 0 ? tr('Отключено') : conn == 1 ? tr('Подключение…') : (kRealTunnel ? tr('Подключено') : tr('Демо-режим')),
+          conn == 0 ? tr('Отключено') : conn == 1 ? tr('Подключение…') : (gEngineReal ? tr('Подключено') : tr('Демо-режим')),
           style: disp(22, w: FontWeight.w700, c: connected ? C.accent : (conn == 1 ? C.warn : C.text)))),
         const SizedBox(height: 6),
         Center(child: Text(connected ? hms : '00:00:00',
@@ -211,7 +211,7 @@ extension ShellHome on ShellState {
       label: connected ? tr('Отключить') : tr('Подключиться'),
       // value повторяет видимый статус (строка 41), включая honesty-гейт: в демо скринридер
       // тоже слышит «Демо-режим», а не «Подключено».
-      value: conn == 0 ? tr('Отключено') : conn == 1 ? tr('Подключение…') : (kRealTunnel ? tr('Подключено') : tr('Демо-режим')),
+      value: conn == 0 ? tr('Отключено') : conn == 1 ? tr('Подключение…') : (gEngineReal ? tr('Подключено') : tr('Демо-режим')),
       onTap: toggle,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,

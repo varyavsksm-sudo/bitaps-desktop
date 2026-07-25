@@ -9,7 +9,13 @@ const kSupport = 'https://t.me/bitapssupport';
 // Ставить true, когда на платформе подключена нативная сторона (Apple: PacketTunnelProvider +
 // Libbox.xcframework; Android: VpnService + libbox). См. TUNNEL.md. При true без нативной
 // стороны connect() честно бросит TunnelUnavailable — фейкового «Подключено» не будет.
-const bool kRealTunnel = false;
+const bool kRealTunnel = true;
+
+// Настоящий ли туннель поднят ПРЯМО СЕЙЧАС. kRealTunnel — лишь разрешение пытаться; фактически
+// движок есть не на каждой платформе (на десктопе рядом лежит xray, на мобильных нужна нативная
+// сторона). Интерфейс красит «защищено» зелёным только по этому флагу, чтобы демо-сессия никогда
+// не выглядела как реальная защита.
+bool gEngineReal = false;
 // Базовый URL edge-функций (functions/v1) — вынесен, чтобы не повторять один и тот же префикс
 // в каждом эндпоинте. Значения эндпоинтов идентичны прежним полным литералам.
 const kFnBase = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/';

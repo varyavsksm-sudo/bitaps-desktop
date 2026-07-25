@@ -37,6 +37,21 @@ jobs:
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: flutter build windows --release --dart-define=BUILD_NUMBER=${{ github.run_number }}
+      # VPN-движок кладём РЯДОМ с исполняемым файлом: приложение ищет его там (desktop_engine.dart).
+      # Версия и контрольная сумма закреплены (см. pkg/THIRD-PARTY.md) — молча подменённый бинарь
+      # движка означал бы чужой код в туннеле пользователя.
+      - name: VPN-движок (xray) в сборку
+        shell: pwsh
+        run: |
+          $ver = "v26.3.27"
+          $sha = "d004c39288ce9ada487c6f398c7c545f7d749e44bdfdd59dbc9f865afba4e1ad"
+          Invoke-WebRequest "https://github.com/XTLS/Xray-core/releases/download/$ver/Xray-windows-64.zip" -OutFile xray.zip
+          $got = (Get-FileHash xray.zip -Algorithm SHA256).Hash.ToLower()
+          if ($got -ne $sha) { throw "xray checksum mismatch: $got" }
+          Expand-Archive xray.zip -DestinationPath xray-tmp -Force
+          Copy-Item xray-tmp\xray.exe build\windows\x64\runner\Release\xray.exe
+          Copy-Item pkg\THIRD-PARTY.md build\windows\x64\runner\Release\THIRD-PARTY.md
+          if (-not (Test-Path build\windows\x64\runner\Release\xray.exe)) { throw "xray.exe not packaged" }
       - name: Portable zip
         run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath bitaps-windows-x64.zip -Force
       - name: Installer (Inno Setup)
@@ -66,6 +81,17 @@ jobs:
       - run: flutter create --org com.bitapsvpn --platforms=linux --project-name bitaps_vpn .
       - run: flutter pub get
       - run: flutter build linux --release --dart-define=BUILD_NUMBER=${{ github.run_number }}
+      # тот же движок для Linux: в bundle → попадает и в tar.gz, и в AppImage
+      - name: VPN-движок (xray) в сборку
+        run: |
+          ver=v26.3.27
+          sha=23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae
+          curl -sSL -o xray.zip "https://github.com/XTLS/Xray-core/releases/download/$ver/Xray-linux-64.zip"
+          echo "$sha  xray.zip" | sha256sum -c -
+          unzip -o -q xray.zip -d xray-tmp
+          install -m 0755 xray-tmp/xray build/linux/x64/release/bundle/xray
+          cp pkg/THIRD-PARTY.md build/linux/x64/release/bundle/THIRD-PARTY.md
+          build/linux/x64/release/bundle/xray version | head -1
       - name: Portable tar.gz
         run: tar -czf bitaps-linux-x64.tar.gz -C build/linux/x64/release/bundle .
       - name: AppImage
