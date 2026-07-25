@@ -2,6 +2,13 @@ part of '../main.dart';
 
 // ============================ HOME (статус / подключение) ============================
 extension ShellHome on ShellState {
+  // Честная подпись охвата защиты: на телефоне туннель забирает весь трафик устройства,
+  // на десктопе поднимается системный прокси — под защитой браузеры и приложения, которые
+  // его уважают. Обещать «весь трафик» там, где это неправда, нельзя.
+  String _protectionScope() => TunnelEngine.kind() == EngineKind.desktopXray
+      ? tr('под защитой — браузеры и приложения с системным прокси')
+      : tr('под защитой');
+
   // ---------------- HOME ----------------
   // Semantics: баннер — одна кнопка для скринридера (обе строки читаются одним узлом).
   Widget _updateBanner() => Semantics(
@@ -50,7 +57,7 @@ extension ShellHome on ShellState {
             color: connected ? C.accentSoft : C.muted, letterSpacing: 2))),
         const SizedBox(height: 4),
         Center(child: Text(
-          conn == 0 ? tr('нажми на кнопку') : conn == 1 ? tr('устанавливаем соединение…') : (kRealTunnel ? tr('под защитой') : tr('демо — без реального туннеля')),
+          conn == 0 ? tr('нажми на кнопку') : conn == 1 ? tr('устанавливаем соединение…') : (gEngineReal ? _protectionScope() : tr('демо — без реального туннеля')),
           style: mono(12))),
         const SizedBox(height: 20),
         Row(children: [

@@ -100,6 +100,8 @@ const Map<String, String> _kEn = {
   'Подключение…': 'Connecting…',
   'Подключено': 'Connected',
   'под защитой': "you're protected",
+  'под защитой — браузеры и приложения с системным прокси':
+      "protected — browsers and apps that use the system proxy",
   'Демо-режим': 'Demo mode',
   'демо — без реального туннеля': 'demo — no real tunnel',
   'демо': 'demo',
