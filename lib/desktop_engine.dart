@@ -203,15 +203,19 @@ class SystemProxy {
     try {
       if (Platform.isMacOS) {
         _macServices = await _macNetworkServices();
-        for (final s in _macServices) {
-          await Process.run('/usr/sbin/networksetup', ['-setsocksfirewallproxy', s, '127.0.0.1', '$socksPort']);
-          await Process.run('/usr/sbin/networksetup', ['-setsocksfirewallproxystate', s, 'on']);
-          await Process.run('/usr/sbin/networksetup', ['-setwebproxy', s, '127.0.0.1', '$httpPort']);
-          await Process.run('/usr/sbin/networksetup', ['-setwebproxystate', s, 'on']);
-          await Process.run('/usr/sbin/networksetup', ['-setsecurewebproxy', s, '127.0.0.1', '$httpPort']);
-          await Process.run('/usr/sbin/networksetup', ['-setsecurewebproxystate', s, 'on']);
-        }
-        _enabled = _macServices.isNotEmpty && await _macApplied(socksPort);
+        if (_macServices.isEmpty) return false;
+        final cmds = <List<String>>[
+          for (final s in _macServices) ...[
+            ['-setsocksfirewallproxy', s, '127.0.0.1', '$socksPort'],
+            ['-setsocksfirewallproxystate', s, 'on'],
+            ['-setwebproxy', s, '127.0.0.1', '$httpPort'],
+            ['-setwebproxystate', s, 'on'],
+            ['-setsecurewebproxy', s, '127.0.0.1', '$httpPort'],
+            ['-setsecurewebproxystate', s, 'on'],
+          ],
+        ];
+        await _macRun(cmds);
+        _enabled = await _macApplied(socksPort);
         return _enabled;
       }
       if (Platform.isWindows) {
@@ -248,11 +252,14 @@ class SystemProxy {
     _enabled = false;
     try {
       if (Platform.isMacOS) {
-        for (final s in _macServices) {
-          await Process.run('/usr/sbin/networksetup', ['-setsocksfirewallproxystate', s, 'off']);
-          await Process.run('/usr/sbin/networksetup', ['-setwebproxystate', s, 'off']);
-          await Process.run('/usr/sbin/networksetup', ['-setsecurewebproxystate', s, 'off']);
-        }
+        final services = _macServices.isNotEmpty ? _macServices : await _macNetworkServices();
+        await _macRun([
+          for (final s in services) ...[
+            ['-setsocksfirewallproxystate', s, 'off'],
+            ['-setwebproxystate', s, 'off'],
+            ['-setsecurewebproxystate', s, 'off'],
+          ],
+        ]);
         _macServices = [];
         return;
       }
@@ -268,6 +275,29 @@ class SystemProxy {
     } catch (_) {/* при выключении ошибки глотаем: главное — не мешать выходу */}
   }
 
+
+
+  /// Выполнить пачку команд networksetup. Сначала пробуем как есть: если приложение уже
+  /// запущено с нужными правами, лишний запрос пароля не нужен. Не получилось — повторяем
+  /// ОДНИМ вызовом с правами администратора, чтобы система спросила пароль один раз на всю
+  /// операцию, а не на каждую команду. (Смена сетевых настроек в macOS требует root.)
+  static Future<void> _macRun(List<List<String>> cmds) async {
+    var allOk = true;
+    for (final args in cmds) {
+      final r = await Process.run('/usr/sbin/networksetup', args);
+      if (r.exitCode != 0) { allOk = false; break; }
+    }
+    if (allOk) return;
+    final script = cmds.map((a) => '/usr/sbin/networksetup ${a.map(_shellQuote).join(' ')}').join(' ; ');
+    // экранирование для строки AppleScript: обратный слэш и кавычки
+    final applescript = script.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+    await Process.run('osascript', [
+      '-e',
+      'do shell script "$applescript" with administrator privileges',
+    ]);
+  }
+
+  static String _shellQuote(String a) => "'${a.replaceAll("'", r"'\''")}'";
 
   // ── подтверждение по факту ──
   // Команды настройки прокси возвращают успех и там, где их результат никто не читает

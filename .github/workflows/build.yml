@@ -191,21 +191,64 @@ jobs:
             bitaps.apk
             bitaps-armv7.apk
 
-# ─────────────────────────────────────────────────────────────────────────────
-# macOS-джоба НАМЕРЕННО не добавлена. Почему (чтобы не сломать рабочий CI):
-#   • Папка macos/ (как и windows/linux/android) в .gitignore и восстанавливается через
-#     `flutter create --platforms=macos .`. Но локальная macos/ несёт кастомную нативную
-#     сторону туннеля (PacketTunnelProvider/entitlements), которой НЕТ в репозитории —
-#     `flutter create` сгенерил бы ванильный каркас БЕЗ неё. То есть Apple-путь (нативный
-#     туннель) такой сборкой всё равно не проверился бы, только пустой демо-каркас.
-#   • `flutter create` здесь — деструктивный шаг (перегенерация каркаса); трогать его без
-#     полной уверенности запрещено.
-#   • По принятому пайплайну (см. заметку «bitaps release pipeline») macOS собирается ВРУЧНУЮ
-#     (dmg + подпись через API), а не в этом workflow.
-# Если когда-нибудь понадобится CI-проверка ванильной macOS-сборки без подписи — добавить
-# отдельную джобу на `runs-on: macos-latest`:
-#   flutter config --enable-macos-desktop
-#   flutter create --org com.bitapsvpn --platforms=macos --project-name bitaps_vpn .
-#   flutter pub get && flutter build macos --release
-# — предварительно проверив, что перегенерация каркаса не затрёт нужную нативную сторону.
-# ─────────────────────────────────────────────────────────────────────────────
+
+  # macOS: раздаём DMG напрямую (без App Store), поэтому подпись — ad-hoc. Пользователь один раз
+  # разрешает запуск в «Системные настройки → Конфиденциальность и безопасность».
+  # Песочница ОТКЛЮЧЕНА намеренно: приложению нужно запускать вложенный движок и менять
+  # системный прокси — под sandbox это невозможно.
+  macos:
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter --version
+      - run: flutter config --enable-macos-desktop
+      - run: flutter create --org com.bitapsvpn --platforms=macos --project-name bitaps_vpn .
+      - name: Отключить песочницу (иначе движок не запустится)
+        run: |
+          for F in macos/Runner/Release.entitlements macos/Runner/DebugProfile.entitlements; do
+            /usr/libexec/PlistBuddy -c "Set :com.apple.security.app-sandbox false" "$F" 2>/dev/null               || /usr/libexec/PlistBuddy -c "Add :com.apple.security.app-sandbox bool false" "$F"
+            /usr/libexec/PlistBuddy -c "Set :com.apple.security.network.client true" "$F" 2>/dev/null               || /usr/libexec/PlistBuddy -c "Add :com.apple.security.network.client bool true" "$F"
+          done
+          grep -A1 app-sandbox macos/Runner/Release.entitlements
+      - run: flutter pub get
+      - run: flutter build macos --release --dart-define=BUILD_NUMBER=${{ github.run_number }}
+      - name: VPN-движок (xray) в бандл — универсальный бинарь arm64+x86_64
+        run: |
+          ver=v26.3.27
+          sha_arm=2e93a67e8aa1936ecefb307e120830fcbd4c643ab9b1c46a2d0838d5f8409eaf
+          sha_x64=f5b0471d3459eff1b82e48af0aeac186abcc3298210070afbbbd8437a4e8b203
+          curl -sSL -o xray-arm.zip "https://github.com/XTLS/Xray-core/releases/download/$ver/Xray-macos-arm64-v8a.zip"
+          curl -sSL -o xray-x64.zip "https://github.com/XTLS/Xray-core/releases/download/$ver/Xray-macos-64.zip"
+          echo "$sha_arm  xray-arm.zip" | shasum -a 256 -c -
+          echo "$sha_x64  xray-x64.zip" | shasum -a 256 -c -
+          unzip -o -q xray-arm.zip -d xray-arm && unzip -o -q xray-x64.zip -d xray-x64
+          APP=build/macos/Build/Products/Release/bitaps_vpn.app
+          dest="$APP/Contents/MacOS"
+          # приложение Flutter собирается универсальным — движок тоже делаем универсальным,
+          # иначе на Intel-маках он просто не запустится
+          lipo -create xray-arm/xray xray-x64/xray -output "$dest/xray"
+          chmod 0755 "$dest/xray"
+          cp xray-arm/geoip.dat xray-arm/geosite.dat "$dest/"
+          cp xray-arm/LICENSE "$APP/Contents/Resources/XRAY-LICENSE.txt"
+          lipo -info "$dest/xray"
+          "$dest/xray" version | head -1
+      - name: Подпись (ad-hoc) и DMG
+        run: |
+          APP=build/macos/Build/Products/Release/bitaps_vpn.app
+          # вложенный бинарь подписываем ПЕРВЫМ: hardened runtime не запустит неподписанного ребёнка
+          codesign --force --timestamp=none --sign - "$APP/Contents/MacOS/xray"
+          codesign --force --deep --timestamp=none --sign - "$APP"
+          codesign --verify --deep --verbose=2 "$APP"
+          mkdir -p dmg && cp -R "$APP" dmg/ && ln -sf /Applications dmg/Applications
+          hdiutil create -volname "bitaps VPN" -srcfolder dmg -ov -format UDZO bitaps-macos.dmg
+          ls -la bitaps-macos.dmg
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Последняя сборка
+          files: bitaps-macos.dmg
