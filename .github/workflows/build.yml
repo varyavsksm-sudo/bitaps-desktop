@@ -143,9 +143,9 @@ jobs:
           grep -q 'android:allowBackup="false"' android/app/src/main/AndroidManifest.xml && echo "allowBackup ok" || (echo "allowBackup MISSING" && exit 1)
           sed -i.bak 's/minSdk = flutter.minSdkVersion/minSdk = 24/; s/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' android/app/build.gradle.kts 2>/dev/null || true
           sed -i.bak 's/minSdk = flutter.minSdkVersion/minSdk = 24/; s/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' android/app/build.gradle 2>/dev/null || true
-          # VPN-плагин компилируется против API 35 — иначе Gradle падает на «compiled against API 35»
-          sed -i.bak 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/' android/app/build.gradle.kts 2>/dev/null || true
-          sed -i.bak 's/compileSdk flutter.compileSdkVersion/compileSdk 35/' android/app/build.gradle 2>/dev/null || true
+          # compileSdk НЕ фиксируем: шаблон Flutter подставляет актуальный (сейчас 36), а он выше
+          # требований и VPN-плагина (35), и остальных плагинов (app_links/shared_preferences → 36).
+          # Жёсткая цифра здесь уже ломала сборку: занижала compileSdk до 35.
           # Манифест VPN-плагина приносит READ_EXTERNAL_STORAGE — чувствительное разрешение,
           # которое нам не нужно и которое пришлось бы обосновывать в Google Play. Убираем слиянием.
           M=android/app/src/main/AndroidManifest.xml

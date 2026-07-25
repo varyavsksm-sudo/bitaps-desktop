@@ -211,7 +211,7 @@ class SystemProxy {
           await Process.run('/usr/sbin/networksetup', ['-setsecurewebproxy', s, '127.0.0.1', '$httpPort']);
           await Process.run('/usr/sbin/networksetup', ['-setsecurewebproxystate', s, 'on']);
         }
-        _enabled = _macServices.isNotEmpty;
+        _enabled = _macServices.isNotEmpty && await _macApplied(socksPort);
         return _enabled;
       }
       if (Platform.isWindows) {
@@ -221,8 +221,8 @@ class SystemProxy {
         final value = 'http=127.0.0.1:$httpPort;https=127.0.0.1:$httpPort;socks=127.0.0.1:$socksPort';
         await Process.run('reg', ['add', key, '/v', 'ProxyServer', '/t', 'REG_SZ', '/d', value, '/f']);
         await Process.run('reg', ['add', key, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', '1', '/f']);
-        _enabled = true;
-        return true;
+        _enabled = await _winApplied(httpPort);
+        return _enabled;
       }
       if (Platform.isLinux) {
         // GNOME/GTK-окружения читают gsettings; на прочих DE пользователь настраивает сам.
@@ -231,15 +231,20 @@ class SystemProxy {
           await Process.run('gsettings', ['set', 'org.gnome.system.proxy.${e.key}', 'host', '127.0.0.1']);
           await Process.run('gsettings', ['set', 'org.gnome.system.proxy.${e.key}', 'port', '${e.value}']);
         }
-        _enabled = true;
-        return true;
+        // На KDE и прочих не-GNOME средах команды проходят, но настройку никто не читает —
+        // объявлять «защищено» в этом случае нельзя, поэтому проверяем чтением.
+        _enabled = await _linuxApplied(socksPort);
+        return _enabled;
       }
     } catch (_) {/* ниже вернём false — вызывающий честно скажет, что прокси не встал */}
     return false;
   }
 
+  /// Снять системный прокси. Намеренно НЕ смотрим на флаг в памяти: после падения приложения
+  /// (или его убийства) флаг сброшен, а прокси в системе остался — это ровно тот случай, когда
+  /// уборка нужнее всего. Чужие настройки не трогаем: снимаем, только если прокси указывает на
+  /// локальный адрес, то есть это наш.
   static Future<void> disable() async {
-    if (!_enabled) return;
     _enabled = false;
     try {
       if (Platform.isMacOS) {
@@ -261,6 +266,71 @@ class SystemProxy {
         return;
       }
     } catch (_) {/* при выключении ошибки глотаем: главное — не мешать выходу */}
+  }
+
+
+  // ── подтверждение по факту ──
+  // Команды настройки прокси возвращают успех и там, где их результат никто не читает
+  // (KDE вместо GNOME, macOS без прав администратора). Поэтому после записи перечитываем.
+  static Future<bool> _macApplied(int socksPort) async {
+    for (final svc in _macServices) {
+      final r = await Process.run('/usr/sbin/networksetup', ['-getsocksfirewallproxy', svc]);
+      final out = (r.stdout ?? '').toString();
+      if (out.contains('Enabled: Yes') && out.contains('$socksPort')) return true;
+    }
+    return false;
+  }
+
+  static Future<bool> _winApplied(int httpPort) async {
+    const key = r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings';
+    final r = await Process.run('reg', ['query', key, '/v', 'ProxyServer']);
+    return (r.stdout ?? '').toString().contains('127.0.0.1:$httpPort');
+  }
+
+  static Future<bool> _linuxApplied(int socksPort) async {
+    final mode = await Process.run('gsettings', ['get', 'org.gnome.system.proxy', 'mode']);
+    if (!(mode.stdout ?? '').toString().contains('manual')) return false;
+    final port = await Process.run('gsettings', ['get', 'org.gnome.system.proxy.socks', 'port']);
+    return (port.stdout ?? '').toString().trim() == '$socksPort';
+  }
+
+  /// Остался ли в системе НАШ прокси (указывает на localhost) — вызывается на старте
+  /// приложения, чтобы прибрать за прошлым упавшим запуском.
+  static Future<bool> looksOurs() async {
+    try {
+      if (Platform.isWindows) {
+        const key = r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings';
+        final en = await Process.run('reg', ['query', key, '/v', 'ProxyEnable']);
+        if (!(en.stdout ?? '').toString().contains('0x1')) return false;
+        final srv = await Process.run('reg', ['query', key, '/v', 'ProxyServer']);
+        return (srv.stdout ?? '').toString().contains('127.0.0.1');
+      }
+      if (Platform.isMacOS) {
+        for (final svc in await _macNetworkServices()) {
+          final r = await Process.run('/usr/sbin/networksetup', ['-getsocksfirewallproxy', svc]);
+          final out = (r.stdout ?? '').toString();
+          if (out.contains('Enabled: Yes') && out.contains('127.0.0.1')) {
+            _macServices = [svc];
+            return true;
+          }
+        }
+        return false;
+      }
+      if (Platform.isLinux) {
+        final mode = await Process.run('gsettings', ['get', 'org.gnome.system.proxy', 'mode']);
+        if (!(mode.stdout ?? '').toString().contains('manual')) return false;
+        final host = await Process.run('gsettings', ['get', 'org.gnome.system.proxy.socks', 'host']);
+        return (host.stdout ?? '').toString().contains('127.0.0.1');
+      }
+    } catch (_) {/* не смогли прочитать — считаем, что чужого не трогаем */}
+    return false;
+  }
+
+  /// Прибраться на старте приложения: если в системе висит наш прокси от прошлой сессии
+  /// (падение/убийство процесса), снимаем его — иначе у пользователя «нет интернета».
+  static Future<void> cleanupStale() async {
+    if (!(Platform.isWindows || Platform.isMacOS || Platform.isLinux)) return;
+    if (await looksOurs()) await disable();
   }
 
   /// Сетевые сервисы macOS (Wi-Fi, Ethernet…), кроме отключённых (строки со «*»).

@@ -1,0 +1,30 @@
+[
+ {"remarks":"🛡️ Нидерланды · БС",
+  "outbounds":[
+   {"tag":"proxy","protocol":"vless",
+    "settings":{"vnext":[{"address":"cdn2.bit-core.online","port":443,
+      "users":[{"id":"11111111-2222-3333-4444-555555555555","encryption":"none"}]}]},
+    "streamSettings":{"network":"xhttp","security":"tls",
+      "tlsSettings":{"serverName":"cdn2.bit-core.online","alpn":["h2","http/1.1"],"fingerprint":"firefox"},
+      "xhttpSettings":{"mode":"packet-up","path":"/"}}},
+   {"protocol":"freedom","tag":"direct"},
+   {"protocol":"blackhole","tag":"block"}]},
+ {"remarks":"🇫🇮 Финляндия",
+  "outbounds":[
+   {"tag":"proxy","protocol":"vless",
+    "settings":{"vnext":[{"address":"212.237.219.223","port":8443,
+      "users":[{"id":"11111111-2222-3333-4444-555555555555","encryption":"none","flow":"xtls-rprx-vision"}]}]},
+    "streamSettings":{"security":"reality","network":"tcp",
+      "realitySettings":{"serverName":"ya.ru","fingerprint":"firefox",
+        "publicKey":"mRX3TKTKefW4WrXGIEiKQL1aIWVlfZ5I3Xyf0We4skQ","shortId":"974a7f83c1977d80","spiderX":"/"}}},
+   {"protocol":"freedom","tag":"direct"}]},
+ {"remarks":"🇳🇱 Нидерланды",
+  "outbounds":[
+   {"tag":"proxy","protocol":"vless",
+    "settings":{"vnext":[{"address":"176.222.53.193","port":8443,
+      "users":[{"id":"11111111-2222-3333-4444-555555555555","encryption":"none","flow":"xtls-rprx-vision"}]}]},
+    "streamSettings":{"security":"reality","network":"tcp",
+      "realitySettings":{"serverName":"ya.ru","fingerprint":"firefox",
+        "publicKey":"rBOGd3DCzFvk9QVW6jQHg9-FM76F05DBDc7FbwOMhmQ","shortId":"149c1b359327a310"}}},
+   {"protocol":"freedom","tag":"direct"}]}
+]

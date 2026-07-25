@@ -53,6 +53,10 @@ Future<void> main(List<String> args) async {
   await _applyStoredThemeEarly();
   // window_manager — только десктоп (на Android/iOS его нет → иначе краш на старте)
   if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+    // Прошлый запуск мог завершиться падением/убийством процесса с включённым системным
+    // прокси — тогда у пользователя «нет интернета» до ручной правки настроек. Прибираем за
+    // собой на старте (снимаем только прокси, указывающий на localhost, — чужой не трогаем).
+    unawaited(SystemProxy.cleanupStale());
     await windowManager.ensureInitialized();
     // hotkey_manager требует сброса «залипших» с прошлого запуска хоткеев на старте (десктоп).
     // fail-soft: на платформе без нативной стороны бросит — глотаем, живём без хоткея.

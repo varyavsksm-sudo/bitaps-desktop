@@ -107,10 +107,10 @@ extension ShellHome on ShellState {
             // Демо-IP светим только в демо-режиме, где рядом стоит дисклеймер. Отключённому
             // пользователю IP-строку не подписываем «IP скрыт» (это было бы ложью) — прочерк,
             // согласованный с плейсхолдерами скорости в этой же строке.
-            Text(!connected ? '—' : (kRealTunnel ? tr('IP скрыт') : '95.142.16.7'), style: mono(12)),
+            Text(!connected ? '—' : (gEngineReal ? tr('IP скрыт') : '95.142.16.7'), style: mono(12)),
           ]),
           // Честно: без боевого туннеля скорость/трафик/IP — демонстрационные.
-          if (connected && !kRealTunnel) ...[
+          if (connected && !gEngineReal) ...[
             const SizedBox(height: 8),
             Text(tr('Демо-режим — скорость и IP показаны для примера'), style: mono(10, c: C.muted)),
           ],
