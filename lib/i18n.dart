@@ -38,6 +38,7 @@ const Map<String, String> _kEn = {
   'В подписке нет доступных серверов': 'No servers available in your subscription',
   'Узлы подписки не поддерживаются этой сборкой': 'This build cannot use the subscription servers',
   'подписка bitaps': 'bitaps subscription',
+  'Открыть в Happ': 'Open in Happ',
   'Соединение разорвано': 'Connection dropped',
 
   // ---- widgets.dart ----

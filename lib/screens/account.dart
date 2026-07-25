@@ -413,6 +413,22 @@ extension ShellAccount on ShellState {
     }
   }
 
+  // «Открыть в Happ»: отдаём ключ/подписку стороннему клиенту Happ его же deep-link'ом
+  // happ://add/<base64(ключ)> — той же схемой, что уже работает в кабинете на сайте.
+  // Зачем это здесь: узлы «белого списка» (транспорт xhttp через CDN) наш движок пока не умеет,
+  // а Happ умеет — так пользователь получает ВСЕ узлы подписки, не дожидаясь смены движка.
+  // Happ не установлен → уводим на страницу с инструкцией и ссылками на магазины.
+  Future<void> _openInHapp() async {
+    final payload = base64.encode(utf8.encode(keyStr));
+    try {
+      final ok = await launchUrl(Uri.parse('happ://add/$payload'), mode: LaunchMode.externalApplication);
+      if (ok) return;
+    } catch (_) {/* приложения нет / схема не зарегистрирована — ниже фолбэк */}
+    if (!mounted) return;
+    _toast(appLang == 'en' ? 'Happ not found — opening the guide' : 'Happ не найден — открываю инструкцию');
+    await _open('https://bitapsvpn.com/happ.html');
+  }
+
   Widget _keyCard() => _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [_gIcon(Icons.qr_code_2), const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -443,6 +459,9 @@ extension ShellAccount on ShellState {
         const SizedBox(height: 10),
         // «Отправить на другое устройство» — deep-link + сырой ключ через share-sheet
         _btn(tr('Отправить на другое устройство'), kind: 2, icon: Icons.ios_share, onTap: _shareKey),
+        const SizedBox(height: 10),
+        // Happ понимает ВСЕ узлы подписки, включая «белый список» (xhttp), — даём быстрый импорт
+        _btn(tr('Открыть в Happ'), kind: 2, icon: Icons.open_in_new, onTap: _openInHapp),
         if (loggedIn && loginSecret != null) ...[
           const SizedBox(height: 12),
           _divider(), // единый разделитель как в остальном UI (было голое Divider(...))
