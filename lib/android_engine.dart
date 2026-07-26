@@ -18,6 +18,22 @@ class AndroidXrayEngine {
   V2ray? _v2ray;
   bool _initialized = false;
   void Function(String state)? _onState;
+  String _state = 'disconnected'; // последнее состояние от плагина
+
+  /// Плагин и его инициализация. Нужны и для остановки тоже: туннель переживает закрытие
+  /// приложения, и после нового запуска остановить его иначе было бы нечем — VPN оставался
+  /// висеть в системе, а подключиться заново не давал.
+  Future<V2ray> _engine() async {
+    final v = _v2ray ??= V2ray(onStatusChanged: (s) {
+      _state = _mapState(s.state);
+      _onState?.call(_state);
+    });
+    if (!_initialized) {
+      await v.initialize();
+      _initialized = true;
+    }
+    return v;
+  }
 
   /// Поднять туннель. [remark] попадает в системное уведомление Android.
   Future<void> connect(
@@ -25,19 +41,20 @@ class AndroidXrayEngine {
     required String remark,
     required void Function(String state) onState,
   }) async {
-    _onState = onState;
-    _v2ray ??= V2ray(onStatusChanged: (s) => _onState?.call(_mapState(s.state)));
-    if (!_initialized) {
-      await _v2ray!.initialize();
-      _initialized = true;
-    }
+    final v = await _engine();
     // Системный диалог «разрешить VPN». Пользователь может отказаться — это не сбой движка,
     // а осознанный отказ: говорим об этом прямо, без «не удалось подключиться».
-    final allowed = await _v2ray!.requestPermission();
+    final allowed = await v.requestPermission();
     if (!allowed) {
       throw EngineUnavailable('нужно разрешить приложению создавать VPN-подключение');
     }
-    await _v2ray!.startV2Ray(
+    // Гасим прошлый туннель ДО старта нового. Плагин применяет новый конфиг только на
+    // поднятие сервиса: без остановки смена сервера молча оставляла работать прежний.
+    // Слушателя подключаем после остановки, чтобы её события не приняли за обрыв нового.
+    _onState = null;
+    await _stop(v);
+    _onState = onState;
+    await v.startV2Ray(
       remark: remark,
       config: configJson,
       notificationDisconnectButtonName: 'Отключить',
@@ -45,7 +62,18 @@ class AndroidXrayEngine {
   }
 
   Future<void> disconnect() async {
-    await _v2ray?.stopV2Ray();
+    _onState = null; // события собственной остановки наверх не поднимаем
+    await _stop(await _engine());
+  }
+
+  /// Остановить туннель и дождаться, пока плагин это подтвердит. Без ожидания следующий
+  /// старт мог прийти в ещё живой сервис — тогда он игнорировал новый конфиг.
+  Future<void> _stop(V2ray v) async {
+    await v.stopV2Ray();
+    for (var i = 0; i < 30 && _state != 'disconnected'; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    _state = 'disconnected';
   }
 
   /// Версия ядра внутри плагина — для экрана самодиагностики.
@@ -66,9 +94,15 @@ class AndroidXrayEngine {
     }
   }
 
-  /// Состояния плагина («CONNECTED»/«DISCONNECTED»/…) → словарь контроллера подключения.
+  /// Состояния плагина (V2RAY_CONNECTED / V2RAY_DISCONNECTED / V2RAY_CONNECTING) → словарь
+  /// контроллера подключения.
+  ///
+  /// «CONNECTING» обязан иметь СВОЁ значение. Раньше он не подходил ни под одно условие и
+  /// сваливался в «disconnected», а контроллер считает это обрывом и гасит туннель — то есть
+  /// приложение убивало собственное подключение в момент его установления.
   String _mapState(String raw) {
     final s = raw.toUpperCase();
+    if (s.contains('CONNECTING')) return 'connecting';
     if (s.contains('CONNECTED') && !s.contains('DIS')) return 'connected';
     if (s.contains('ERROR')) return 'error';
     return 'disconnected';

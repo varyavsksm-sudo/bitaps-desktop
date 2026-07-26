@@ -160,7 +160,9 @@ class TunnelEngine {
       cfg,
       remark: server.isEmpty ? node.remark : server,
       onState: (state) {
-        if (state == 'connected') return; // о подключении сообщаем сами, ниже
+        // «connected» и «connecting» наверх не поднимаем: о подключении сообщаем сами ниже,
+        // а «connecting» контроллер принял бы за обрыв и погасил бы туннель.
+        if (state == 'connected' || state == 'connecting') return;
         _events.add(EngineEvent(state));
       },
     );
