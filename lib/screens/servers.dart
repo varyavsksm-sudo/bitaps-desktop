@@ -87,8 +87,8 @@ extension ShellServers on ShellState {
     final favList = _byPing(all.where((s) => favs.contains(s.id)));
     // Узлы «белого списка» (через CDN) показываем отдельной группой: они нужны, когда прямые
     // адреса недоступны, но обычно медленнее — пользователю честнее видеть это разделение.
-    final direct = _byPing(all.where((s) => !s.proto.startsWith('БС')));
-    final bs = _byPing(all.where((s) => s.proto.startsWith('БС')));
+    final direct = _byPing(all.where((s) => !s.proto.startsWith('LTE')));
+    final bs = _byPing(all.where((s) => s.proto.startsWith('LTE')));
     return [
       if (favList.isNotEmpty) ...[
         _kicker(tr('⭐ избранное')),
@@ -107,7 +107,30 @@ extension ShellServers on ShellState {
         const SizedBox(height: 10),
         for (final s in bs) _serverRow(s, locked),
       ],
-      if (all.isEmpty) Text(tr('Войди в аккаунт — здесь появятся твои серверы'), style: mono(12)),
+      // Пустой список объясняем: чаще всего это занятый лимит устройств или истёкшая подписка,
+      // и человек должен видеть причину прямо здесь, а не гадать.
+      if (all.isEmpty) _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // Текст от сервиса выдачи приходит по-русски — прогоняем через tr(), иначе в английском
+        // интерфейсе он остался бы русским.
+        Text(tr(subNotice ?? 'Войди в аккаунт — здесь появятся твои серверы'),
+            style: disp(15, w: FontWeight.w600)),
+        const SizedBox(height: 8),
+        Text(
+          !loggedIn
+              ? tr('Список серверов приходит вместе с подпиской.')
+              // сверяем с РУССКИМ оригиналом: сервис отвечает на русском независимо от языка приложения
+              : (subNotice ?? '').contains('Лимит')
+                  ? tr('Отключи лишнее устройство в «Кабинете» или расширь лимит — и серверы появятся.')
+                  : tr('Проверь подписку в «Кабинете» и обнови список.'),
+          style: mono(12.5, c: C.muted)),
+        const SizedBox(height: 14),
+        Row(children: [
+          Expanded(child: _btn(tr('Обновить'), kind: 1, icon: Icons.refresh,
+              onTap: _subLoading ? null : () => _refreshSub())),
+          const SizedBox(width: 12),
+          Expanded(child: _btn(tr('Кабинет'), kind: 0, icon: Icons.person_outline, onTap: () => _goTab(2))),
+        ]),
+      ])),
     ];
   }
 

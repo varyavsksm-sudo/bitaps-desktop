@@ -421,4 +421,14 @@ const Map<String, String> _kEn = {
   'Нужен ключ vless:// (или trojan/vmess/ss/hysteria2). Другой формат не поддерживается.':
       'A vless:// key is required (or trojan/vmess/ss/hysteria2). Other formats are not supported.',
   'Мой ключ': 'My key',
+
+  // ---- пустой список серверов: причина и что делать ----
+  'Список серверов приходит вместе с подпиской.': 'The server list comes with your subscription.',
+  'Отключи лишнее устройство в «Кабинете» или расширь лимит — и серверы появятся.':
+      'Remove an extra device in "Account" or raise the limit — the servers will show up.',
+  'Проверь подписку в «Кабинете» и обнови список.': 'Check your subscription in "Account" and refresh.',
+  'Сначала нужны серверы — обнови подписку': 'Servers are needed first — refresh your subscription',
+  // ответы сервиса выдачи (приходят по-русски независимо от языка приложения)
+  'Лимит устройств исчерпан': 'Device limit reached',
+  'Подписка отключена': 'Subscription disabled',
 };

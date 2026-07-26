@@ -185,7 +185,11 @@ class Shell extends StatefulWidget {
 class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBindingObserver, TrayListener {
   int tab = 0;
   int mode = 0;
-  Server server = ruServers[0];
+  Server server = kNoServer;
+  /// Почему список серверов пуст: текст от сервиса выдачи («Лимит устройств исчерпан»,
+  /// «Подписка истекла»). Без него экран молча показывал бы пустоту, и человек не понимал бы,
+  /// что делать.
+  String? subNotice;
   /// Узлы из подписки — источник правды для списка серверов и для подключения.
   List<SubNode> subNodes = const [];
   bool tgl1 = false, tgl2 = true, tgl3 = true, tgl4 = false;
@@ -738,11 +742,10 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   // Пинг сервера: живой замер (кнопка «Пинг» на Серверах), пока его нет — статичный из models.dart.
   int pingOf(Server s) => pingMeasured[s.id] ?? s.ping;
 
-  /// Доступные серверы: реальные узлы подписки, а пока их нет (не вошли / нет сети) —
-  /// прежний статичный список, чтобы экран не был пустым.
-  List<Server> get fleet => subNodes.isEmpty
-      ? [...ruServers, ...intlServers]
-      : [for (final n in subNodes) serverFromSubNode(n, ping: pingMeasured[n.tag] ?? 0)];
+  /// Доступные серверы — ТОЛЬКО узлы подписки. Запасного списка нет намеренно: пустой экран
+  /// с объяснением честнее, чем выдуманные серверы, к которым нельзя подключиться.
+  List<Server> get fleet =>
+      [for (final n in subNodes) serverFromSubNode(n, ping: pingMeasured[n.tag] ?? 0)];
 
   /// Применить свежий список узлов: обновляем парк и следим, чтобы выбранный сервер
   /// существовал (иначе подключение ушло бы к исчезнувшему узлу).
@@ -757,7 +760,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   // режим реально подбирает сервер: Стрим→мин.нагрузка, Игры/Авто→мин.пинг, Прив→зарубежный (иначе лучший)
   Server serverForMode(int m) {
     final avail = fleet.where((s) => s.available).toList();
-    if (avail.isEmpty) return ruServers[0];
+    if (avail.isEmpty) return kNoServer;
     if (m == 1) { avail.sort((a, b) => a.load.compareTo(b.load)); return avail.first; }
     if (m == 3) {
       final intl = avail.where((s) => s.country != 'Россия').toList();

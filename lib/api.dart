@@ -488,6 +488,12 @@ extension ShellApi on ShellState {
       // дёргался наш бэкенд — одинаковый хост для всех строк, то есть отклик канала пользователя,
       // а не сервера. Замеряем параллельно: последовательно 8 узлов ждать слишком долго.
       final targets = subNodes.where((n) => n.server.isNotEmpty).toList();
+      // Без узлов замерять нечего — и это НЕ проблема сети. Раньше пустой список давал
+      // «нет связи с интернетом», хотя интернет был, а не было подписки.
+      if (targets.isEmpty) {
+        _toast(tr('Сначала нужны серверы — обнови подписку'));
+        return;
+      }
       final results = await Future.wait([
         for (final n in targets) _tcpPing(n.server, n.port).then((ms) => MapEntry(n.tag, ms)),
       ]);
@@ -511,8 +517,17 @@ extension ShellApi on ShellState {
     if (!isSubscriptionUrl(key) || hwid.isEmpty) return;
     try {
       final sub = await fetchSubscription(key, hwid: hwid, deviceOs: Platform.operatingSystem);
-      if (!mounted || !sub.ok) return;
-      _applyNodes(sub.nodes);
+      if (!mounted) return;
+      // Причину пустого списка запоминаем и показываем на экране «Серверы». Сервис выдачи
+      // отвечает осмысленно («Лимит устройств исчерпан», «Подписка истекла»), а раньше этот
+      // текст выбрасывался — человек видел вместо серверов заглушку и не понимал, что не так.
+      final note = sub.notice;
+      if (sub.ok && sub.nodes.isNotEmpty) {
+        rebuild(() => subNotice = null);
+        _applyNodes(sub.nodes);
+      } else if (note != null && note.isNotEmpty) {
+        rebuild(() => subNotice = note);
+      }
     } catch (e) {
       debugPrint('_loadNodes: $e');
     }
