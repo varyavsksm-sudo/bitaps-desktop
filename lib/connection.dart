@@ -158,7 +158,7 @@ class ConnectionController extends ChangeNotifier {
         // РЕАЛЬНАЯ статистика/статус из движка — никаких выдуманных чисел
         _tunEvents = TunnelEngine.instance.events.listen((e) {
           if (_disposed || gen != _gen) return;
-          if (e.state == 'error' || e.state == 'disconnected') { _dropped(gen); return; }
+          if (e.state == 'error' || e.state == 'disconnected') { _dropped(gen, why: e.message); return; }
           down = e.downKbps;
           up = e.upKbps;
           notifyListeners();
@@ -228,7 +228,7 @@ class ConnectionController extends ChangeNotifier {
   }
 
   // движок сообщил об обрыве соединения — снимаем «подключено»
-  void _dropped(int gen) {
+  void _dropped(int gen, {String? why}) {
     if (_disposed || gen != _gen) return;
     // синхронизируем натив с UI: явно гасим движок, чтобы после обрыва он не остался в
     // полу-поднятом/реконнектящем состоянии (как reset()/disconnect-ветка toggle()).
@@ -237,8 +237,14 @@ class ConnectionController extends ChangeNotifier {
     onSpin(false);
     conn = 0; secs = 0;
     notifyListeners();
-    // «Обрыв соединения»: уведомляем об обрыве, только если включён тумблер
-    if (dropAlertOn()) onToast(tr('Соединение разорвано'));
+    // Причину от движка показываем ВСЕГДА, независимо от тумблера «Обрыв соединения»: тумблер
+    // про фоновые уведомления, а это ответ на действие пользователя — без него отказ выглядит
+    // как «нажал подключить, ничего не произошло».
+    if (why != null && why.isNotEmpty) {
+      onToast(tr(why));
+    } else if (dropAlertOn()) {
+      onToast(tr('Соединение разорвано'));
+    }
   }
 
   // полный сброс подключения (напр. при выходе из аккаунта): гасит поколение, таймеры, статус

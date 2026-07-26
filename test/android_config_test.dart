@@ -55,6 +55,17 @@ void main() {
     });
   }
 
+  test('локальный вход НЕ на 10808 — этот порт занимают другие клиенты', () {
+    // 10808 — порт по умолчанию у Happ и v2rayNG. Пока такой клиент стоит на телефоне, порт
+    // занят, движок не может открыть вход, и туннель поднимается пустым: система показывает
+    // VPN, а трафика нет. Порт обязан быть своим.
+    expect(kXrayAndroidSocksPort, isNot(10808));
+    final cfg = json.decode(
+        xrayEntryConfigJson(parsed.nodes.first, socksPort: kXrayAndroidSocksPort)) as Map<String, dynamic>;
+    final socks = (cfg['inbounds'] as List).cast<Map>().firstWhere((i) => i['protocol'] == 'socks');
+    expect(socks['port'], kXrayAndroidSocksPort);
+  });
+
   test('узел через CDN сохраняет транспорт xhttp', () {
     final cdn = parsed.nodes.firstWhere((n) => n.remark.contains('LTE'));
     final cfg = json.decode(xrayEntryConfigJson(cdn)) as Map<String, dynamic>;

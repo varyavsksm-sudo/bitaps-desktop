@@ -155,7 +155,9 @@ class TunnelEngine {
     // сторонних клиентах. Собственная сборка со всеми узлами, балансировщиком и метриками
     // внутри системного VpnService поднимала туннель, но трафик через него не шёл.
     final node = _pickAndroidNode(nodes, onlyTag);
-    final cfg = xrayEntryConfigJson(node, socksPort: kXraySocksPort);
+    // Свой порт локального входа: 10808 занимают Happ и v2rayNG, и тогда наш движок не может
+    // его открыть — туннель поднимается пустым.
+    final cfg = xrayEntryConfigJson(node, socksPort: kXrayAndroidSocksPort);
     await _android.connect(
       cfg,
       remark: server.isEmpty ? node.remark : server,
@@ -163,7 +165,12 @@ class TunnelEngine {
         // «connected» и «connecting» наверх не поднимаем: о подключении сообщаем сами ниже,
         // а «connecting» контроллер принял бы за обрыв и погасил бы туннель.
         if (state == 'connected' || state == 'connecting') return;
-        _events.add(EngineEvent(state));
+        // Туннель отвалился — вытаскиваем причину из лога движка. Без неё «подключился и сразу
+        // отключился» выглядит одинаково для занятого порта, отказа узла и битого конфига,
+        // и разбираться приходится вслепую.
+        _android.lastError().then((why) {
+          _events.add(EngineEvent(state, message: why));
+        }, onError: (_) => _events.add(EngineEvent(state)));
       },
     );
     // Метрик на Android больше нет: конфиг подписки их не содержит, а добавлять свои значит

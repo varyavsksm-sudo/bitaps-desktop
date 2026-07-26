@@ -429,6 +429,9 @@ const Map<String, String> _kEn = {
   'Проверь подписку в «Кабинете» и обнови список.': 'Check your subscription in "Account" and refresh.',
   'Сначала нужны серверы — обнови подписку': 'Servers are needed first — refresh your subscription',
   // ответы сервиса выдачи (приходят по-русски независимо от языка приложения)
+  // причина отказа из лога движка (проходит через tr() в момент показа)
+  'локальный порт занят другим VPN-приложением — закройте его и попробуйте снова':
+      'the local port is taken by another VPN app — close it and try again',
   'Лимит устройств исчерпан': 'Device limit reached',
   'Подписка отключена': 'Subscription disabled',
 };

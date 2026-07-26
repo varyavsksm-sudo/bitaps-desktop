@@ -94,6 +94,28 @@ class AndroidXrayEngine {
     }
   }
 
+  /// Понятная причина отказа из лога ядра, или null — если ничего внятного нет.
+  ///
+  /// Самая частая причина на телефоне — занятый локальный порт: рядом стоит другой клиент на
+  /// xray. Ядро пишет про это «address already in use», но человеку такая строка ничего не
+  /// говорит, поэтому переводим её в понятную фразу. Остальные ошибки отдаём как есть —
+  /// пусть лучше будет техническая строка, чем молчание.
+  Future<String?> lastError() async {
+    final lines = await logs();
+    for (final l in lines.reversed) {
+      final s = l.trim();
+      if (s.isEmpty) continue;
+      final low = s.toLowerCase();
+      if (low.contains('address already in use') || low.contains('bind: ')) {
+        return 'локальный порт занят другим VPN-приложением — закройте его и попробуйте снова';
+      }
+      if (low.contains('failed to') || low.contains('error') || low.contains('panic')) {
+        return s.length > 160 ? s.substring(0, 160) : s;
+      }
+    }
+    return null;
+  }
+
   /// Состояния плагина (V2RAY_CONNECTED / V2RAY_DISCONNECTED / V2RAY_CONNECTING) → словарь
   /// контроллера подключения.
   ///
