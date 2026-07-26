@@ -128,24 +128,47 @@ class TunnelEngine {
 
   final AndroidXrayEngine _android = AndroidXrayEngine();
 
+  /// Узел, к которому подключаемся на Android. Один — не список: движок там получает готовый
+  /// конфиг записи подписки (см. xrayEntryConfigJson).
+  SubNode _pickAndroidNode(List<SubNode> nodes, String? onlyTag) {
+    if (onlyTag != null) {
+      final hit = nodes.where((n) => n.tag == onlyTag);
+      if (hit.isNotEmpty) return hit.first;
+      throw const FormatException('выбранный сервер отсутствует в подписке');
+    }
+    // Авто: берём узел с наименьшим измеренным откликом; без замеров — первый прямой
+    // (у прямых отклик заведомо ниже, чем у узлов через CDN), иначе просто первый.
+    final measured = nodes.where((n) => (nodePings[n.tag] ?? 0) > 0).toList();
+    if (measured.isNotEmpty) {
+      measured.sort((a, b) => (nodePings[a.tag] ?? 9999).compareTo(nodePings[b.tag] ?? 9999));
+      return measured.first;
+    }
+    final direct = nodes.where((n) => n.singboxReady);
+    return direct.isNotEmpty ? direct.first : nodes.first;
+  }
+
   Future<void> _connectAndroid(List<SubNode> nodes, String? onlyTag, String server) async {
-    // Порт метрик берём случайный: постоянный слушатель на устройстве читался бы любым
-    // другим приложением. socks-порт плагин находит в конфиге сам.
-    final metricsPort = await _freePort();
-    final cfg = xrayConfigJsonFromNodes(nodes,
-        only: onlyTag, socksPort: kXraySocksPort, metricsPort: metricsPort);
+    if (nodes.isEmpty) {
+      throw const FormatException('в подписке нет узлов для подключения');
+    }
+    // Отдаём движку конфиг ОДНОГО узла — ровно тот, что приходит в подписке и работает в
+    // сторонних клиентах. Собственная сборка со всеми узлами, балансировщиком и метриками
+    // внутри системного VpnService поднимала туннель, но трафик через него не шёл.
+    final node = _pickAndroidNode(nodes, onlyTag);
+    final cfg = xrayEntryConfigJson(node, socksPort: kXraySocksPort);
     await _android.connect(
       cfg,
-      remark: server.isEmpty ? 'bitaps VPN' : server,
+      remark: server.isEmpty ? node.remark : server,
       onState: (state) {
         if (state == 'connected') return; // о подключении сообщаем сами, ниже
         _events.add(EngineEvent(state));
       },
     );
-    _metricsPort = metricsPort;
+    // Метрик на Android больше нет: конфиг подписки их не содержит, а добавлять свои значит
+    // снова отойти от проверенного. Счётчики скорости на этой платформе не показываем.
+    _metricsPort = null;
     _lastTotals = null;
     _events.add(const EngineEvent('connected'));
-    _statsTimer = Timer.periodic(const Duration(seconds: 1), (_) => _pollStats());
   }
 
   Future<void> _pollStats() async {

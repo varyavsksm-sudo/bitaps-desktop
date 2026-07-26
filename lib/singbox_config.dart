@@ -458,6 +458,13 @@ class SubNode {
   final int port;
   final Map<String, dynamic> xray;
   final Map<String, dynamic>? singbox;
+
+  /// ЦЕЛИКОМ запись подписки — готовый конфиг на один узел, ровно такой, каким его выдаёт наш
+  /// сервис и каким его исполняют сторонние клиенты (Happ). На Android отдаём движку именно
+  /// его: собственная сборка со всеми узлами, балансировщиком и метриками там не заработала,
+  /// а эта — работает у пользователей каждый день.
+  final Map<String, dynamic>? full;
+
   const SubNode({
     required this.remark,
     required this.tag,
@@ -465,6 +472,7 @@ class SubNode {
     required this.port,
     required this.xray,
     this.singbox,
+    this.full,
   });
 
   /// Узел доступен движку sing-box (у xray доступны все).
@@ -545,6 +553,7 @@ SubParseResult parseSubscription(String body, {String? headerNotice}) {
       port: host.$2,
       xray: proxy,
       singbox: singbox,
+      full: entry is Map<String, dynamic> ? entry : Map<String, dynamic>.from(entry),
     ));
   }
   return SubParseResult(nodes: nodes, notice: notice, skipped: skipped);

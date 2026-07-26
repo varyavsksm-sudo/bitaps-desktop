@@ -1,0 +1,788 @@
+[
+ {
+  "remarks": "🛡️ Нидерланды · LTE",
+  "dns": {
+   "queryStrategy": "UseIPv4",
+   "servers": [
+    "https://77.88.8.8/dns-query",
+    "localhost"
+   ]
+  },
+  "inbounds": [
+   {
+    "listen": "127.0.0.1",
+    "port": 10808,
+    "protocol": "socks",
+    "settings": {
+     "udp": true
+    },
+    "sniffing": {
+     "enabled": true,
+     "destOverride": [
+      "http",
+      "tls",
+      "quic"
+     ],
+     "routeOnly": true
+    },
+    "tag": "socks"
+   }
+  ],
+  "outbounds": [
+   {
+    "tag": "proxy",
+    "protocol": "vless",
+    "settings": {
+     "vnext": [
+      {
+       "address": "cdn41.bit-core.online",
+       "port": 443,
+       "users": [
+        {
+         "id": "11111111-2222-3333-4444-555555555555",
+         "encryption": "none"
+        }
+       ]
+      }
+     ]
+    },
+    "streamSettings": {
+     "network": "xhttp",
+     "security": "tls",
+     "tlsSettings": {
+      "serverName": "cdn41.bit-core.online",
+      "alpn": [
+       "h2",
+       "http/1.1"
+      ],
+      "fingerprint": "firefox"
+     },
+     "xhttpSettings": {
+      "mode": "packet-up",
+      "path": "/",
+      "extra": {
+       "mode": "packet-up",
+       "path": "/",
+       "uplinkHTTPMethod": "GET",
+       "xPaddingBytes": "100-1000"
+      }
+     }
+    }
+   },
+   {
+    "protocol": "freedom",
+    "tag": "direct"
+   },
+   {
+    "protocol": "blackhole",
+    "tag": "block"
+   }
+  ],
+  "routing": {
+   "domainStrategy": "IPIfNonMatch",
+   "rules": [
+    {
+     "type": "field",
+     "protocol": [
+      "bittorrent"
+     ],
+     "outboundTag": "direct"
+    },
+    {
+     "type": "field",
+     "domain": [
+      "geosite:category-ads-all"
+     ],
+     "outboundTag": "block"
+    },
+    {
+     "type": "field",
+     "domain": [
+      "geosite:category-ru"
+     ],
+     "outboundTag": "direct"
+    },
+    {
+     "type": "field",
+     "ip": [
+      "geoip:ru",
+      "geoip:private"
+     ],
+     "outboundTag": "direct"
+    },
+    {
+     "type": "field",
+     "network": "tcp,udp",
+     "outboundTag": "proxy"
+    }
+   ]
+  }
+ },
+ {
+  "remarks": "🇫🇮 Финляндия",
+  "dns": {
+   "queryStrategy": "UseIPv4",
+   "servers": [
+    "https://77.88.8.8/dns-query",
+    "localhost"
+   ]
+  },
+  "inbounds": [
+   {
+    "listen": "127.0.0.1",
+    "port": 10808,
+    "protocol": "socks",
+    "settings": {
+     "udp": true
+    },
+    "sniffing": {
+     "enabled": true,
+     "destOverride": [
+      "http",
+      "tls",
+      "quic"
+     ],
+     "routeOnly": true
+    },
+    "tag": "socks"
+   }
+  ],
+  "outbounds": [
+   {
+    "tag": "proxy",
+    "protocol": "vless",
+    "settings": {
+     "vnext": [
+      {
+       "address": "212.237.219.223",
+       "port": 8443,
+       "users": [
+        {
+         "id": "11111111-2222-3333-4444-555555555555",
+         "encryption": "none",
+         "flow": "xtls-rprx-vision"
+        }
+       ]
+      }
+     ]
+    },
+    "streamSettings": {
+     "security": "reality",
+     "network": "tcp",
+     "realitySettings": {
+      "serverName": "ya.ru",
+      "fingerprint": "firefox",
+      "publicKey": "mRX3TKTKefW4WrXGIEiKQL1aIWVlfZ5I3Xyf0We4skQ",
+      "shortId": "974a7f83c1977d80",
+      "spiderX": "/"
+     }
+    }
+   },
+   {
+    "protocol": "freedom",
+    "tag": "direct"
+   },
+   {
+    "protocol": "blackhole",
+    "tag": "block"
+   }
+  ],
+  "routing": {
+   "domainStrategy": "IPIfNonMatch",
+   "rules": [
+    {
+     "type": "field",
+     "protocol": [
+      "bittorrent"
+     ],
+     "outboundTag": "direct"
+    },
+    {
+     "type": "field",
+     "domain": [
+      "geosite:category-ads-all"
+     ],
+     "outboundTag": "block"
+    },
+    {
+     "type": "field",
+     "domain": [
+      "geosite:category-ru"
+     ],
+     "outboundTag": "direct"
+    },
+    {
+     "type": "field",
+     "ip": [
+      "geoip:ru",
+      "geoip:private"
+     ],
+     "outboundTag": "direct"
+    },
+    {
+     "type": "field",
+     "network": "tcp,udp",
+     "outboundTag": "proxy"
+    }
+   ]
+  }
+ },
+ {
+  "remarks": "🚀 Авто · лучший узел",
+  "log": {
+   "loglevel": "warning"
+  },
+  "dns": {
+   "queryStrategy": "UseIPv4",
+   "servers": [
+    "https://77.88.8.8/dns-query",
+    "localhost"
+   ]
+  },
+  "inbounds": [
+   {
+    "listen": "127.0.0.1",
+    "port": 10808,
+    "protocol": "socks",
+    "settings": {
+     "udp": true
+    },
+    "sniffing": {
+     "enabled": true,
+     "destOverride": [
+      "http",
+      "tls",
+      "quic"
+     ],
+     "routeOnly": true
+    },
+    "tag": "socks"
+   }
+  ],
+  "outbounds": [
+   {
+    "tag": "node-r0",
+    "protocol": "vless",
+    "settings": {
+     "vnext": [
+      {
+       "address": "212.237.219.223",
+       "port": 8443,
+       "users": [
+        {
+         "id": "11111111-2222-3333-4444-555555555555",
+         "encryption": "none",
+         "flow": "xtls-rprx-vision"
+        }
+       ]
+      }
+     ]
+    },
+    "streamSettings": {
+     "security": "reality",
+     "network": "tcp",
+     "realitySettings": {
+      "serverName": "ya.ru",
+      "fingerprint": "firefox",
+      "publicKey": "mRX3TKTKefW4WrXGIEiKQL1aIWVlfZ5I3Xyf0We4skQ",
+      "shortId": "974a7f83c1977d80",
+      "spiderX": "/"
+     }
+    }
+   },
+   {
+    "tag": "node-r1",
+    "protocol": "vless",
+    "settings": {
+     "vnext": [
+      {
+       "address": "176.222.53.193",
+       "port": 8443,
+       "users": [
+        {
+         "id": "11111111-2222-3333-4444-555555555555",
+         "encryption": "none",
+         "flow": "xtls-rprx-vision"
+        }
+       ]
+      }
+     ]
+    },
+    "streamSettings": {
+     "security": "reality",
+     "network": "tcp",
+     "realitySettings": {
+      "serverName": "ya.ru",
+      "fingerprint": "firefox",
+      "publicKey": "rBOGd3DCzFvk9QVW6jQHg9-FM76F05DBDc7FbwOMhmQ",
+      "shortId": "149c1b359327a310",
+      "spiderX": "/"
+     }
+    }
+   },
+   {
+    "tag": "node-r2",
+    "protocol": "vless",
+    "settings": {
+     "vnext": [
+      {
+       "address": "151.241.228.127",
+       "port": 8443,
+       "users": [
+        {
+         "id": "11111111-2222-3333-4444-555555555555",
+         "encryption": "none",
+         "flow": "xtls-rprx-vision"
+        }
+       ]
+      }
+     ]
+    },
+    "streamSettings": {
+     "security": "reality",
+     "network": "tcp",
+     "realitySettings": {
+      "serverName": "ya.ru",
+      "fingerprint": "firefox",
+      "publicKey": "lnTyQATZGRIp8fMCyPSmZDa88mNptShn_4vwXOHsTFs",
+      "shortId": "7d90cbb5b7b674bc",
+      "spiderX": "/"
+     }
+    }
+   },
+   {
+    "tag": "node-r3",
+    "protocol": "vless",
+    "settings": {
+     "vnext": [
+      {
+       "address": "82.40.37.176",
+       "port": 8443,
+       "users": [
+        {
+         "id": "11111111-2222-3333-4444-555555555555",
+         "encryption": "none",
+         "flow": "xtls-rprx-vision"
+        }
+       ]
+      }
+     ]
+    },
+    "streamSettings": {
+     "security": "reality",
+     "network": "tcp",
+     "realitySettings": {
+      "serverName": "ya.ru",
+      "fingerprint": "firefox",
+      "publicKey": "KlYsn1irixKqql6R-s8o2M7PlUiMFaPvh1B4wlWSWCw",
+      "shortId": "dab053e5b6c5e429",
+      "spiderX": "/"
+     }
+    }
+   },
+   {
+    "tag": "node-r4",
+    "protocol": "vless",
+    "settings": {
+     "vnext": [
+      {
+       "address": "162.141.93.9",
+       "port": 8443,
+       "users": [
+        {
+         "id": "11111111-2222-3333-4444-555555555555",
+         "encryption": "none",
+         "flow": "xtls-rprx-vision"
+        }
+       ]
+      }
+     ]
+    },
+    "streamSettings": {
+     "security": "reality",
+     "network": "tcp",
+     "realitySettings": {
+      "serverName": "ya.ru",
+      "fingerprint": "firefox",
+      "publicKey": "QLjAXUVzTbAKQGa-9mNvTYxYNAoe_7jLM_e5ee_tpRs",
+      "shortId": "118e7082540ea8be",
+      "spiderX": "/"
+     }
+    }
+   },
+   {
+    "tag": "node-r5",
+    "protocol": "vless",
+    "settings": {
+     "vnext": [
+      {
+       "address": "185.165.171.176",
+       "port": 8443,
+       "users": [
+        {
+         "id": "11111111-2222-3333-4444-555555555555",
+         "encryption": "none",
+         "flow": "xtls-rprx-vision"
+        }
+       ]
+      }
+     ]
+    },
+    "streamSettings": {
+     "security": "reality",
+     "network": "tcp",
+     "realitySettings": {
+      "serverName": "ya.ru",
+      "fingerprint": "firefox",
+      "publicKey": "dV2nPHZOZ82m5hOQpwxKd_UUuOvlW87Ei4aqRPWS90M",
+      "shortId": "64ce64c34456732b",
+      "spiderX": "/"
+     }
+    }
+   },
+   {
+    "tag": "node-r6",
+    "protocol": "vless",
+    "settings": {
+     "vnext": [
+      {
+       "address": "185.146.234.208",
+       "port": 2053,
+       "users": [
+        {
+         "id": "11111111-2222-3333-4444-555555555555",
+         "encryption": "none",
+         "flow": "xtls-rprx-vision"
+        }
+       ]
+      }
+     ]
+    },
+    "streamSettings": {
+     "security": "reality",
+     "network": "tcp",
+     "realitySettings": {
+      "serverName": "ya.ru",
+      "fingerprint": "firefox",
+      "publicKey": "DGZ0jqsJVkApapteTbjuj-2mzIHZtEAoDWwO81nCojQ",
+      "shortId": "981c8b00981c8eb9",
+      "spiderX": "/"
+     }
+    }
+   },
+   {
+    "tag": "node-c0",
+    "protocol": "vless",
+    "settings": {
+     "vnext": [
+      {
+       "address": "cdn11.bit-core.online",
+       "port": 443,
+       "users": [
+        {
+         "id": "11111111-2222-3333-4444-555555555555",
+         "encryption": "none"
+        }
+       ]
+      }
+     ]
+    },
+    "streamSettings": {
+     "network": "xhttp",
+     "security": "tls",
+     "tlsSettings": {
+      "serverName": "cdn11.bit-core.online",
+      "alpn": [
+       "h2",
+       "http/1.1"
+      ],
+      "fingerprint": "firefox"
+     },
+     "xhttpSettings": {
+      "mode": "packet-up",
+      "path": "/",
+      "extra": {
+       "mode": "packet-up",
+       "path": "/",
+       "uplinkHTTPMethod": "GET",
+       "xPaddingBytes": "100-1000"
+      }
+     }
+    }
+   },
+   {
+    "tag": "node-c1",
+    "protocol": "vless",
+    "settings": {
+     "vnext": [
+      {
+       "address": "cdn21.bit-core.online",
+       "port": 443,
+       "users": [
+        {
+         "id": "11111111-2222-3333-4444-555555555555",
+         "encryption": "none"
+        }
+       ]
+      }
+     ]
+    },
+    "streamSettings": {
+     "network": "xhttp",
+     "security": "tls",
+     "tlsSettings": {
+      "serverName": "cdn21.bit-core.online",
+      "alpn": [
+       "h2",
+       "http/1.1"
+      ],
+      "fingerprint": "firefox"
+     },
+     "xhttpSettings": {
+      "mode": "packet-up",
+      "path": "/",
+      "extra": {
+       "mode": "packet-up",
+       "path": "/",
+       "uplinkHTTPMethod": "GET",
+       "xPaddingBytes": "100-1000"
+      }
+     }
+    }
+   },
+   {
+    "tag": "node-c2",
+    "protocol": "vless",
+    "settings": {
+     "vnext": [
+      {
+       "address": "cdn31.bit-core.online",
+       "port": 443,
+       "users": [
+        {
+         "id": "11111111-2222-3333-4444-555555555555",
+         "encryption": "none"
+        }
+       ]
+      }
+     ]
+    },
+    "streamSettings": {
+     "network": "xhttp",
+     "security": "tls",
+     "tlsSettings": {
+      "serverName": "cdn31.bit-core.online",
+      "alpn": [
+       "h2",
+       "http/1.1"
+      ],
+      "fingerprint": "firefox"
+     },
+     "xhttpSettings": {
+      "mode": "packet-up",
+      "path": "/",
+      "extra": {
+       "mode": "packet-up",
+       "path": "/",
+       "uplinkHTTPMethod": "GET",
+       "xPaddingBytes": "100-1000"
+      }
+     }
+    }
+   },
+   {
+    "tag": "node-c3",
+    "protocol": "vless",
+    "settings": {
+     "vnext": [
+      {
+       "address": "cdn41.bit-core.online",
+       "port": 443,
+       "users": [
+        {
+         "id": "11111111-2222-3333-4444-555555555555",
+         "encryption": "none"
+        }
+       ]
+      }
+     ]
+    },
+    "streamSettings": {
+     "network": "xhttp",
+     "security": "tls",
+     "tlsSettings": {
+      "serverName": "cdn41.bit-core.online",
+      "alpn": [
+       "h2",
+       "http/1.1"
+      ],
+      "fingerprint": "firefox"
+     },
+     "xhttpSettings": {
+      "mode": "packet-up",
+      "path": "/",
+      "extra": {
+       "mode": "packet-up",
+       "path": "/",
+       "uplinkHTTPMethod": "GET",
+       "xPaddingBytes": "100-1000"
+      }
+     }
+    }
+   },
+   {
+    "tag": "node-c4",
+    "protocol": "vless",
+    "settings": {
+     "vnext": [
+      {
+       "address": "cdn51.bit-core.online",
+       "port": 443,
+       "users": [
+        {
+         "id": "11111111-2222-3333-4444-555555555555",
+         "encryption": "none"
+        }
+       ]
+      }
+     ]
+    },
+    "streamSettings": {
+     "network": "xhttp",
+     "security": "tls",
+     "tlsSettings": {
+      "serverName": "cdn51.bit-core.online",
+      "alpn": [
+       "h2",
+       "http/1.1"
+      ],
+      "fingerprint": "firefox"
+     },
+     "xhttpSettings": {
+      "mode": "packet-up",
+      "path": "/",
+      "extra": {
+       "mode": "packet-up",
+       "path": "/",
+       "uplinkHTTPMethod": "GET",
+       "xPaddingBytes": "100-1000"
+      }
+     }
+    }
+   },
+   {
+    "tag": "node-c5",
+    "protocol": "vless",
+    "settings": {
+     "vnext": [
+      {
+       "address": "cdn61.bit-core.online",
+       "port": 443,
+       "users": [
+        {
+         "id": "11111111-2222-3333-4444-555555555555",
+         "encryption": "none"
+        }
+       ]
+      }
+     ]
+    },
+    "streamSettings": {
+     "network": "xhttp",
+     "security": "tls",
+     "tlsSettings": {
+      "serverName": "cdn61.bit-core.online",
+      "alpn": [
+       "h2",
+       "http/1.1"
+      ],
+      "fingerprint": "firefox"
+     },
+     "xhttpSettings": {
+      "mode": "packet-up",
+      "path": "/",
+      "extra": {
+       "mode": "packet-up",
+       "path": "/",
+       "uplinkHTTPMethod": "GET",
+       "xPaddingBytes": "100-1000"
+      }
+     }
+    }
+   },
+   {
+    "protocol": "freedom",
+    "tag": "direct",
+    "settings": {
+     "domainStrategy": "UseIPv4"
+    }
+   },
+   {
+    "protocol": "blackhole",
+    "tag": "block"
+   }
+  ],
+  "burstObservatory": {
+   "subjectSelector": [
+    "node-"
+   ],
+   "pingConfig": {
+    "destination": "https://origin.bit-core.online/gen204",
+    "interval": "5s",
+    "sampling": 4,
+    "timeout": "4s"
+   }
+  },
+  "routing": {
+   "domainMatcher": "hybrid",
+   "domainStrategy": "IPIfNonMatch",
+   "balancers": [
+    {
+     "tag": "gen-bal",
+     "selector": [
+      "node-"
+     ],
+     "strategy": {
+      "type": "leastPing"
+     }
+    }
+   ],
+   "rules": [
+    {
+     "type": "field",
+     "protocol": [
+      "bittorrent"
+     ],
+     "outboundTag": "direct"
+    },
+    {
+     "type": "field",
+     "domain": [
+      "geosite:category-ads-all"
+     ],
+     "outboundTag": "block"
+    },
+    {
+     "type": "field",
+     "domain": [
+      "geosite:category-ru"
+     ],
+     "outboundTag": "direct"
+    },
+    {
+     "type": "field",
+     "ip": [
+      "geoip:ru",
+      "geoip:private"
+     ],
+     "outboundTag": "direct"
+    },
+    {
+     "type": "field",
+     "network": "tcp,udp",
+     "balancerTag": "gen-bal"
+    }
+   ]
+  }
+ }
+]

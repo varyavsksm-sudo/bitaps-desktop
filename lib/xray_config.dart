@@ -140,6 +140,46 @@ Map<String, dynamic> xrayConfigFromNodes(
   return cfg;
 }
 
+/// Конфиг ОДНОГО узла — ровно тот, что наш сервис кладёт в подписку и что исполняют сторонние
+/// клиенты. Используется на Android.
+///
+/// Почему не общий конфиг со всеми узлами. На Android движок живёт внутри системного
+/// VpnService (плагин), и там наша сборка «15 исходов + балансировщик + обсерватория +
+/// метрики» вела себя так: туннель поднимался, а трафик не шёл. Тот же телефон с тем же
+/// сервером в стороннем клиенте работал — потому что клиент берёт ИМЕННО эту запись подписки,
+/// без наших надстроек. Вместо того чтобы гадать, какая из надстроек мешает внутри чужого
+/// VpnService, отдаём проверенный конфиг как есть.
+///
+/// Меняем в нём только порт socks-входа: плагин ищет его в конфиге и на него натравливает
+/// свой перехватчик трафика.
+String xrayEntryConfigJson(SubNode node, {int socksPort = kXraySocksPort}) {
+  final full = node.full;
+  if (full == null) {
+    // Ручной ключ без записи подписки — собираем минимальный конфиг на один узел сами.
+    return xrayConfigJsonFromNodes([node], only: node.tag, socksPort: socksPort);
+  }
+  final cfg = json.decode(json.encode(full)) as Map<String, dynamic>;
+  cfg.remove('remarks'); // служебное поле подписки, движку не нужно
+  final inbounds = cfg['inbounds'];
+  if (inbounds is List && inbounds.isNotEmpty) {
+    for (final i in inbounds) {
+      if (i is Map && i['protocol'] == 'socks') i['port'] = socksPort;
+    }
+  } else {
+    cfg['inbounds'] = [
+      {
+        'listen': '127.0.0.1',
+        'port': socksPort,
+        'protocol': 'socks',
+        'settings': {'udp': true, 'auth': 'noauth'},
+        'sniffing': {'enabled': true, 'destOverride': ['http', 'tls', 'quic'], 'routeOnly': true},
+        'tag': 'socks',
+      }
+    ];
+  }
+  return const JsonEncoder.withIndent('  ').convert(cfg);
+}
+
 /// Тот же конфиг строкой — именно он уходит в движок.
 String xrayConfigJsonFromNodes(
   List<SubNode> nodes, {
