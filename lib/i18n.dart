@@ -398,4 +398,27 @@ const Map<String, String> _kEn = {
   'VPN не подключается?': "VPN won't connect?",
   'Смени локацию, проверь интернет и что подписка активна. Не помогло — напиши в поддержку.':
       'Switch location, check your internet and that your subscription is active. Still stuck — message support.',
+
+  // ---- сообщения движка, сети и разбора подписки ----
+  // Эти строки бросаются исключениями и показываются тостом, поэтому tr() к ним применяется
+  // в самом тосте (см. _toast в main.dart). Без словаря они оставались русскими в EN.
+  'нужно разрешить приложению создавать VPN-подключение': 'you need to allow the app to create a VPN connection',
+  'Непонятный ответ сервера. Попробуй позже.': 'Unexpected server response. Try again later.',
+  'VPN-движок не найден в сборке': 'VPN engine not found in this build',
+  'VPN-движок не установлен в этой сборке': 'VPN engine is not bundled in this build',
+  'VPN-движок ещё не установлен в этой сборке': 'VPN engine is not bundled in this build yet',
+  'Не удалось запустить туннель': 'Could not start the tunnel',
+  'не удалось включить системный прокси': 'could not enable the system proxy',
+  'в подписке нет узлов, поддерживаемых этой сборкой': 'the subscription has no nodes supported by this build',
+  'в подписке нет узлов, которые понимает движок': 'the subscription has no nodes the engine understands',
+  'в подписке нет узлов для подключения': 'the subscription has no nodes to connect to',
+  'выбранный сервер отсутствует в подписке': 'the selected server is not in the subscription',
+  'подписка не ответила вовремя': 'the subscription did not respond in time',
+  'не удалось получить подписку': 'could not fetch the subscription',
+  'подписка: ожидался JSON-массив конфигов': 'subscription: expected a JSON array of configs',
+  'не удалось разобрать ключ': 'could not parse the key',
+  'Этот ключ не поддерживается этой сборкой': 'This key is not supported by this build',
+  'Нужен ключ vless:// (или trojan/vmess/ss/hysteria2). Другой формат не поддерживается.':
+      'A vless:// key is required (or trojan/vmess/ss/hysteria2). Other formats are not supported.',
+  'Мой ключ': 'My key',
 };

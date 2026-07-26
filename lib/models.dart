@@ -173,7 +173,8 @@ Server serverFromSubNode(SubNode n, {int ping = 0}) {
   final city = parts.length > 1 ? parts.sublist(1).join(' ') : n.remark;
   return Server(
     n.tag, city, '', flag, ping, 0,
-    proto: n.singboxReady ? 'Reality' : 'БС · CDN',
+    // «LTE» вместо «БС»: так узлы белого списка названы и в подписке, и в кабинете
+    proto: n.singboxReady ? 'Reality' : 'LTE · CDN',
   );
 }
 

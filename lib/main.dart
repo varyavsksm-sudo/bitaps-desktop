@@ -778,7 +778,11 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
           const SizedBox(width: 12),
           // Цвет текста — из текущей темы (C.text): иначе в светлой теме тёмный текст ложился на
           // захардкоженный тёмный фон и был нечитаем.
-          Expanded(child: Text(m, style: disp(14, w: FontWeight.w600, c: C.text))),
+          // tr() прямо здесь: в тосты приходят и сообщения из движка/сети, которые бросаются
+          // исключениями и потому не проходят через tr() на месте. Без перевода они оставались
+          // русскими даже в английском интерфейсе. tr() возвращает исходную строку, если её нет
+          // в словаре, — для остальных тостов ничего не меняется.
+          Expanded(child: Text(tr(m), style: disp(14, w: FontWeight.w600, c: C.text))),
         ]),
         // Фон тоже тема-зависимый (C.bg2): белый в светлой, near-black в тёмной — читается в обеих.
         backgroundColor: C.bg2,
