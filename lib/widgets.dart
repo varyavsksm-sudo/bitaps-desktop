@@ -198,10 +198,13 @@ extension ShellWidgets on ShellState {
           border: solid ? null : Border.all(color: C.line),
           boxShadow: (solid && !disabled) ? [BoxShadow(color: C.accent.withValues(alpha: 0.45), blurRadius: 22)] : null,
         ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
+        // FittedBox: на узком экране длинная подпись («Продлить подписку», «Отправить на другое
+        // устройство») не влезала в кнопку и молча обрезалась — в паре с иконкой это съедало
+        // до 48px текста. Ужимаем надпись целиком вместо того, чтобы прятать её хвост.
+        child: FittedBox(fit: BoxFit.scaleDown, child: Row(mainAxisSize: MainAxisSize.min, children: [
           if (icon != null) ...[Icon(icon, size: 17, color: solid ? C.bg : C.text), const SizedBox(width: 8)],
           Text(label, style: disp(16, w: FontWeight.w600, c: solid ? C.bg : C.text)),
-        ]),
+        ])),
       ),
     );
     return disabled ? Opacity(opacity: 0.5, child: btn) : btn;

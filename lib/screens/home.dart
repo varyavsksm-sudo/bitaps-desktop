@@ -43,7 +43,13 @@ extension ShellHome on ShellState {
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
       children: [
         if (_updateAvail) ...[_updateBanner(), const SizedBox(height: 12)],
-        Row(children: [_logo(), const Spacer(), _shieldPill(connected)]),
+        // Flexible+FittedBox: на узких телефонах (360px) логотип и пилюля статуса вместе не
+        // помещались, и правый край пилюли обрезался. Теперь при нехватке места они ужимаются.
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Flexible(child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: _logo())),
+          const SizedBox(width: 8),
+          Flexible(child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: _shieldPill(connected))),
+        ]),
         const SizedBox(height: 10),
         Center(child: _powerButton()),
         const SizedBox(height: 4),

@@ -345,7 +345,9 @@ extension ShellAccount on ShellState {
               style: mono(13))]),
           const SizedBox(height: 4),
           Row(children: [Icon(Icons.devices, size: 14, color: C.muted), const SizedBox(width: 6),
-            Text(appLang == 'en' ? '${devices.length} / $_limitStr devices' : '${devices.length} / $_limitStr устройств', style: mono(13))]),
+            // Expanded: на узком экране строка про устройства вылезала за карточку и обрезалась
+            Expanded(child: Text(appLang == 'en' ? '${devices.length} / $_limitStr devices' : '${devices.length} / $_limitStr устройств',
+                style: mono(13), maxLines: 1, overflow: TextOverflow.ellipsis))]),
         ])),
       ]),
       const SizedBox(height: 16),
@@ -492,7 +494,9 @@ extension ShellAccount on ShellState {
 
   Widget _devicesCard() => _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [_gIcon(Icons.devices), const SizedBox(width: 12),
-          _kicker(appLang == 'en' ? 'devices · ${devices.length}/$_limitStr' : 'устройства · ${devices.length}/$_limitStr'), const Spacer(),
+          // Expanded вместо пары «текст + Spacer»: заголовок карточки не влезал рядом с иконкой
+          // обновления и уезжал под неё
+          Expanded(child: _kicker(appLang == 'en' ? 'devices · ${devices.length}/$_limitStr' : 'устройства · ${devices.length}/$_limitStr')),
           _subVisibleLoading
               ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: C.accent))
               : IconButton(

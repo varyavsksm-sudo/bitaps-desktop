@@ -64,9 +64,17 @@ Future<void> main(List<String> args) async {
     // Десктоп больше не «растянутый телефон» 440px: окно по умолчанию широкое (виден боковой
     // рейл навигации, см. LayoutBuilder в _buildBody), максимума нет — ресайз свободный.
     // Узкое окно (<720) продолжает работать мобильной раскладкой с нижним таб-баром.
+    // Отладочный размер окна: BITAPS_WIN=ШИРИНАxВЫСОТА. Нужен, чтобы проверять МОБИЛЬНУЮ
+    // раскладку (<720) на десктопе — иначе телефонные экраны нечем посмотреть без устройства.
+    // В release ветка мертва (kDebugMode == false) и выкидывается компилятором.
+    Size winSize = const Size(1024, 800);
+    if (kDebugMode) {
+      final m = RegExp(r'^(\d{3,4})x(\d{3,4})$').firstMatch(Platform.environment['BITAPS_WIN'] ?? '');
+      if (m != null) winSize = Size(double.parse(m.group(1)!), double.parse(m.group(2)!));
+    }
     final opts = WindowOptions(
-      size: const Size(1024, 800),
-      minimumSize: const Size(390, 700),
+      size: winSize,
+      minimumSize: const Size(360, 640),
       center: true,
       backgroundColor: C.bg, // уже согласован с сохранённой темой (см. _applyStoredThemeEarly)
       title: 'bitaps VPN',
@@ -1103,12 +1111,18 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
         decoration: BoxDecoration(color: C.bg2.withValues(alpha: 0.7), border: Border(top: BorderSide(color: C.line))),
         // Стеклянная подложка бара — во всю ширину, но сами вкладки держим в той же 560px-колонке,
         // что и контент (иначе на широком окне 4 таба разъезжались бы по краям на сотни px).
-        child: SafeArea(top: false, child: Center(child: ConstrainedBox(
+        // heightFactor: 1 обязателен. Без него Center забирает ВСЮ доступную высоту, а Scaffold
+        // отдаёт нижнему бару столько, сколько тот попросил, — телу остаётся ноль. Внешне это
+        // выглядело так: иконки вкладок висят посреди экрана, а весь контент исчез. На десктопе
+        // не проявлялось: широкое окно использует боковой рейл, а не нижний бар.
+        child: SafeArea(top: false, child: Center(heightFactor: 1, child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 560),
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 9),
-            child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [for (int i = 0; i < 4; i++) _tabItem(items[i].$1, items[i].$2, i)]),
+            // Expanded на каждую вкладку: при spaceAround с естественной шириной четыре подписи
+            // («Настройки» — длинная) не влезали в 360px и обрезались. Теперь вкладки делят
+            // ширину поровну, а подпись внутри при нехватке места ужимается.
+            child: Row(children: [for (int i = 0; i < 4; i++) Expanded(child: _tabItem(items[i].$1, items[i].$2, i))]),
           ),
         ))),
       ),
@@ -1133,7 +1147,9 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               Icon(ic, size: 22, color: sel ? C.accent : C.muted),
               const SizedBox(height: 4),
-              Text(label, style: mono(10.5, c: sel ? C.accent : C.muted, w: FontWeight.w600)),
+              // подпись вкладки ужимается, а не обрезается: «Настройки»/«Settings» длиннее ячейки
+              FittedBox(fit: BoxFit.scaleDown, child:
+                Text(label, maxLines: 1, style: mono(10.5, c: sel ? C.accent : C.muted, w: FontWeight.w600))),
             ]),
           ),
         ),
