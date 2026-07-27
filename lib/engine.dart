@@ -284,6 +284,16 @@ class TunnelEngine {
   /// Нужна потому, что «подключено» и «работает» — разные вещи: движок поднимается и рапортует
   /// об успехе, а сессию сквозь фильтрацию рвёт, и человек сидит с зелёной кнопкой без интернета.
   Future<bool> verifyConnected() async {
+    // Два круга по тем же причинам, что и в probe: рвать человеку рабочее подключение из-за
+    // одной не дошедшей проверки нельзя — это было бы хуже, чем не проверять вовсе.
+    for (var round = 0; round < 2; round++) {
+      if (round > 0) await Future<void>.delayed(const Duration(milliseconds: 700));
+      if (await _verifyOnce()) return true;
+    }
+    return false;
+  }
+
+  Future<bool> _verifyOnce() async {
     for (final url in probeUrls) {
       try {
         if (kind() == EngineKind.androidXray) {
@@ -308,11 +318,18 @@ class TunnelEngine {
 
   Future<int?> _probeAndroid(SubNode node) async {
     final cfg = xrayEntryConfigJson(node, socksPort: kXrayProbeSocksPort);
-    for (final url in probeUrls) {
-      try {
-        final ms = await _android.serverDelay(cfg, url).timeout(probeTimeout);
-        if (ms > 0) return ms;
-      } catch (_) { /* следующий адрес */ }
+    // Две попытки, а не одна. Проверено на живом прогоне: при холодном старте и загруженном
+    // устройстве рабочий узел иногда не укладывается в таймаут, и с одного раза его записали бы
+    // в непригодные — а потом человек видел бы «не работает» у сервера, который работает.
+    // Хоронить узел можно только по ПОДТВЕРЖДЁННОЙ неудаче.
+    for (var round = 0; round < 2; round++) {
+      if (round > 0) await Future<void>.delayed(const Duration(milliseconds: 700));
+      for (final url in probeUrls) {
+        try {
+          final ms = await _android.serverDelay(cfg, url).timeout(probeTimeout);
+          if (ms > 0) return ms;
+        } catch (_) { /* следующий адрес */ }
+      }
     }
     return null;
   }
