@@ -176,7 +176,9 @@ extension ShellAccount on ShellState {
           const SizedBox(height: 14),
           GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTap: () => _open(kBot),
+            // Раньше кнопка выкидывала в Telegram-бота: интерес возник в приложении, а рассказ
+            // про товар — снаружи, и половина людей туда не доходила. Теперь у коробки свой экран.
+            onTap: _openBBox,
             child: _card(strong: true, child: Row(children: [
               _gIcon(Icons.router),
               const SizedBox(width: 12),

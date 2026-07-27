@@ -43,6 +43,7 @@ part 'screens/settings.dart';
 part 'screens/lock.dart';
 part 'screens/onboarding.dart';
 part 'screens/paywall.dart';
+part 'screens/bbox.dart';    // B-box: свой экран товара, предзаказ и «поторопить сборку»
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();

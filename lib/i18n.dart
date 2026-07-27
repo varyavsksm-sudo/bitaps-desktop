@@ -216,6 +216,43 @@ const Map<String, String> _kEn = {
   'прямой узел': 'direct node',
   'через CDN': 'via CDN',
 
+  // ---- bbox.dart (экран B-box: товар, предзаказ, «поторопить сборку») ----
+  'Назад': 'Back',
+  'устройство для дома': 'a device for your home',
+  'VPN для всего дома': 'VPN for the whole home',
+  'Коробка становится вашим роутером: защищён каждый экран в доме — телевизор, приставка, колонка, ноутбук. Ничего не настраивая на каждом устройстве.':
+      'The box becomes your router: every screen at home is protected — TV, console, speaker, laptop. Nothing to set up on each device.',
+  'Сейчас идёт сборка и закупка материалов. Предзаказ ничего не списывает — это место в очереди и фиксация цены.':
+      'Assembly and sourcing are under way. A pre-order charges you nothing — it holds your place in the queue and locks the price.',
+  'что внутри': 'what is inside',
+  'Точка доступа': 'Access point',
+  'Раздаёт свой Wi-Fi: подключился — уже под защитой': 'It runs its own Wi-Fi: connect and you are already protected',
+  'Наш туннель внутри': 'Our tunnel inside',
+  'Те же узлы, что и в приложении, с обходом блокировок': 'The same nodes as in the app, with blocking bypass',
+  'Сколько угодно устройств': 'As many devices as you like',
+  'Телевизор, приставка, колонка — лимит подписки не тратится': 'TV, console, speaker — your subscription limit is not spent',
+  'Включил и забыл': 'Plug it in and forget it',
+  'Обновляется сама, настройка — один раз с телефона': 'Updates itself; you set it up once from your phone',
+  'цена': 'price',
+  'Устройство покупается один раз. Подписка на VPN оплачивается отдельно, как обычно.':
+      'The device is a one-time purchase. The VPN subscription is paid separately, as usual.',
+  'Предзаказ принят': 'Pre-order accepted',
+  'предзаказ': 'pre-order',
+  'Имя': 'Name',
+  'Телефон': 'Phone',
+  'Город': 'City',
+  'Адрес доставки': 'Delivery address',
+  'Индекс': 'Postcode',
+  'Комментарий (не обязательно)': 'Comment (optional)',
+  'Оформить предзаказ': 'Place a pre-order',
+  'Предоплаты нет. Заявка уходит менеджеру, он свяжется по указанному телефону.':
+      'No prepayment. The request goes to a manager who will call the number you gave.',
+  'поторопить сборку': 'speed up the build',
+  'Чем больше подтверждённых предзаказов, тем крупнее партия материалов и тем быстрее сборка. Напиши, если готов забрать раньше или можешь помочь с комплектующими.':
+      'The more confirmed pre-orders, the bigger the materials batch and the faster the build. Write to us if you can take yours earlier or can help with parts.',
+  'Что предлагаешь?': 'What do you suggest?',
+  'Напиши, что предлагаешь': 'Tell us what you suggest',
+
   // ---- account.dart (тарифы/подписка/ключ/устройства) ----
   '1 месяц': '1 month',
   '3 месяца': '3 months',
