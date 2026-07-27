@@ -447,13 +447,22 @@ extension ShellAccount on ShellState {
     await _open('https://bitapsvpn.com/happ.html');
   }
 
-  Widget _keyCard() => _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+  // Ключа ещё нет: пока человек не вошёл, keyStr держит заглушку-пример (kDemoKey). Показывать
+  // её как «ключ доступа для роутера» нельзя — это ключ в никуда: скопировав его в Happ, человек
+  // получает нерабочее подключение и решает, что сломан сервис. Поэтому у гостя вместо строки
+  // ключа — объяснение, а кнопки, раздающие ключ наружу (копировать, QR, поделиться, Happ), скрыты.
+  Widget _keyCard() {
+    final hasKey = keyStr.isNotEmpty && keyStr != kDemoKey;
+    return _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [_gIcon(Icons.qr_code_2), const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             _kicker(tr('ключ доступа')), const SizedBox(height: 3),
-            Text(loggedIn ? tr('твой ключ из аккаунта') : tr('для роутера и ручной настройки'), style: mono(11))])),
+            Text(hasKey
+                    ? (loggedIn ? tr('твой ключ из аккаунта') : tr('для роутера и ручной настройки'))
+                    : tr('появится после входа'),
+                style: mono(11))])),
           // Показать QR ключа — быстрый перенос на телефон/роутер сканером
-          IconButton(
+          if (hasKey) IconButton(
             onPressed: () => _showQr(keyStr, tr('QR ключа'),
                 hint: tr('Отсканируй в VPN-клиенте или другом устройстве')),
             iconSize: 22, padding: EdgeInsets.zero, visualDensity: VisualDensity.compact,
@@ -464,22 +473,29 @@ extension ShellAccount on ShellState {
           decoration: BoxDecoration(color: C.field, borderRadius: BorderRadius.circular(10)),
           // SelectableText: выделение мышью само доскролливает до хвоста длинного ключа и даёт
           // контекстное меню копирования (обычный Text в гориз. скролле хвост мышью не достать)
-          child: SingleChildScrollView(scrollDirection: Axis.horizontal,
-            child: SelectableText(keyStr, style: mono(11, c: C.text), maxLines: 1))),
+          child: hasKey
+              ? SingleChildScrollView(scrollDirection: Axis.horizontal,
+                  child: SelectableText(keyStr, style: mono(11, c: C.text), maxLines: 1))
+              : Text(tr('Войди по ключу или через Telegram — ключ подписки появится здесь'),
+                  style: mono(11, c: C.muted))),
         const SizedBox(height: 12),
         Row(children: [
-          Expanded(child: _btn(tr('Скопировать'), kind: 1, icon: Icons.copy, onTap: () => _copy(keyStr, tr('Ключ'), secret: true))),
-          const SizedBox(width: 12),
+          if (hasKey) ...[
+            Expanded(child: _btn(tr('Скопировать'), kind: 1, icon: Icons.copy, onTap: () => _copy(keyStr, tr('Ключ'), secret: true))),
+            const SizedBox(width: 12),
+          ],
           Expanded(child: loggedIn
               ? _btn(tr('Обновить'), kind: 2, icon: Icons.refresh, onTap: () => _refreshSub())
               : _btn(tr('Вставить'), kind: 2, icon: Icons.content_paste, onTap: _importKey)),
         ]),
-        const SizedBox(height: 10),
-        // «Отправить на другое устройство» — deep-link + сырой ключ через share-sheet
-        _btn(tr('Отправить на другое устройство'), kind: 2, icon: Icons.ios_share, onTap: _shareKey),
-        const SizedBox(height: 10),
-        // Happ понимает ВСЕ узлы подписки, включая «белый список» (xhttp), — даём быстрый импорт
-        _btn(tr('Открыть в Happ'), kind: 2, icon: Icons.open_in_new, onTap: _openInHapp),
+        if (hasKey) ...[
+          const SizedBox(height: 10),
+          // «Отправить на другое устройство» — deep-link + сырой ключ через share-sheet
+          _btn(tr('Отправить на другое устройство'), kind: 2, icon: Icons.ios_share, onTap: _shareKey),
+          const SizedBox(height: 10),
+          // Happ понимает ВСЕ узлы подписки, включая «белый список» (xhttp), — даём быстрый импорт
+          _btn(tr('Открыть в Happ'), kind: 2, icon: Icons.open_in_new, onTap: _openInHapp),
+        ],
         if (loggedIn && loginSecret != null) ...[
           const SizedBox(height: 12),
           _divider(), // единый разделитель как в остальном UI (было голое Divider(...))
@@ -507,6 +523,7 @@ extension ShellAccount on ShellState {
           ]),
         ],
       ]));
+  }
 
   Widget _devicesCard() => _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [_gIcon(Icons.devices), const SizedBox(width: 12),

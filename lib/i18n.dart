@@ -216,6 +216,9 @@ const Map<String, String> _kEn = {
   '6 МЕС': '6 MO',
   '1 ГОД': '1 YR',
   'ТРИАЛ': 'TRIAL',
+  'появится после входа': 'appears after you sign in',
+  'Войди по ключу или через Telegram — ключ подписки появится здесь':
+      'Sign in with your key or via Telegram — your subscription key will appear here',
   'В буфере нет VPN-ключа': 'No VPN key in the clipboard',
   'неизвестный хост': 'unknown host',
   'Ключ заменён ✓': 'Key replaced ✓',
