@@ -19,6 +19,8 @@ class AndroidXrayEngine {
   bool _initialized = false;
   void Function(String state)? _onState;
   String _state = 'disconnected'; // последнее состояние от плагина
+  /// Видели ли «подключено» в ТЕКУЩЕЙ попытке. До этого момента «отключено» — не обрыв.
+  bool _sawConnected = false;
 
   /// Плагин и его инициализация. Нужны и для остановки тоже: туннель переживает закрытие
   /// приложения, и после нового запуска остановить его иначе было бы нечем — VPN оставался
@@ -26,6 +28,15 @@ class AndroidXrayEngine {
   Future<V2ray> _engine() async {
     final v = _v2ray ??= V2ray(onStatusChanged: (s) {
       _state = _mapState(s.state);
+      if (_state == 'connected') _sawConnected = true;
+      // «Отключено» ДО первого «подключено» наверх не поднимаем.
+      //
+      // Плагин рассылает состояние широковещательно и с задержкой. Перед стартом нового
+      // туннеля мы гасим прежний — и его «отключено» прилетает уже после того, как новый
+      // поднялся. Приложение принимало это за обрыв и тут же убивало свежее подключение:
+      // в логе ядра было видно «core started» и через 50 мс «core stopped». Снаружи это
+      // выглядело как «подключается и сразу отключается».
+      if (!_sawConnected && (_state == 'disconnected' || _state == 'error')) return;
       _onState?.call(_state);
     });
     if (!_initialized) {
@@ -53,6 +64,7 @@ class AndroidXrayEngine {
     // Слушателя подключаем после остановки, чтобы её события не приняли за обрыв нового.
     _onState = null;
     await _stop(v);
+    _sawConnected = false; // новая попытка: «отключено» до «подключено» снова не считается обрывом
     _onState = onState;
     await v.startV2Ray(
       remark: remark,
@@ -69,6 +81,7 @@ class AndroidXrayEngine {
   /// Остановить туннель и дождаться, пока плагин это подтвердит. Без ожидания следующий
   /// старт мог прийти в ещё живой сервис — тогда он игнорировал новый конфиг.
   Future<void> _stop(V2ray v) async {
+    _sawConnected = false;
     await v.stopV2Ray();
     for (var i = 0; i < 30 && _state != 'disconnected'; i++) {
       await Future<void>.delayed(const Duration(milliseconds: 100));

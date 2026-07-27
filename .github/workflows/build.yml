@@ -143,6 +143,26 @@ jobs:
           grep -q 'android:allowBackup="false"' android/app/src/main/AndroidManifest.xml && echo "allowBackup ok" || (echo "allowBackup MISSING" && exit 1)
           sed -i.bak 's/minSdk = flutter.minSdkVersion/minSdk = 24/; s/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' android/app/build.gradle.kts 2>/dev/null || true
           sed -i.bak 's/minSdk = flutter.minSdkVersion/minSdk = 24/; s/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' android/app/build.gradle 2>/dev/null || true
+          # ── Распаковывать нативные библиотеки на диск (extractNativeLibs) ──
+          # ОБЯЗАТЕЛЬНО. Современная упаковка (по умолчанию) держит .so внутри APK и не пишет их
+          # в каталог lib/ — система грузит их прямо из архива. Для обычных библиотек это нормально,
+          # но libtun2socks.so VPN-плагин ЗАПУСКАЕТ КАК ПРОГРАММУ, а запустить файл, которого нет
+          # на диске, нельзя: «Cannot run program … No such file or directory».
+          # Последствие ровно такое: xray стартует, системный VPN поднимается, а перемычки между
+          # туннелем и движком нет — соединение есть, трафика нет, и сервис тут же гасится.
+          # Проверено на живом устройстве: без этой строки трафик не идёт вообще.
+          perl -0pi -e 's/(<application\b)/$1 android:extractNativeLibs="true"/ unless /extractNativeLibs/' android/app/src/main/AndroidManifest.xml
+          grep -q 'android:extractNativeLibs="true"' android/app/src/main/AndroidManifest.xml && echo "extractNativeLibs ok" || (echo "extractNativeLibs MISSING" && exit 1)
+          # Манифест перебивается настройкой сборки, поэтому дублируем её в Gradle.
+          for G in android/app/build.gradle.kts android/app/build.gradle; do
+            [ -f "$G" ] || continue
+            grep -q "useLegacyPackaging" "$G" && continue
+            case "$G" in
+              *.kts) perl -0pi -e 's/(\n\s*buildTypes\s*\{)/\n    packaging { jniLibs { useLegacyPackaging = true } }\n$1/' "$G" ;;
+              *)     perl -0pi -e 's/(\n\s*buildTypes\s*\{)/\n    packagingOptions { jniLibs { useLegacyPackaging = true } }\n$1/' "$G" ;;
+            esac
+          done
+          grep -rq "useLegacyPackaging" android/app/build.gradle* && echo "useLegacyPackaging ok" || (echo "useLegacyPackaging MISSING" && exit 1)
           # compileSdk НЕ фиксируем: шаблон Flutter подставляет актуальный (сейчас 36), а он выше
           # требований и VPN-плагина (35), и остальных плагинов (app_links/shared_preferences → 36).
           # Жёсткая цифра здесь уже ломала сборку: занижала compileSdk до 35.
