@@ -329,7 +329,11 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       hwidOf: () => hwid,
       serverOf: () => server,
       onNodes: _applyNodes,
-      nodeTagOf: () => bestServer ? null : server.id,
+      // Даже в режиме «лучший сервер» отдаём движку КОНКРЕТНЫЙ узел — тот же, что показан на
+      // экране. Раньше в авто-режиме сюда шёл null, и на Android движок выбирал узел сам, своим
+      // правилом: интерфейс писал «Румыния», а туннель уходил в Финляндию. Выбор делает интерфейс
+      // (serverForMode), движок его исполняет. null остаётся только если выбирать пока не из чего.
+      nodeTagOf: () => server.id.isEmpty ? null : server.id,
       dropAlertOn: () => tgl2,
       trafWarnOn: () => tgl4,
       onToast: _toast,
@@ -519,9 +523,17 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   // маршрутов у нас нет, поэтому второй путь падал: «Null check operator used on a null value»
   // внутри _onUnknownRoute. Внешне это выглядело так, что по ссылке из автонастройки приложение
   // открывается, но ключ не подставляется — на уже запущенном приложении импорт просто не доходил.
-  // Возвращаем true = «ссылку обработали», и Flutter дальше по ней не навигирует.
+  // На УЖЕ ЗАПУЩЕННОМ приложении ссылка приходит ТОЛЬКО сюда — поток app_links её не отдаёт
+  // (проверено на устройстве: вкладка не переключалась, импорт не происходил). Поэтому здесь не
+  // просто гасим навигацию, а разбираем ссылку сами тем же обработчиком.
+  // Возвращаем true всегда = «обработали»: именованных маршрутов у приложения нет, и любая
+  // попытка Flutter перейти по «маршруту» заканчивалась падением.
   @override
-  Future<bool> didPushRouteInformation(RouteInformation routeInformation) async => true;
+  Future<bool> didPushRouteInformation(RouteInformation routeInformation) async {
+    final uri = routeInformation.uri;
+    if (uri.scheme.toLowerCase() == kUrlScheme) _handleDeepLink(uri);
+    return true;
+  }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
