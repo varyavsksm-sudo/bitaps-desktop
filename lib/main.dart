@@ -514,6 +514,15 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     if (_foreground && !_locked && tab == 0 && btnStyle == 0) _spin.repeat();
   }
 
+  // Android доставляет deep-link ДВАЖДЫ: плагину app_links (там мы его и разбираем — см.
+  // _handleDeepLink) и отдельно в навигацию Flutter, как будто это имя маршрута. Именованных
+  // маршрутов у нас нет, поэтому второй путь падал: «Null check operator used on a null value»
+  // внутри _onUnknownRoute. Внешне это выглядело так, что по ссылке из автонастройки приложение
+  // открывается, но ключ не подставляется — на уже запущенном приложении импорт просто не доходил.
+  // Возвращаем true = «ссылку обработали», и Flutter дальше по ней не навигирует.
+  @override
+  Future<bool> didPushRouteInformation(RouteInformation routeInformation) async => true;
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // авто-замок при сворачивании. paused (мобильный) + hidden (десктоп свёрнут). НЕ inactive —
