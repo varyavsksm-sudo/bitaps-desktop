@@ -153,6 +153,11 @@ class Server {
   final bool premium, available;
   const Server(this.id, this.city, this.country, this.flag, this.ping, this.load,
       {this.premium = false, this.available = true, this.proto = 'Reality'});
+
+  /// Копия с изменённой доступностью: узел, который не пропускает трафик на этой сети,
+  /// выбирать нечего, и это решается уже после разбора подписки.
+  Server copyWith({bool? available}) => Server(id, city, country, flag, ping, load,
+      premium: premium, available: available ?? this.available, proto: proto);
 }
 
 /// «Сервер не выбран». Заглушка на время, пока подписка не загрузилась: выбирать нечего.
@@ -189,7 +194,20 @@ Server serverFromSubNode(SubNode n, {int ping = 0}) {
 /// На практике это была рельса через CDN, которая по замыслу медленнее прямой, то есть режим
 /// систематически подсовывал самый медленный путь. Незамеренные уходят в конец, а при прочих
 /// равных выигрывает прямой узел: CDN — обход блокировки, а не первый выбор.
-int compareServers(Server a, Server b, int Function(Server) ping) {
+/// [stateOf] — что мы знаем про узел на текущей сети (см. node_probe.dart). Проверенно рабочие
+/// всегда впереди непроверенных, а непригодные — всегда позади: «лучшим» не может быть сервер,
+/// через который заведомо ничего не грузится.
+int compareServers(Server a, Server b, int Function(Server) ping,
+    {NodeState Function(Server)? stateOf}) {
+  if (stateOf != null) {
+    int rank(Server s) => switch (stateOf(s)) {
+          NodeState.works => 0,
+          NodeState.unknown => 1,
+          NodeState.blocked => 2,
+        };
+    final ra = rank(a), rb = rank(b);
+    if (ra != rb) return ra.compareTo(rb);
+  }
   final pa = ping(a), pb = ping(b);
   if (pa > 0 && pb > 0 && pa != pb) return pa.compareTo(pb);
   if ((pa > 0) != (pb > 0)) return pa > 0 ? -1 : 1; // замеренный всегда впереди незамеренного

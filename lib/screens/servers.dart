@@ -32,7 +32,7 @@ extension ShellServers on ShellState {
           Semantics(
             button: true,
             enabled: !_pinging,
-            label: tr('Пинг серверов'),
+            label: tr('Проверить серверы'),
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: _pinging ? null : _pingServers,
@@ -40,9 +40,9 @@ extension ShellServers on ShellState {
                 _gIcon(Icons.network_ping),
                 const SizedBox(width: 12),
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(tr('Пинг серверов'), style: disp(16, w: FontWeight.w700)),
+                  Text(tr('Проверить серверы'), style: disp(16, w: FontWeight.w700)),
                   const SizedBox(height: 3),
-                  Text(_pinging ? tr('замеряю отклик…') : tr('замерить отклик доступных серверов'), style: mono(12)),
+                  Text(_pinging ? tr('проверяю, где идёт трафик…') : tr('проверить, через какие серверы реально идёт трафик'), style: mono(12)),
                 ])),
                 _pinging
                     ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: C.accent))
@@ -136,14 +136,20 @@ extension ShellServers on ShellState {
 
   Widget _serverRow(Server s, bool locked) {
     final sel = s.id == server.id;
-    final ping = pingOf(s); // живой замер (кнопка «Пинг» / автозамер после загрузки узлов)
-    // Замера ещё не было (0) — это НЕ «0 мс». Зелёный «быстрый отклик» на пустом месте обещал
-    // мгновенный сервер; показываем прочерк серым, пока настоящего числа нет.
-    final measured = ping > 0;
-    final pingCol = !measured ? C.muted : ping < 60 ? C.ok : ping < 120 ? C.warn : C.danger;
-    final pingLabel = !measured
-        ? tr('отклик не замерен')
-        : ping < 60 ? tr('быстрый отклик') : ping < 120 ? tr('средний отклик') : tr('медленный отклик');
+    final ping = pingOf(s);
+    final st = stateOf(s.id);
+    // Число показываем ТОЛЬКО у проверенных узлов и только сквозное — время ответа через сам
+    // туннель. Раньше здесь стоял TCP-коннект до адреса: при глушении интернета он проходит,
+    // а трафик — нет, и человек видел зелёный отклик у сервера, через который ничего не грузится.
+    final measured = st == NodeState.works && ping > 0;
+    final pingCol = st == NodeState.blocked
+        ? C.danger
+        : !measured ? C.muted : ping < 60 ? C.ok : ping < 120 ? C.warn : C.danger;
+    final pingLabel = switch (st) {
+      NodeState.blocked => tr('через этот сервер трафик не идёт'),
+      NodeState.unknown => tr('не проверен'),
+      NodeState.works => ping < 60 ? tr('быстрый отклик') : ping < 120 ? tr('средний отклик') : tr('медленный отклик'),
+    };
     // При locked (conn!=0) все строки кроме текущего сервера некликабельны-сейчас → приглушаем их,
     // чтобы список не выглядел обманчиво активным. Текущий сервер (sel) оставляем читаемым.
     final dimmed = (locked && !sel) || !s.available;
@@ -187,11 +193,13 @@ extension ShellServers on ShellState {
                       : tr(s.proto.startsWith('LTE') ? 'через CDN' : 'прямой узел'),
                     style: mono(12), overflow: TextOverflow.ellipsis)),
                   if (s.premium) ...[const SizedBox(width: 6), _badge('PRO', accentSoftInk)],
-                  if (!s.available) ...[const SizedBox(width: 6), _badge(tr('скоро'), C.muted)],
+                  if (st == NodeState.blocked) ...[const SizedBox(width: 6), _badge(tr('не работает'), C.danger)]
+                  else if (!s.available) ...[const SizedBox(width: 6), _badge(tr('скоро'), C.muted)],
                 ]),
               ])),
               Tooltip(message: measured ? '$pingLabel · $ping ms' : pingLabel,
-                child: Text(measured ? '$ping ms' : '—', style: mono(13, c: pingCol, w: FontWeight.w600))),
+                child: Text(st == NodeState.blocked ? '✕' : measured ? '$ping ms' : '—',
+                    style: mono(13, c: pingCol, w: FontWeight.w600))),
               // Нагрузку узла подписка не сообщает — «0 %» с пустой полоской читались как
               // «сервер совершенно свободен». Показываем колонку, только когда число настоящее.
               if (s.load > 0) ...[

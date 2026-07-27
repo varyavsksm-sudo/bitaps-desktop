@@ -134,6 +134,35 @@ class AndroidXrayEngine {
     return null;
   }
 
+  /// Время ответа СКВОЗЬ переданный конфиг: плагин поднимает временный экземпляр движка,
+  /// тянет [url] и гасит его. Системный VPN при этом не трогается — можно проверять соседний
+  /// узел, не роняя текущее подключение.
+  ///
+  /// Возвращает миллисекунды либо -1, если ответа не дождались (движок отдаёт именно -1).
+  /// Это единственный честный способ узнать, ПРОПУСКАЕТ ли узел трафик: TCP-коннект до его
+  /// адреса при глушении интернета проходит, а сессия внутри — нет.
+  Future<int> serverDelay(String configJson, String url) async {
+    try {
+      final v = _v2ray ??= V2ray(onStatusChanged: (_) {});
+      await v.initialize(notificationIconResourceName: 'ic_launcher', notificationIconResourceType: 'mipmap');
+      return await v.getServerDelay(config: configJson, url: url);
+    } catch (_) {
+      return -1;
+    }
+  }
+
+  /// Время ответа сквозь АКТИВНОЕ подключение (не поднимая временный экземпляр).
+  /// -1 — ответа не дождались.
+  Future<int> connectedDelay(String url) async {
+    try {
+      final v = _v2ray;
+      if (v == null) return -1;
+      return await v.getConnectedServerDelay(url: url);
+    } catch (_) {
+      return -1;
+    }
+  }
+
   /// Состояния плагина (V2RAY_CONNECTED / V2RAY_DISCONNECTED / V2RAY_CONNECTING) → словарь
   /// контроллера подключения.
   ///

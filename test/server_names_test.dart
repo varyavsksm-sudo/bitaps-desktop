@@ -75,9 +75,52 @@ void main() {
     });
   });
 
+  group('приговоры по узлам', _verdictTests);
+
   test('незнакомая страна не ломает список, а показывается как есть', () {
     appLang = 'en';
     // так выглядит нода в стране, которой ещё нет в таблице: перевода нет, но и падения нет
     expect(tr(_fromRemark('🇻🇦 Ватикан').city), 'Ватикан');
+  });
+}
+
+// ── Приговоры по узлам: что реально пропускает трафик ──
+// Регрессия, ради которой всё затевалось: при глушении интернета TCP-коннект до прямого узла
+// проходит, а трафик сквозь него — нет. Узел с зелёным откликом оказывался мёртвым, и «лучший
+// сервер» выбирал именно его.
+void _verdictTests() {
+  Server srv(String id, {bool cdn = false}) => Server(id, id, '', '🌐', 0, 0, proto: cdn ? 'LTE · CDN' : 'Reality');
+
+  test('непригодный узел никогда не выигрывает у рабочего', () {
+    final dead = srv('dead'), live = srv('live', cdn: true);
+    final st = {'dead': NodeState.blocked, 'live': NodeState.works};
+    final l = [dead, live]..sort((a, b) => compareServers(a, b, (_) => 0, stateOf: (s) => st[s.id]!));
+    expect(l.first.id, 'live', reason: 'через CDN трафик идёт, через прямой — нет');
+  });
+
+  test('проверенный рабочий выигрывает у непроверенного, даже если тот «быстрее»', () {
+    final fast = srv('fast'), ok = srv('ok');
+    final st = {'fast': NodeState.unknown, 'ok': NodeState.works};
+    final ping = {'fast': 10, 'ok': 300};
+    final l = [fast, ok]..sort((a, b) => compareServers(a, b, (s) => ping[s.id]!, stateOf: (s) => st[s.id]!));
+    expect(l.first.id, 'ok');
+  });
+
+  test('приговор с чужой сети не считается за истину', () {
+    final v = NodeVerdict(ok: true, at: DateTime.now(), net: '77.88');
+    expect(v.fresh, isTrue);
+    expect(v.net == '10.20', isFalse, reason: 'сеть другая — приговор к ней не относится');
+  });
+
+  test('устаревший приговор перестаёт быть свежим', () {
+    final old = NodeVerdict(ok: true, at: DateTime.now().subtract(kVerdictTtl * 2), net: 'x');
+    expect(old.fresh, isFalse);
+  });
+
+  test('приговор переживает запись и чтение', () {
+    final v = NodeVerdict(ok: false, ms: null, at: DateTime.now(), net: '5.6');
+    final back = NodeVerdict.fromJson(v.toJson());
+    expect(back!.ok, isFalse);
+    expect(back.net, '5.6');
   });
 }

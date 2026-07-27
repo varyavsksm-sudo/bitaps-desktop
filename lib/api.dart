@@ -491,40 +491,97 @@ extension ShellApi on ShellState {
   // собственных нод по городам пока нет, поэтому это отклик канала пользователя, а не
   // конкретного города. http.get каждый раз поднимает свежее соединение (TCP+TLS) —
   // значения не схлопываются в кэшированный keep-alive. Результаты обновляются построчно.
-  /// [silent] — автозамер сразу после загрузки узлов: молча, без тостов об успехе и о сети.
-  /// Без него весь список стоял бы прочерками, пока человек не догадается нажать «Пинг».
+  /// [silent] — автопроверка сразу после загрузки узлов: молча, без тостов об успехе и о сети.
+  /// Без неё весь список стоял бы прочерками, пока человек не догадается нажать «Проверить».
+  ///
+  /// Что здесь происходит и почему именно так. Раньше это был TCP-коннект до адреса узла, и
+  /// он врал: при глушении интернета порт прямого узла отвечает, а трафик сквозь него не идёт.
+  /// Человек видел зелёный отклик у всех серверов, подключался — и ничего не грузилось, тогда
+  /// как узлы через CDN работали. Теперь на каждый узел поднимается временный экземпляр движка
+  /// и сквозь него тянется маленький ответ из сети: дошло — узел рабочий, и число рядом с ним
+  /// это честное время ответа СКВОЗЬ туннель; не дошло — узел непригоден и выбирать его нечего.
   Future<void> _pingServers({bool silent = false}) async {
     if (_pinging) return; // гвард от двойного тапа
     rebuild(() => _pinging = true);
-    var okCount = 0;
+    var okCount = 0, badCount = 0;
     try {
-      // Замер честный и ПО КАЖДОМУ узлу: TCP-коннект к самому серверу подписки. Раньше здесь
-      // дёргался наш бэкенд — одинаковый хост для всех строк, то есть отклик канала пользователя,
-      // а не сервера. Замеряем параллельно: последовательно 8 узлов ждать слишком долго.
       final targets = subNodes.where((n) => n.server.isNotEmpty).toList();
-      // Без узлов замерять нечего — и это НЕ проблема сети. Раньше пустой список давал
+      // Без узлов проверять нечего — и это НЕ проблема сети. Раньше пустой список давал
       // «нет связи с интернетом», хотя интернет был, а не было подписки.
       if (targets.isEmpty) {
         if (!silent) _toast(tr('Сначала нужны серверы — обнови подписку'));
         return;
       }
-      final results = await Future.wait([
-        for (final n in targets) _tcpPing(n.server, n.port).then((ms) => MapEntry(n.tag, ms)),
-      ]);
-      for (final e in results) {
-        if (e.value == null) continue;
-        okCount++;
-        pingMeasured[e.key] = e.value!;
+      // Отпечаток сети снимаем ОДИН раз на проверку: приговоры привязаны к сети, потому что
+      // узел, закрытый у мобильного оператора, прекрасно работает с домашнего Wi-Fi.
+      final net = await _networkId();
+      if (mounted) rebuild(() => netId = net);
+
+      // Проверка тяжелее TCP-коннекта: каждый узел это отдельный запуск движка. На Android
+      // идём по одному (там временный экземпляр поднимает системная часть), на десктопе — по
+      // двое, чтобы 13 узлов не проверялись минуту.
+      final lanes = Platform.isAndroid ? 1 : 2;
+      final queue = List<SubNode>.from(targets);
+      Future<void> worker() async {
+        while (queue.isNotEmpty) {
+          final n = queue.removeAt(0);
+          final ms = await TunnelEngine.instance.probe(n);
+          if (!mounted) return;
+          final v = NodeVerdict(ok: ms != null, ms: ms, at: DateTime.now(), net: net);
+          rebuild(() {
+            nodeVerdicts[n.tag] = v;
+            if (ms != null) { pingMeasured[n.tag] = ms; okCount++; }
+            else { pingMeasured.remove(n.tag); badCount++; }
+          });
+        }
       }
-      // Пересобираем выбор «лучшего сервера»: он делался в момент загрузки узлов, когда замеров
-      // ещё не было, и оставался прежним даже после того, как отклик стал известен — то есть
-      // режим обещал оптимальный сервер, а держал случайный. Ручной выбор (bestServer=false)
-      // и живое подключение не трогаем.
-      if (okCount > 0 && bestServer && conn == 0) server = serverForMode(mode);
-      if (mounted) rebuild(() {});
-      if (!silent) _toast(okCount > 0 ? tr('Пинг обновлён ✓') : _netErr);
+      await Future.wait([for (var i = 0; i < lanes; i++) worker()]);
+      await _saveVerdicts();
+
+      // Выбор «лучшего сервера» пересобираем ПОСЛЕ проверки: до неё приговоров не было, и
+      // режим держал бы узел, через который ничего не грузится.
+      if (mounted && bestServer && conn == 0) rebuild(() => server = serverForMode(mode));
+      if (!silent) {
+        _toast(okCount > 0
+            ? (appLang == 'en'
+                ? 'Checked: $okCount working, $badCount not passing traffic'
+                : 'Проверено: $okCount рабочих, $badCount не пропускают трафик')
+            : (appLang == 'en'
+                ? 'None of the servers is passing traffic right now'
+                : 'Сейчас ни один сервер не пропускает трафик'));
+      }
     } finally {
       if (mounted) { rebuild(() => _pinging = false); } else { _pinging = false; }
+    }
+  }
+
+  /// Сохранить приговоры. Отдельно от общего _save: он вызывается часто и синхронно с UI,
+  /// а тут запись большого JSON — незачем дёргать её на каждый чих.
+  Future<void> _saveVerdicts() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setString('nodeVerdicts',
+          jsonEncode({for (final e in nodeVerdicts.entries) e.key: e.value.toJson()}));
+      await p.setString('netId', netId);
+    } catch (e) {
+      debugPrint('_saveVerdicts failed: $e');
+    }
+  }
+
+  /// Отпечаток сети — две первые группы внешнего адреса. Нужен, чтобы приговор по узлу,
+  /// полученный у мобильного оператора, не показывался как истина на домашнем Wi-Fi.
+  /// Не получилось узнать — возвращаем пустую строку: тогда приговоры считаются общими,
+  /// это хуже, но честнее, чем приписать их чужой сети.
+  Future<String> _networkId() async {
+    try {
+      final r = await http.get(Uri.parse('${kFnBase}whoami')).timeout(const Duration(seconds: 6));
+      if (r.statusCode != 200) return '';
+      final ip = '${(json.decode(r.body) as Map)['ip'] ?? ''}';
+      final parts = ip.split(ip.contains(':') ? ':' : '.');
+      if (parts.length < 2) return '';
+      return '${parts[0]}.${parts[1]}';
+    } catch (_) {
+      return '';
     }
   }
 
@@ -555,18 +612,6 @@ extension ShellApi on ShellState {
     }
   }
 
-  /// Отклик узла: время установления TCP-соединения. null — узел не ответил за таймаут.
-  Future<int?> _tcpPing(String host, int port, {Duration timeout = const Duration(seconds: 4)}) async {
-    final sw = Stopwatch()..start();
-    try {
-      final sock = await Socket.connect(host, port, timeout: timeout);
-      sw.stop();
-      sock.destroy();
-      return sw.elapsedMilliseconds.clamp(1, 9999);
-    } catch (_) {
-      return null;
-    }
-  }
 
   Future<void> _leakCheck() => _runTool(tr('Проверка утечек'), () async {
         final r = await http.get(Uri.parse('https://api.ipify.org?format=json')).timeout(const Duration(seconds: 15));

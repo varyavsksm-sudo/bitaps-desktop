@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform, File, Directory, Process, Socket;
+import 'dart:io' show Platform, File, Directory, Process;
 import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -35,6 +35,7 @@ part 'connection.dart';  // ConnectionController — жизненный цикл
 part 'native.dart';      // deep-link (bitaps://), автозапуск при входе, глобальный хоткей — десктоп
 part 'widgets.dart';     // painters + общие виджеты-строители
 part 'api.dart';         // сетевые вызовы к edge-функциям + сетевые инструменты
+part 'node_probe.dart';  // приговоры по узлам: что реально пропускает трафик на этой сети
 part 'screens/home.dart';
 part 'screens/servers.dart';
 part 'screens/account.dart';
@@ -211,6 +212,12 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   // Живые замеры отклика (кнопка «Пинг» на Серверах): id сервера → мс. Пока замера не было —
   // показываем статичный s.ping из models.dart. Не персистим: замер живёт в рамках сессии.
   final Map<String, int> pingMeasured = {};
+  /// Приговоры по узлам: пропускает ли узел трафик С ЭТОГО устройства. Заполняет проверка
+  /// серверов, живут между запусками (prefs), привязаны к сети — см. node_probe.dart.
+  final Map<String, NodeVerdict> nodeVerdicts = {};
+  /// Отпечаток текущей сети: две первые группы внешнего адреса. Домашний Wi-Fi и мобильный
+  /// оператор блокируют по-разному, и приговор с одной сети нельзя показывать на другой.
+  String netId = '';
   bool _pinging = false; // идёт замер пинга — гвард от двойного запуска
   String keyStr = kDemoKey;
   String? customCfg;
@@ -346,6 +353,17 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       dropAlertOn: () => tgl2,
       trafWarnOn: () => tgl4,
       demoOn: () => demoMode,
+      // Узел не пропустил трафик: помечаем его тут же, чтобы он перестал считаться доступным
+      // и не был выбран «лучшим» на следующем подключении.
+      onNodeDead: (tag) {
+        if (tag.isEmpty) return;
+        rebuild(() {
+          nodeVerdicts[tag] = NodeVerdict(ok: false, at: DateTime.now(), net: netId);
+          pingMeasured.remove(tag);
+          if (bestServer) server = serverForMode(mode);
+        });
+        _saveVerdicts();
+      },
       onToast: _toast,
       onPersist: _save,
       onSpin: _spinConn,
@@ -617,6 +635,21 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       themeMode = (p.getInt('themeMode') ?? 0).clamp(0, 2);
       autoConnect = p.getBool('autoConnect') ?? false;
       demoMode = p.getBool('demoMode') ?? false;
+      // Приговоры по узлам переживают перезапуск: иначе после каждого открытия приложения
+      // человек снова видел бы прочерки и заново гонял проверку.
+      netId = p.getString('netId') ?? '';
+      final vraw = p.getString('nodeVerdicts');
+      if (vraw != null && vraw.isNotEmpty) {
+        try {
+          final m = jsonDecode(vraw);
+          if (m is Map) {
+            for (final e in m.entries) {
+              final v = NodeVerdict.fromJson(e.value);
+              if (v != null) nodeVerdicts['${e.key}'] = v;
+            }
+          }
+        } catch (_) { /* испорченная запись — просто проверим заново */ }
+      }
       bestServer = p.getBool('bestServer') ?? true;
       tgl1 = p.getBool('tgl1') ?? false;
       appPin = secPin;
@@ -778,8 +811,23 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
 
   /// Доступные серверы — ТОЛЬКО узлы подписки. Запасного списка нет намеренно: пустой экран
   /// с объяснением честнее, чем выдуманные серверы, к которым нельзя подключиться.
-  List<Server> get fleet =>
-      [for (final n in subNodes) serverFromSubNode(n, ping: pingMeasured[n.tag] ?? 0)];
+  /// Что мы знаем про узел на ЭТОЙ сети.
+  NodeState stateOf(String tag) {
+    final v = nodeVerdicts[tag];
+    if (v == null || !v.fresh || (netId.isNotEmpty && v.net.isNotEmpty && v.net != netId)) {
+      return NodeState.unknown;
+    }
+    return v.ok ? NodeState.works : NodeState.blocked;
+  }
+
+  List<Server> get fleet => [
+        for (final n in subNodes)
+          serverFromSubNode(n, ping: pingMeasured[n.tag] ?? 0)
+              // Узел, через который трафик не идёт, выбирать нечего: гасим его в списке так же,
+              // как «скоро». Иначе человек жмёт зелёную строку и получает мёртвое подключение —
+              // ровно то, на что жаловался владелец во время глушения интернета.
+              .copyWith(available: stateOf(n.tag) != NodeState.blocked),
+      ];
 
   /// Применить свежий список узлов: обновляем парк и следим, чтобы выбранный сервер
   /// существовал (иначе подключение ушло бы к исчезнувшему узлу).
@@ -791,7 +839,8 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     });
   }
 
-  int _betterServer(Server a, Server b) => compareServers(a, b, pingOf);
+  int _betterServer(Server a, Server b) =>
+      compareServers(a, b, pingOf, stateOf: (s) => stateOf(s.id));
 
   // режим реально подбирает сервер: Стрим→мин.нагрузка, Игры/Авто→мин.пинг, Прив→зарубежный (иначе лучший)
   Server serverForMode(int m) {

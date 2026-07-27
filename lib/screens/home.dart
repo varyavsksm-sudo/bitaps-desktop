@@ -202,6 +202,13 @@ extension ShellHome on ShellState {
                 ]),
               ConnFix.refreshSub => _btn(tr('Обновить подписку'), kind: 1, icon: Icons.refresh,
                   onTap: _subLoading ? null : () => _refreshSub()),
+              // Узел не пропустил трафик — ведём к списку, где уже видно, какие сервера рабочие
+              ConnFix.pickOther => Row(children: [
+                  Expanded(child: _btn(tr('Выбрать сервер'), kind: 1, icon: Icons.dns_outlined, onTap: () => _goTab(1))),
+                  const SizedBox(width: 12),
+                  Expanded(child: _btn(tr('Проверить серверы'), kind: 2, icon: Icons.network_ping,
+                      onTap: _pinging ? null : _pingServers)),
+                ]),
               // поддержка живёт в Кабинете — ведём туда, а не наружу в переписку с нуля
               _ => _btn(tr('Написать в поддержку'), kind: 1, icon: Icons.forum, onTap: () => _goTab(2)),
             },

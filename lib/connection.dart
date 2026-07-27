@@ -11,6 +11,8 @@ enum ConnFix {
   happ,
   /// Сами не починим — довести человека до поддержки.
   support,
+  /// Узел не пропускает трафик: выбрать другой сервер (кнопка ведёт на список).
+  pickOther,
 }
 
 // ============================ CONNECTION CONTROLLER ============================
@@ -35,6 +37,7 @@ class ConnectionController extends ChangeNotifier {
     required this.dropAlertOn,
     required this.trafWarnOn,
     required this.demoOn,
+    required this.onNodeDead,
     required this.onToast,
     required this.onPersist,
     required this.onSpin,
@@ -54,6 +57,8 @@ class ConnectionController extends ChangeNotifier {
   /// Разрешена ли демо-сессия там, где движка нет. По умолчанию ВЫКЛЮЧЕНА: молчаливое демо
   /// после оплаты выглядело как рабочий VPN и человек не понимал, почему ничего не открывается.
   final bool Function() demoOn;
+  /// Узел не пропустил трафик — записать приговор, чтобы он не считался доступным.
+  final void Function(String nodeTag) onNodeDead;
   final void Function(String msg) onToast;
   final Future<void> Function() onPersist;
   final void Function(bool fast) onSpin;
@@ -193,6 +198,24 @@ class ConnectionController extends ChangeNotifier {
           return;
         }
         if (_disposed || gen != _gen) { await TunnelEngine.instance.disconnect(); return; } // отменили во время старта
+        // «Подключено» и «работает» — разные вещи. Движок поднимает туннель и рапортует об успехе,
+        // а сессию сквозь фильтрацию может рвать: у человека горит ключ в шторке и не грузится
+        // ничего. Именно так сейчас ведут себя ПРЯМЫЕ узлы при глушении интернета, тогда как узлы
+        // через CDN работают. Поэтому сразу после старта тянем маленький ответ СКВОЗЬ туннель.
+        final passes = await TunnelEngine.instance.verifyConnected();
+        if (_disposed || gen != _gen) { await TunnelEngine.instance.disconnect(); return; }
+        if (!passes) {
+          // Узел не пропускает трафик — держать на нём человека нельзя, это и есть то самое
+          // «подключено, но интернета нет». Гасим, помечаем узел и предлагаем взять рабочий.
+          await TunnelEngine.instance.disconnect().catchError((_) {});
+          onNodeDead(serverOf().id);
+          _fail(gen,
+              appLang == 'en'
+                  ? 'This server is not passing traffic right now'
+                  : 'Через этот сервер сейчас не идёт трафик',
+              fix: ConnFix.pickOther);
+          return;
+        }
         gEngineReal = true;
         _startSession(down: 0, up: 0);
         _timer = Timer.periodic(const Duration(seconds: 1), (_) {

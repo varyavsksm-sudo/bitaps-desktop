@@ -242,6 +242,112 @@ class TunnelEngine {
     if (p != null) await p.stop();
   }
 
+  /// Свободный локальный порт (нужен и проверке узлов, поэтому не приватный).
+  static Future<int> freePort() => _freePort();
+
+  // ── ПРОВЕРКА УЗЛА: пропускает ли он трафик С ЭТОГО УСТРОЙСТВА ──
+  //
+  // Смысл: поднять временный экземпляр движка ровно на один узел и вытянуть сквозь него
+  // маленький ответ из сети. Дошло — узел настоящий, и число это честное время ответа
+  // СКВОЗЬ туннель. Не дошло — узел непригоден, сколько бы его порт ни отвечал на TCP.
+  //
+  // Что тянем. Свой /gen204 — основной: всегда живой и отдаёт пустой ответ, то есть проверка
+  // стоит доли килобайта. Второй адрес независимый: если наш ориджин прилёг, нельзя объявлять
+  // непригодными все узлы разом.
+  static const List<String> probeUrls = [
+    'https://origin.bit-core.online/gen204',
+    'https://cp.cloudflare.com/generate_204',
+  ];
+  // Реальные узлы отвечают за 0.3–1.5 с. Шесть секунд — это уже не «медленно», а «не работает».
+  static const Duration probeTimeout = Duration(seconds: 6);
+
+  /// Время ответа сквозь узел в мс, либо null — трафик не пошёл. Никогда не бросает:
+  /// непригодный узел это результат проверки, а не сбой приложения.
+  Future<int?> probe(SubNode node) async {
+    try {
+      switch (kind()) {
+        case EngineKind.androidXray:
+          return await _probeAndroid(node);
+        case EngineKind.desktopXray:
+          return await _probeDesktop(node);
+        case EngineKind.native:
+        case EngineKind.none:
+          return null; // проверять нечем — выдумывать «работает» нельзя
+      }
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Идёт ли трафик сквозь УЖЕ ПОДНЯТЫЙ туннель. Отдельно от [probe]: там временный экземпляр
+  /// на конкретный узел, здесь — тот самый туннель, которым сейчас пользуется человек.
+  /// Нужна потому, что «подключено» и «работает» — разные вещи: движок поднимается и рапортует
+  /// об успехе, а сессию сквозь фильтрацию рвёт, и человек сидит с зелёной кнопкой без интернета.
+  Future<bool> verifyConnected() async {
+    for (final url in probeUrls) {
+      try {
+        if (kind() == EngineKind.androidXray) {
+          final ms = await _android.connectedDelay(url).timeout(probeTimeout);
+          if (ms > 0) return true;
+          continue;
+        }
+        // Десктоп: системный прокси уже указывает на наш вход, обычного запроса достаточно.
+        final client = HttpClient()..connectionTimeout = probeTimeout;
+        try {
+          final req = await client.getUrl(Uri.parse(url)).timeout(probeTimeout);
+          final res = await req.close().timeout(probeTimeout);
+          await res.drain<void>();
+          if (res.statusCode < 400) return true;
+        } finally {
+          client.close(force: true);
+        }
+      } catch (_) { /* следующий адрес */ }
+    }
+    return false;
+  }
+
+  Future<int?> _probeAndroid(SubNode node) async {
+    final cfg = xrayEntryConfigJson(node, socksPort: kXrayProbeSocksPort);
+    for (final url in probeUrls) {
+      try {
+        final ms = await _android.serverDelay(cfg, url).timeout(probeTimeout);
+        if (ms > 0) return ms;
+      } catch (_) { /* следующий адрес */ }
+    }
+    return null;
+  }
+
+  // На десктопе движок наш собственный: поднимаем процесс на один узел с локальным ВХОДОМ HTTP
+  // (HttpClient умеет http-прокси, socks — нет) и тянем канарейку через него.
+  Future<int?> _probeDesktop(SubNode node) async {
+    final bin = XrayBinary.locate();
+    if (bin == null) return null;
+    final socksPort = await _freePort();
+    final httpPort = await _freePort();
+    XrayProcess? proc;
+    final client = HttpClient()
+      ..connectionTimeout = probeTimeout
+      ..findProxy = (_) => 'PROXY 127.0.0.1:$httpPort';
+    try {
+      final cfg = xrayConfigJsonFromNodes([node], only: node.tag, socksPort: socksPort, httpPort: httpPort);
+      proc = await XrayProcess.start(cfg, socksPort: socksPort, binaryPath: bin);
+      for (final url in probeUrls) {
+        final sw = Stopwatch()..start();
+        try {
+          final req = await client.getUrl(Uri.parse(url)).timeout(probeTimeout);
+          final res = await req.close().timeout(probeTimeout);
+          await res.drain<void>();
+          sw.stop();
+          if (res.statusCode < 400) return sw.elapsedMilliseconds.clamp(1, 99999);
+        } catch (_) { /* следующий адрес */ }
+      }
+      return null;
+    } finally {
+      client.close(force: true);
+      await proc?.stop();
+    }
+  }
+
   static Future<int> _freePort() async {
     final s = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
     final port = s.port;
