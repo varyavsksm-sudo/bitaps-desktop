@@ -207,6 +207,8 @@ const Map<String, String> _kEn = {
   'проверить, через какие серверы реально идёт трафик': 'find out which servers actually pass traffic',
   'через этот сервер трафик не идёт': 'no traffic gets through this server',
   'не проверен': 'not checked yet',
+  'отключись — при включённом VPN замер пойдёт через туннель':
+      'disconnect first — with the VPN on this would measure the tunnel',
   'не работает': 'not working',
   'Выбрать сервер': 'Pick a server',
   'Через этот сервер сейчас не идёт трафик': 'No traffic is getting through this server right now',

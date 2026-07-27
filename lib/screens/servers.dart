@@ -35,14 +35,20 @@ extension ShellServers on ShellState {
             label: tr('Проверить серверы'),
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTap: _pinging ? null : _pingServers,
+              // При поднятом туннеле замер бессмыслен (мерил бы сам туннель) — гасим кнопку
+              onTap: (_pinging || conn != 0) ? null : _pingServers,
               child: _card(strong: true, child: Row(children: [
                 _gIcon(Icons.network_ping),
                 const SizedBox(width: 12),
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(tr('Проверить серверы'), style: disp(16, w: FontWeight.w700)),
                   const SizedBox(height: 3),
-                  Text(_pinging ? tr('проверяю, где идёт трафик…') : tr('проверить, через какие серверы реально идёт трафик'), style: mono(12)),
+                  Text(_pinging
+                          ? tr('проверяю, где идёт трафик…')
+                          : conn != 0
+                              ? tr('отключись — при включённом VPN замер пойдёт через туннель')
+                              : tr('проверить, через какие серверы реально идёт трафик'),
+                      style: mono(12)),
                 ])),
                 _pinging
                     ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: C.accent))
