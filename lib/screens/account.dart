@@ -192,6 +192,21 @@ extension ShellAccount on ShellState {
           _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [_gIcon(Icons.forum), const SizedBox(width: 12), _kicker(tr('поддержка'))]),
             const SizedBox(height: 12),
+            // Куда ответить. Раньше заявка уходила с пустым контактом: в группе поддержки стояло
+            // «✉️ E-mail:» ни с чем, а обратный мост работает только для тикетов, заведённых в
+            // боте. Человек видел «Отправлено ✓» и ждал ответа, которому некуда было прийти.
+            Container(padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: C.field, borderRadius: BorderRadius.circular(10)),
+              child: TextField(
+                controller: _supportContact,
+                maxLines: 1,
+                style: mono(13, c: C.text),
+                cursorColor: C.accent,
+                textInputAction: TextInputAction.next,
+                decoration: InputDecoration(isDense: true, border: InputBorder.none,
+                  contentPadding: EdgeInsets.zero, hintText: tr('Почта или @ник — куда ответить'), hintStyle: mono(13, c: C.muted)),
+              )),
+            const SizedBox(height: 10),
             Container(padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(color: C.field, borderRadius: BorderRadius.circular(10)),
               // Ctrl/Cmd+Enter отправляет (обычный Enter оставляем для переноса — сообщение
@@ -416,14 +431,15 @@ extension ShellAccount on ShellState {
   }
 
   // «Открыть в Happ»: отдаём ключ/подписку стороннему клиенту Happ его же deep-link'ом
-  // happ://add/<base64(ключ)> — той же схемой, что уже работает в кабинете на сайте.
+  // happ://add/<ключ или адрес подписки КАК ЕСТЬ> — ровно так, как это делает кабинет на сайте.
+  // Именно без base64: на base64 Happ открывался и отвечал «ссылка подписки не валидна» —
+  // хуже молчания. Сайт этот баг уже починил (см. open.html), здесь он оставался.
   // Зачем это здесь: узлы «белого списка» (транспорт xhttp через CDN) наш движок пока не умеет,
   // а Happ умеет — так пользователь получает ВСЕ узлы подписки, не дожидаясь смены движка.
   // Happ не установлен → уводим на страницу с инструкцией и ссылками на магазины.
   Future<void> _openInHapp() async {
-    final payload = base64.encode(utf8.encode(keyStr));
     try {
-      final ok = await launchUrl(Uri.parse('happ://add/$payload'), mode: LaunchMode.externalApplication);
+      final ok = await launchUrl(Uri.parse('happ://add/$keyStr'), mode: LaunchMode.externalApplication);
       if (ok) return;
     } catch (_) {/* приложения нет / схема не зарегистрирована — ниже фолбэк */}
     if (!mounted) return;

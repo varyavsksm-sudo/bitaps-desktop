@@ -11,7 +11,52 @@ part of 'main.dart';
 // весь UI перечитывает tr() и перерисовывается на лету.
 String appLang = 'ru';
 
-String tr(String ru) => appLang == 'en' ? (_kEn[ru] ?? ru) : ru;
+// kCountryEn — вторым словарём, а не строками внутри _kEn: названия стран приходят с сервиса
+// выдачи (метка узла подписки), их набор меняется при добавлении ноды и не связан с текстами
+// интерфейса. Порядок поиска важен: _kEn может переопределить страну (например «🇷🇺 Россия»
+// целиком с флагом), а kCountryEn закрывает всё остальное.
+String tr(String ru) => appLang == 'en' ? (_kEn[ru] ?? kCountryEn[ru] ?? ru) : ru;
+
+/// Названия стран для списка серверов: узлы приходят из подписки метками вида «🇮🇸 Исландия»
+/// и «🛡️ Румыния · LTE», то есть по-русски всегда. Без этой таблицы английский интерфейс
+/// показывал «Finland» рядом с «Исландия», «Гонконг» и «Румыния» — переведено было ровно то,
+/// что случайно осталось в словаре от старого выдуманного списка локаций.
+///
+/// Держим с запасом — все страны, куда реально ставят выходные узлы, а не только текущие 7:
+/// новая нода не должна требовать правки приложения, иначе смешанный язык вернётся молча.
+/// Чего в таблице нет — показываем по-русски (честный откат, ничего не ломается).
+const Map<String, String> kCountryEn = {
+  // Европа
+  'Австрия': 'Austria', 'Албания': 'Albania', 'Белоруссия': 'Belarus', 'Беларусь': 'Belarus',
+  'Бельгия': 'Belgium', 'Болгария': 'Bulgaria', 'Босния и Герцеговина': 'Bosnia and Herzegovina',
+  'Великобритания': 'United Kingdom', 'Венгрия': 'Hungary', 'Германия': 'Germany',
+  'Гибралтар': 'Gibraltar', 'Греция': 'Greece', 'Дания': 'Denmark', 'Ирландия': 'Ireland',
+  'Исландия': 'Iceland', 'Испания': 'Spain', 'Италия': 'Italy', 'Кипр': 'Cyprus',
+  'Латвия': 'Latvia', 'Литва': 'Lithuania', 'Лихтенштейн': 'Liechtenstein',
+  'Люксембург': 'Luxembourg', 'Мальта': 'Malta', 'Молдавия': 'Moldova', 'Молдова': 'Moldova',
+  'Монако': 'Monaco', 'Нидерланды': 'Netherlands', 'Норвегия': 'Norway', 'Польша': 'Poland',
+  'Португалия': 'Portugal', 'Румыния': 'Romania', 'Северная Македония': 'North Macedonia',
+  'Сербия': 'Serbia', 'Словакия': 'Slovakia', 'Словения': 'Slovenia', 'Украина': 'Ukraine',
+  'Финляндия': 'Finland', 'Франция': 'France', 'Хорватия': 'Croatia', 'Черногория': 'Montenegro',
+  'Чехия': 'Czechia', 'Швейцария': 'Switzerland', 'Швеция': 'Sweden', 'Эстония': 'Estonia',
+  // Азия и Ближний Восток
+  'Азербайджан': 'Azerbaijan', 'Армения': 'Armenia', 'Бахрейн': 'Bahrain', 'Вьетнам': 'Vietnam',
+  'Грузия': 'Georgia', 'Израиль': 'Israel', 'Индия': 'India', 'Индонезия': 'Indonesia',
+  'Иордания': 'Jordan', 'Казахстан': 'Kazakhstan', 'Катар': 'Qatar', 'Киргизия': 'Kyrgyzstan',
+  'Китай': 'China', 'Гонконг': 'Hong Kong', 'Макао': 'Macao', 'Тайвань': 'Taiwan',
+  'Малайзия': 'Malaysia', 'ОАЭ': 'UAE', 'Оман': 'Oman', 'Пакистан': 'Pakistan',
+  'Саудовская Аравия': 'Saudi Arabia', 'Сингапур': 'Singapore', 'Таиланд': 'Thailand',
+  'Турция': 'Turkey', 'Узбекистан': 'Uzbekistan', 'Филиппины': 'Philippines',
+  'Южная Корея': 'South Korea', 'Корея': 'South Korea', 'Япония': 'Japan',
+  // Америка, Африка, Океания
+  'Австралия': 'Australia', 'Аргентина': 'Argentina', 'Бразилия': 'Brazil', 'Канада': 'Canada',
+  'Колумбия': 'Colombia', 'Мексика': 'Mexico', 'Новая Зеландия': 'New Zealand',
+  'Панама': 'Panama', 'США': 'United States', 'Чили': 'Chile',
+  'Египет': 'Egypt', 'Кения': 'Kenya', 'Марокко': 'Morocco', 'Нигерия': 'Nigeria',
+  'ЮАР': 'South Africa',
+  // Россия оставлена отдельно в _kEn (там строка с флагом целиком) — здесь без флага
+  'Россия': 'Russia',
+};
 
 const Map<String, String> _kEn = {
   // ---- main.dart (диалоги/тосты/навигация) ----
@@ -37,6 +82,7 @@ const Map<String, String> _kEn = {
   'Нужен рабочий VPN-ключ': 'Need a working VPN key',
   'В подписке нет доступных серверов': 'No servers available in your subscription',
   'Узлы подписки не поддерживаются этой сборкой': 'This build cannot use the subscription servers',
+  'На этой системе туннель ещё не поддержан': 'This system cannot run the tunnel yet',
   'подписка bitaps': 'bitaps subscription',
   'Открыть в Happ': 'Open in Happ',
   'Соединение разорвано': 'Connection dropped',
@@ -86,9 +132,10 @@ const Map<String, String> _kEn = {
   'Обновлено ✓': 'Updated ✓',
   'Не удалось обновить': "Couldn't refresh",
   'Сначала напиши сообщение': 'Write a message first',
+  'Укажи, куда ответить — почта или @ник': 'Tell us where to reply — email or @handle',
   'Отправляю…': 'Sending…',
   'Пользователь приложения': 'App user',
-  'Отправлено в поддержку ✓': 'Sent to support ✓',
+  'Отправлено ✓ — ответим на указанный контакт': 'Sent ✓ — we\'ll reply to the contact you gave',
   'Проверка утечек': 'Leak check',
   'IP не получен': "Couldn't get IP",
   'Тест скорости': 'Speed test',
@@ -109,12 +156,19 @@ const Map<String, String> _kEn = {
   'устанавливаем соединение…': 'establishing connection…',
   'Подключиться': 'Connect',
   'Скорость появится после подключения': 'Speed will appear once connected',
-  'Режим подбирает сервер: Авто/Игры — минимальный пинг, Стрим — наименьшая нагрузка, Прив. — быстрый сервер (зарубежные скоро).':
-      'Mode picks the server: Auto/Games — lowest ping, Stream — lowest load, Private — the fastest server (international soon).',
+  'Режим подбирает сервер: Авто/Игры — минимальный отклик, Стрим — наименьшая нагрузка, Прив. — самый быстрый узел.':
+      'Mode picks the server: Auto/Games — lowest latency, Stream — lowest load, Private — the fastest node.',
+  'сервер не выбран': 'no server selected',
+  'появится вместе с подпиской': 'appears with your subscription',
   'сменить': 'change',
   'IP скрыт': 'IP hidden',
   'Демо-режим — скорость и IP показаны для примера': 'Demo mode — speed and IP are sample values',
   'Отключить': 'Disconnect',
+  // карточка «почему не подключилось» + её кнопки-действия
+  'Подключение не выполнено': 'Connection failed',
+  'Скачать приложение': 'Download the app',
+  'Обновить подписку': 'Refresh subscription',
+  'Написать в поддержку': 'Message support',
   'Подключаться к лучшему серверу': 'Connect to the best server',
   'при подключении сам возьму оптимальный под режим': "auto-picks the optimal server for your mode",
   'выключено — сервер выбираешь ты': 'off — you pick the server',
@@ -131,7 +185,11 @@ const Map<String, String> _kEn = {
   'прямые серверы': 'direct servers',
   'анти-глушилка · CDN': 'anti-jammer · CDN',
   'Войди в аккаунт — здесь появятся твои серверы': 'Sign in — your servers will appear here',
-  // названия локаций серверов (models.dart) — чтобы города/страны переводились в EN
+  // Названия локаций серверов. Раньше здесь лежала горстка строк из выдуманного списка
+  // (Москва/СПб/Екатеринбург), а реальные узлы приходят из подписки — и в английском интерфейсе
+  // список выглядел так: «Finland» переведена, а «Исландия», «Гонконг», «Румыния» остались
+  // по-русски. Названия стран вынесены в kCountryEn (ниже) и подмешиваются в этот словарь: одна
+  // таблица на все страны, куда мы можем поставить узел, вместо ручного добавления по одной.
   'Москва': 'Moscow',
   'Санкт-Петербург': 'Saint Petersburg',
   'Екатеринбург': 'Yekaterinburg',
@@ -139,14 +197,13 @@ const Map<String, String> _kEn = {
   'Франкфурт': 'Frankfurt',
   'Хельсинки': 'Helsinki',
   'Стамбул': 'Istanbul',
-  'Россия': 'Russia',
-  'Нидерланды': 'Netherlands',
-  'Германия': 'Germany',
-  'Финляндия': 'Finland',
-  'Турция': 'Turkey',
   'быстрый отклик': 'low latency',
   'средний отклик': 'medium latency',
   'медленный отклик': 'high latency',
+  'отклик не замерен': 'latency not measured',
+  'скоро': 'soon',
+  'прямой узел': 'direct node',
+  'через CDN': 'via CDN',
 
   // ---- account.dart (тарифы/подписка/ключ/устройства) ----
   '1 месяц': '1 month',
@@ -177,6 +234,7 @@ const Map<String, String> _kEn = {
   'B-box — VPN для всего дома': 'B-box — VPN for the whole home',
   'устройство для дома · 15 000 ₽': 'home device · 15 000 ₽',
   'поддержка': 'support',
+  'Почта или @ник — куда ответить': 'Email or @handle — where to reply',
   'Опиши проблему…': 'Describe the problem…',
   'Отправить': 'Send',
   'или напиши @bitapssupport': 'or message @bitapssupport',
@@ -243,6 +301,7 @@ const Map<String, String> _kEn = {
   'Сигнал при расходе от 5 ГБ за сессию': 'Alert at 5 GB+ used per session',
   'Авто-подключение': 'Auto-connect',
   'Подключаться сразу при запуске': 'Connect right at startup',
+  'Показать интерфейс без реального туннеля': 'Show the interface without a real tunnel',
   'инструменты': 'tools',
   'подключение': 'connection',
   'Авто': 'Auto',
@@ -288,7 +347,8 @@ const Map<String, String> _kEn = {
   'Подписка живёт в Telegram-боте, а этот клиент — её пульт: ключ, устройства и кабинет в одном окне.':
       'Your subscription lives in our Telegram bot — this client is its remote: key, devices and account in one window.',
   'Личный VPN-ключ': 'Personal VPN key',
-  'один ключ — до 10 устройств на одной подписке': 'one key — up to 10 devices on one subscription',
+  'один ключ на подписку — доп. устройства докупаются отдельно':
+      'one key per subscription — extra devices are bought separately',
   'Все платформы': 'All platforms',
   'Windows, macOS, Linux, Android — одно приложение': 'Windows, macOS, Linux, Android — one app',
   'Оплата как удобно': 'Pay your way',
@@ -302,8 +362,11 @@ const Map<String, String> _kEn = {
   'По Коду входа': 'With a login code',
   'короткий код из бота — если ключ не под рукой': 'a short code from the bot — when the key is not at hand',
   'Всё это — на вкладке «Кабинет».': 'All of this lives in the "Account" tab.',
-  'Подключение сейчас — демо, без реального туннеля. Интерфейс можно посмотреть целиком, вход не обязателен.':
-      'The connection is currently a demo — no real tunnel. You can explore the whole interface, no sign-in required.',
+  'Настоящий туннель': 'A real tunnel',
+  'Туннель на этой системе пока не поднимается — интерфейс можно посмотреть целиком, вход не обязателен.':
+      'This system cannot run the tunnel yet — you can still explore the whole interface, no sign-in required.',
+  'Ключ из аккаунта поднимает туннель прямо в приложении. Интерфейс можно посмотреть и без входа.':
+      'The key from your account raises the tunnel right in the app. You can explore the interface without signing in.',
   'VPN-ключ / Код входа': 'VPN key / login code',
   'Посмотреть без входа': 'Look around without signing in',
   'Показать знакомство': 'Show intro',
@@ -313,6 +376,8 @@ const Map<String, String> _kEn = {
   'тарифы': 'plans',
   'устройства': 'devices',
   '+50 ₽/мес за каждое доп-устройство · максимум 10': '+50 ₽/mo per extra device · 10 max',
+  'доп. устройство докупается в боте за токены — цена за остаток срока':
+      'extra devices are bought in the bot with tokens — priced for the remaining term',
   'выбор большинства': 'most popular',
   'Итого': 'Total',
   'VIP: цена считается по тарифу на 10 устройств — точный итог покажет бот':
@@ -388,7 +453,8 @@ const Map<String, String> _kEn = {
 
   // ---- faq (account) ----
   'Сколько устройств можно подключить?': 'How many devices can I connect?',
-  'До 10 устройств одновременно по одной подписке.': 'Up to 10 devices at once on one subscription.',
+  'Подписка работает на одном устройстве. Дополнительные докупаются в боте за токены — цена считается за остаток срока.':
+      'A subscription covers one device. Extra devices are bought in the bot with tokens — priced for the remaining term.',
   'Вы ведёте логи?': 'Do you keep logs?',
   'Нет. Мы не храним логи активности — только техническую информацию для работы сервиса.':
       "No. We don't store activity logs — only technical info to run the service.",

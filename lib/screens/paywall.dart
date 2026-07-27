@@ -1,10 +1,15 @@
 part of '../main.dart';
 
 // ============================ PAYWALL («Продлить» внутри приложения) ============================
-// Нативная витрина тарифов: 4 канон-тарифа (kPlanDefs = зеркало _shared/plans.ts, 399/999/1790/2990 ₽,
-// +50 ₽/мес за доп-устройство, максимум 10) + селектор устройств + стрик-подсказка из app-sub.
-// НОВЫХ платёжных рельсов нет: «Оплатить» — deep-link в бота (?start=subscribe_<plan>_<dev>)
-// для Telegram-аккаунтов или pay.html?plan=&dev= для веб-аккаунтов (отрицательный tgId).
+// Нативная витрина тарифов: 4 канон-тарифа (kPlanDefs = зеркало _shared/plans.ts, 399/999/1790/2990 ₽)
+// + стрик-подсказка из app-sub. НОВЫХ платёжных рельсов нет: «Оплатить» — deep-link в бота
+// (?start=subscribe_<plan>_<dev>) для Telegram-аккаунтов или pay.html?plan=&dev= для веб-аккаунтов
+// (отрицательный tgId).
+//
+// Селектор устройств показываем ТОЛЬКО веб-аккаунтам. Бот продаёт подписку ровно на одно
+// устройство (PLAN_DEVICES=1) и число из deep-link игнорирует, а web-pay честно считает
+// device_limit. Раньше селектор стоял для всех: человек выбирал 4 устройства, видел 4 190 ₽,
+// уходил в бота, платил 2 990 ₽ за одно — и через день упирался в «Лимит устройств исчерпан».
 extension ShellPaywall on ShellState {
   void _openPaywall() {
     // страховка: гостю показывать нечего — его «Продлить» не рисуется (см. _subCard)
@@ -17,7 +22,10 @@ extension ShellPaywall on ShellState {
     final webAcc = tgId != null && tgId! < 0; // веб-аккаунт продлевается на сайте, не в боте
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => StatefulBuilder(builder: (ctx, setSt) {
       final plan = kPlanDefs[sel];
-      final total = plan.base + (dev - 1) * kExtraPerMonthRub * plan.months;
+      // В боте устройство ровно одно, что бы ни стояло в селекторе, — считаем итог по факту,
+      // а не по несуществующему выбору.
+      final devCount = webAcc ? dev : 1;
+      final total = plan.base + (devCount - 1) * kExtraPerMonthRub * plan.months;
       final perMo = (total / plan.months).round();
       return Scaffold(
         backgroundColor: C.bg,
@@ -45,7 +53,7 @@ extension ShellPaywall on ShellState {
               _kicker(tr('тарифы')),
               const SizedBox(height: 10),
               for (int i = 0; i < kPlanDefs.length; i++) ...[
-                _planTile(i, sel, dev, (v) => setSt(() => sel = v)),
+                _planTile(i, sel, devCount, (v) => setSt(() => sel = v)),
                 const SizedBox(height: 10),
               ],
               const SizedBox(height: 4),
@@ -55,14 +63,21 @@ extension ShellPaywall on ShellState {
                 _gIcon(Icons.devices),
                 const SizedBox(width: 12),
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(appLang == 'en' ? '$dev ${dev == 1 ? 'device' : 'devices'}' : '$dev ${_deviceWord(dev)}',
+                  Text(appLang == 'en' ? '$devCount ${devCount == 1 ? 'device' : 'devices'}' : '$devCount ${_deviceWord(devCount)}',
                       style: disp(16, w: FontWeight.w700)),
                   const SizedBox(height: 3),
-                  Text(tr('+50 ₽/мес за каждое доп-устройство · максимум 10'), style: mono(11, c: C.muted)),
+                  Text(
+                      webAcc
+                          ? tr('+50 ₽/мес за каждое доп-устройство · максимум 10')
+                          : tr('доп. устройство докупается в боте за токены — цена за остаток срока'),
+                      style: mono(11, c: C.muted)),
                 ])),
-                _devBtn(Icons.remove, dev > 1 ? () => setSt(() => dev--) : null),
-                const SizedBox(width: 8),
-                _devBtn(Icons.add, dev < kMaxDevices ? () => setSt(() => dev++) : null),
+                // ➖/➕ — только веб-чекауту: он единственный принимает device_limit
+                if (webAcc) ...[
+                  _devBtn(Icons.remove, dev > 1 ? () => setSt(() => dev--) : null),
+                  const SizedBox(width: 8),
+                  _devBtn(Icons.add, dev < kMaxDevices ? () => setSt(() => dev++) : null),
+                ],
               ])),
               // стрик-подсказка: реальные данные app-sub (продление ДО истечения даёт +3/+5/+7 дней)
               if (subActive && subNextBonus > 0) ...[
@@ -102,9 +117,11 @@ extension ShellPaywall on ShellState {
                 ],
                 const SizedBox(height: 14),
                 _btn(tr('Оплатить'), kind: 0, icon: Icons.bolt, onTap: () {
+                  // Суффикс «_1» боту нужен: по нему его регулярка узнаёт тариф и открывает сразу
+                  // способ оплаты. Само число он игнорирует — подписка всегда на одно устройство.
                   _open(webAcc
                       ? '$kPayUrl?plan=${plan.code}&dev=$dev'
-                      : '$kBot?start=subscribe_${plan.code}_$dev');
+                      : '$kBot?start=subscribe_${plan.code}_1');
                 }),
                 const SizedBox(height: 10),
                 Center(child: Text(

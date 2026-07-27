@@ -1,5 +1,18 @@
 part of 'main.dart';
 
+/// Что предложить сделать с неудачной попыткой подключения — кнопка под причиной на Главной.
+/// Причина без действия оставляет человека там же, где и молчание: «не работает, и что теперь».
+enum ConnFix {
+  /// Действия нет — достаточно объяснения (например, повторить попытку).
+  none,
+  /// Обновить подписку: истекла, занят лимит устройств, узлов не пришло.
+  refreshSub,
+  /// Отдать ключ стороннему клиенту Happ — он умеет то, что не умеет наш движок.
+  happ,
+  /// Сами не починим — довести человека до поддержки.
+  support,
+}
+
 // ============================ CONNECTION CONTROLLER ============================
 // Жизненный цикл VPN-подключения вынесен из ShellState (god-object): здесь живут состояние
 // туннеля (conn/secs/скорость/поколение/таймеры/счётчик трафика) и вся логика connect/disconnect,
@@ -7,6 +20,7 @@ part of 'main.dart';
 //   keyOf/serverOf   — актуальные ключ и выбранный сервер из ShellState
 //   dropAlertOn      — тумблер «Обрыв соединения»
 //   trafWarnOn       — тумблер «Лимит трафика»
+//   demoOn           — тумблер «Демо-режим» (Настройки): разрешена ли демо-сессия без движка
 //   onToast          — показать тост (реализует ShellState)
 //   onPersist        — сохранить состояние (_save; нужен для счётчика сессий)
 //   onSpin(fast)     — крутить кнопку-шестерёнку: быстро во время коннекта, медленно в покое
@@ -20,6 +34,7 @@ class ConnectionController extends ChangeNotifier {
     required this.nodeTagOf,
     required this.dropAlertOn,
     required this.trafWarnOn,
+    required this.demoOn,
     required this.onToast,
     required this.onPersist,
     required this.onSpin,
@@ -36,11 +51,19 @@ class ConnectionController extends ChangeNotifier {
   final String? Function() nodeTagOf;
   final bool Function() dropAlertOn;
   final bool Function() trafWarnOn;
+  /// Разрешена ли демо-сессия там, где движка нет. По умолчанию ВЫКЛЮЧЕНА: молчаливое демо
+  /// после оплаты выглядело как рабочий VPN и человек не понимал, почему ничего не открывается.
+  final bool Function() demoOn;
   final void Function(String msg) onToast;
   final Future<void> Function() onPersist;
   final void Function(bool fast) onSpin;
 
   int conn = 0; // 0 off · 1 connecting · 2 on
+  /// Почему последняя попытка не удалась (null — причин нет). Тост живёт три секунды, а человек
+  /// к этому моменту смотрит на «Отключено · нажми на кнопку» и читает это как «нажатие не
+  /// сработало». Причина обязана оставаться на экране до следующей попытки — см. карточку на Главной.
+  String? failMsg;
+  ConnFix failFix = ConnFix.none;
   int secs = 0;
   int down = 0, up = 0;
   int sessions = 0;
@@ -78,6 +101,7 @@ class ConnectionController extends ChangeNotifier {
     if (conn == 0) {
       final gen = ++_gen; // это конкретное подключение; отмена/реконнект сменят _gen
       conn = 1;
+      failMsg = null; failFix = ConnFix.none; // новая попытка — старую причину с экрана убираем
       notifyListeners();
       onSpin(true);
 
@@ -95,21 +119,24 @@ class ConnectionController extends ChangeNotifier {
         final isSub = isSubscriptionUrl(key);
         // пускаем все схемы, что умеет singbox_config (не только vless://) — иначе валидный
         // trojan/vmess/ss/hysteria2-ключ ложно отвергался бы «Нужен рабочий VPN-ключ».
-        if (!isSub && !kSupportedKeySchemes.any((s) => key.toLowerCase().startsWith(s))) { _fail(gen, tr('Нужен рабочий VPN-ключ')); return; }
+        if (!isSub && !kSupportedKeySchemes.any((s) => key.toLowerCase().startsWith(s))) { _fail(gen, tr('Нужен рабочий VPN-ключ'), fix: ConnFix.refreshSub); return; }
         List<SubNode> nodes = const [];
         if (isSub) {
           final sub = await fetchSubscription(key, hwid: hwidOf(), deviceOs: Platform.operatingSystem);
           if (_disposed || gen != _gen) return; // отменили, пока грузилась подписка
           // Сервис отвечает уведомлением вместо узлов: подписка истекла / исчерпан лимит устройств.
           // Показываем его текст как есть — он уже написан для пользователя и локализован сервисом.
-          if (sub.notice != null && !sub.ok) { _fail(gen, sub.notice!); return; }
-          if (sub.error != null) { _fail(gen, sub.error!); return; }
+          if (sub.notice != null && !sub.ok) { _fail(gen, sub.notice!, fix: ConnFix.refreshSub); return; }
+          if (sub.error != null) { _fail(gen, sub.error!, fix: ConnFix.refreshSub); return; }
           onNodes(sub.nodes);
           nodes = TunnelEngine.usableNodes(sub.nodes);
           if (nodes.isEmpty) {
-            _fail(gen, sub.nodes.isNotEmpty
-                ? tr('Узлы подписки не поддерживаются этой сборкой')
-                : tr('В подписке нет доступных серверов'));
+            // Узлы пришли, но наш движок их не понимает → Happ понимает: это не тупик, а обход.
+            _fail(gen,
+                sub.nodes.isNotEmpty
+                    ? tr('Узлы подписки не поддерживаются этой сборкой')
+                    : tr('В подписке нет доступных серверов'),
+                fix: sub.nodes.isNotEmpty ? ConnFix.happ : ConnFix.refreshSub);
             return;
           }
         } else {
@@ -117,12 +144,24 @@ class ConnectionController extends ChangeNotifier {
           // чтобы дальше был один путь подключения для обоих случаев.
           final one = subNodeFromKey(key);
           if (one == null) {
-            _fail(gen, appLang == 'en' ? 'Key is corrupted' : 'Ключ повреждён');
+            _fail(gen, appLang == 'en' ? 'Key is corrupted' : 'Ключ повреждён', fix: ConnFix.refreshSub);
             return;
           }
           nodes = TunnelEngine.usableNodes([one]);
-          if (nodes.isEmpty) { _fail(gen, tr('Этот ключ не поддерживается этой сборкой')); return; }
+          if (nodes.isEmpty) { _fail(gen, tr('Этот ключ не поддерживается этой сборкой'), fix: ConnFix.happ); return; }
         }
+        // Разрешение на VPN спрашиваем ДО таймаута: системный диалог показывает система, читает
+        // его человек, и его время не имеет отношения к тому, «завис ли движок». Раньше эти
+        // секунды входили в те же 40 — и неспешный пользователь получал «таймаут» одновременно
+        // с поднявшимся туннелем: ключ в шторке горит, а приложение говорит «Отключено».
+        if (!await TunnelEngine.instance.ensurePermission()) {
+          if (_disposed || gen != _gen) return;
+          _fail(gen, appLang == 'en'
+              ? 'VPN permission is required to connect'
+              : 'Нужно разрешить приложению создавать VPN-подключение', fix: ConnFix.none);
+          return;
+        }
+        if (_disposed || gen != _gen) return; // отменили, пока человек читал диалог
         try {
           // таймаут: если движок завис и не вернул ни успех, ни ошибку — не залипаем
           // навсегда в «Подключение…», а честно откатываемся в «выключено» с тостом.
@@ -133,16 +172,21 @@ class ConnectionController extends ChangeNotifier {
                        server: serverOf().city)
               .timeout(const Duration(seconds: 40));
         } on TunnelUnavailable catch (e) {
-          _fail(gen, '$e');
+          // Нет разрешения на VPN-подключение: чинится повторной попыткой и «разрешить» в системе.
+          _fail(gen, '$e', fix: ConnFix.none);
           return;
         } on EngineUnavailable catch (e) {
-          _fail(gen, '$e');
+          // Проблема самого движка (нет бинаря, занят порт) — Happ поднимет тот же ключ мимо него.
+          _fail(gen, '$e', fix: ConnFix.happ);
           return;
         } on TimeoutException {
-          // движок мог зависнуть и подняться уже после таймаута — гасим его, чтобы не осталось
-          // «осиротевшего» туннеля при выключенном UI (как ветка disconnect в reset()).
-          TunnelEngine.instance.disconnect();
-          _fail(gen, appLang == 'en' ? 'Connection timed out' : 'Подключение не удалось — таймаут');
+          // Движок мог подняться уже ПОСЛЕ таймаута — тогда останется «осиротевший» туннель:
+          // ключ в шторке горит, а интерфейс показывает «Отключено». Гасим дважды с паузой:
+          // первый вызов ловит уже поднятый туннель, второй — тот, что встал следом.
+          await TunnelEngine.instance.disconnect().catchError((_) {});
+          Future<void>.delayed(const Duration(seconds: 3),
+              () => TunnelEngine.instance.disconnect().catchError((_) {}));
+          _fail(gen, appLang == 'en' ? 'Connection timed out' : 'Подключение не удалось — таймаут', fix: ConnFix.none);
           return;
         } catch (e) {
           _fail(gen, appLang == 'en' ? 'Failed to connect: $e' : 'Не удалось подключиться: $e');
@@ -168,7 +212,17 @@ class ConnectionController extends ChangeNotifier {
         return;
       }
 
-      // ДЕМО-режим (kRealTunnel=false): туннель НЕ поднимается — показываем демо-сессию
+      // Движка на этой платформе нет. Раньше отсюда МОЛЧА стартовала демо-сессия: человек видел
+      // бегущий таймер, скорости и «Демо-режим» — экран выглядел рабочим, а трафик шёл мимо
+      // туннеля. Оплативший при этом не понимал, почему ничего не открылось. Говорим прямо и
+      // даём рабочий обход (Happ умеет наш ключ); демо остаётся, но только по явной просьбе
+      // из Настроек — «посмотреть интерфейс», а не «подключиться».
+      if (!demoOn()) {
+        _fail(gen, tr('На этой системе туннель ещё не поддержан'), fix: ConnFix.happ);
+        return;
+      }
+
+      // ДЕМО-режим (тумблер в Настройках): туннель НЕ поднимается — показываем демо-сессию
       // с явной пометкой «демо» в UI (см. home.dart). Цифры условны, это НЕ реальная защита.
       Future.delayed(const Duration(milliseconds: 1700), () {
         if (_disposed || gen != _gen) return; // «поздний» коллбэк отменённой попытки — игнор
@@ -191,6 +245,7 @@ class ConnectionController extends ChangeNotifier {
   // старт сессии: обнуляем счётчики трафика/времени и поднимаем статус в «Подключено»
   void _startSession({required int down, required int up}) {
     conn = 2; secs = 0; this.down = down; this.up = up; sessions++;
+    failMsg = null; failFix = ConnFix.none; // получилось — причина прошлой неудачи неактуальна
     _sessMB = 0; _trafWarned = false;
     notifyListeners();
     onPersist();
@@ -217,12 +272,15 @@ class ConnectionController extends ChangeNotifier {
     }
   }
 
-  // боевой режим: не удалось подключиться — честно откатываемся в «выключено» + тост
-  void _fail(int gen, String msg) {
+  // боевой режим: не удалось подключиться — честно откатываемся в «выключено».
+  // Причину показываем ДВАЖДЫ намеренно: тост ловит момент (подключение могли запустить хоткеем
+  // или из трея с любой вкладки), карточка на Главной держит её вместе с кнопкой «что делать».
+  void _fail(int gen, String msg, {ConnFix fix = ConnFix.support}) {
     if (_disposed || gen != _gen) return;
     _stopWatch();
     onSpin(false);
     conn = 0;
+    failMsg = msg; failFix = fix;
     notifyListeners();
     onToast(msg);
   }
@@ -236,6 +294,10 @@ class ConnectionController extends ChangeNotifier {
     _stopWatch();
     onSpin(false);
     conn = 0; secs = 0;
+    // Причину обрыва держим на экране так же, как причину неудачного старта: человек мог
+    // отойти от компьютера и вернуться уже после того, как тост погас.
+    failMsg = (why != null && why.isNotEmpty) ? why : tr('Соединение разорвано');
+    failFix = ConnFix.support;
     notifyListeners();
     // Причину от движка показываем ВСЕГДА, независимо от тумблера «Обрыв соединения»: тумблер
     // про фоновые уведомления, а это ответ на действие пользователя — без него отказ выглядит
@@ -257,6 +319,7 @@ class ConnectionController extends ChangeNotifier {
     _stopWatch();
     onSpin(false);
     conn = 0; secs = 0;
+    failMsg = null; failFix = ConnFix.none; // причина прошлого аккаунта новому не показывается
     notifyListeners();
   }
 

@@ -65,21 +65,33 @@ extension ShellHome on ShellState {
         Center(child: Text(
           conn == 0 ? tr('нажми на кнопку') : conn == 1 ? tr('устанавливаем соединение…') : (gEngineReal ? _protectionScope() : tr('демо — без реального туннеля')),
           style: mono(12))),
+        // Причина неудачи живёт на экране до следующей попытки — вместе с кнопкой «что делать».
+        // Раньше причина уходила с тостом за три секунды, и оставалось «нажал — ничего не произошло».
+        if (conn == 0 && connFail != null) ...[
+          const SizedBox(height: 18),
+          _connFailCard(connFail!, connFix),
+        ],
         const SizedBox(height: 20),
         Row(children: [
           for (int i = 0; i < 4; i++)
             Expanded(child: Padding(padding: EdgeInsets.only(right: i < 3 ? 8 : 0), child: _modeChip(modeLabels[i], i))),
         ]),
         const SizedBox(height: 10),
-        Text(tr('Режим подбирает сервер: Авто/Игры — минимальный пинг, Стрим — наименьшая нагрузка, Прив. — быстрый сервер (зарубежные скоро).'), style: mono(12)),
+        Text(tr('Режим подбирает сервер: Авто/Игры — минимальный отклик, Стрим — наименьшая нагрузка, Прив. — самый быстрый узел.'), style: mono(12)),
         const SizedBox(height: 14),
         _card(child: Row(children: [
           Text(server.flag, style: const TextStyle(fontSize: 24)),
           const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(tr(server.city), style: disp(16, w: FontWeight.w700)),
+            Text(server.id.isEmpty ? tr('сервер не выбран') : tr(server.city), style: disp(16, w: FontWeight.w700)),
             const SizedBox(height: 2),
-            Text('${pingOf(server)} ms · ${server.proto}', style: mono(12)),
+            // Узлов ещё нет (id пуст) — рядом с прочерком стояло «Reality», и карточка читалась
+            // как выбранный, но неисправный сервер. До замера отклика числа тоже нет: «0 ms»
+            // читалось как «мгновенный сервер» — та же выдумка, что и вычищенные отсюда города.
+            Text(server.id.isEmpty
+                    ? tr('появится вместе с подпиской')
+                    : pingOf(server) > 0 ? '${pingOf(server)} ms · ${server.proto}' : server.proto,
+                style: mono(12)),
           ])),
           // Semantics: «сменить» — кнопка (лейбл читается из дочернего текста, merge — одним узлом)
           Semantics(
@@ -156,6 +168,46 @@ extension ShellHome on ShellState {
       ],
     );
   }
+
+  // Карточка «почему не подключилось»: причина + одно конкретное действие под неё.
+  // Геометрия и цвета — как у _updateBanner/_expiryBanner (16/14, радиус 14, иконка 20, gap 12),
+  // только предупреждающим цветом. Текст причины гоняем через tr(): часть строк прилетает
+  // исключениями движка и сервиса выдачи, они переводятся в момент показа (как в _toast).
+  Widget _connFailCard(String msg, ConnFix fix) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: C.warn.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: C.warn.withValues(alpha: 0.5)),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Icon(Icons.error_outline, size: 20, color: C.warn),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(tr('Подключение не выполнено'), style: disp(14, w: FontWeight.w700, c: C.warn)),
+              const SizedBox(height: 3),
+              Text(tr(msg), style: mono(11.5, c: C.muted)),
+            ])),
+          ]),
+          if (fix != ConnFix.none) ...[
+            const SizedBox(height: 12),
+            switch (fix) {
+              // Движок этой платформы не тянет — Happ тянет: даём и импорт ключа, и страницу приложения
+              ConnFix.happ => Row(children: [
+                  Expanded(child: _btn(tr('Открыть в Happ'), kind: 1, icon: Icons.open_in_new, onTap: _openInHapp)),
+                  const SizedBox(width: 12),
+                  Expanded(child: _btn(tr('Скачать приложение'), kind: 2, icon: Icons.download,
+                      onTap: () => _open(kDownloadUrl))),
+                ]),
+              ConnFix.refreshSub => _btn(tr('Обновить подписку'), kind: 1, icon: Icons.refresh,
+                  onTap: _subLoading ? null : () => _refreshSub()),
+              // поддержка живёт в Кабинете — ведём туда, а не наружу в переписку с нуля
+              _ => _btn(tr('Написать в поддержку'), kind: 1, icon: Icons.forum, onTap: () => _goTab(2)),
+            },
+          ],
+        ]),
+      );
 
   // Включение режима при выключенном туннеле сразу показывает оптимальный сервер в карточке
   // (при поднятом — не трогаем: конфиг живого коннекта менять нельзя, подхватится при следующем).

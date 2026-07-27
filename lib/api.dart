@@ -439,6 +439,14 @@ extension ShellApi on ShellState {
       _toast(tr('Сначала напиши сообщение'));
       return;
     }
+    // Контакт обязателен: двусторонний мост поддержки работает только для тикетов, заведённых
+    // в боте, поэтому на заявку из приложения отвечают на указанный контакт — и без него ответ
+    // просто некуда отправить.
+    final contact = _supportContact.text.trim();
+    if (contact.isEmpty) {
+      _toast(tr('Укажи, куда ответить — почта или @ник'));
+      return;
+    }
     _toast(tr('Отправляю…'));
     rebuild(() => _supportSending = true); // гасим кнопку «Отправить» на время запроса
     try {
@@ -451,7 +459,10 @@ extension ShellApi on ShellState {
                     ? subName!
                     : (appLang == 'en' ? 'Account #$tgId' : 'Аккаунт #$tgId'))
                 : tr('Пользователь приложения'),
-            'email': '',
+            // notify показывает email в сообщении группы, а contact кладёт в колонку заявки —
+            // отдаём один и тот же контакт в оба поля, чтобы он не потерялся ни там, ни там.
+            'email': contact,
+            'contact': contact,
             'message': msg,
             'source': 'десктоп-приложение'
           }))
@@ -460,7 +471,8 @@ extension ShellApi on ShellState {
       if (r.statusCode >= 200 && r.statusCode < 300) {
         _support.clear();
         rebuild(() {});
-        _toast(tr('Отправлено в поддержку ✓'));
+        // Контакт НЕ чистим: следующее обращение он писать заново не должен.
+        _toast(tr('Отправлено ✓ — ответим на указанный контакт'));
       } else {
         _toast(r.statusCode >= 500
             ? _srvErr(r.statusCode)
@@ -479,7 +491,9 @@ extension ShellApi on ShellState {
   // собственных нод по городам пока нет, поэтому это отклик канала пользователя, а не
   // конкретного города. http.get каждый раз поднимает свежее соединение (TCP+TLS) —
   // значения не схлопываются в кэшированный keep-alive. Результаты обновляются построчно.
-  Future<void> _pingServers() async {
+  /// [silent] — автозамер сразу после загрузки узлов: молча, без тостов об успехе и о сети.
+  /// Без него весь список стоял бы прочерками, пока человек не догадается нажать «Пинг».
+  Future<void> _pingServers({bool silent = false}) async {
     if (_pinging) return; // гвард от двойного тапа
     rebuild(() => _pinging = true);
     var okCount = 0;
@@ -491,7 +505,7 @@ extension ShellApi on ShellState {
       // Без узлов замерять нечего — и это НЕ проблема сети. Раньше пустой список давал
       // «нет связи с интернетом», хотя интернет был, а не было подписки.
       if (targets.isEmpty) {
-        _toast(tr('Сначала нужны серверы — обнови подписку'));
+        if (!silent) _toast(tr('Сначала нужны серверы — обнови подписку'));
         return;
       }
       final results = await Future.wait([
@@ -502,8 +516,13 @@ extension ShellApi on ShellState {
         okCount++;
         pingMeasured[e.key] = e.value!;
       }
+      // Пересобираем выбор «лучшего сервера»: он делался в момент загрузки узлов, когда замеров
+      // ещё не было, и оставался прежним даже после того, как отклик стал известен — то есть
+      // режим обещал оптимальный сервер, а держал случайный. Ручной выбор (bestServer=false)
+      // и живое подключение не трогаем.
+      if (okCount > 0 && bestServer && conn == 0) server = serverForMode(mode);
       if (mounted) rebuild(() {});
-      _toast(okCount > 0 ? tr('Пинг обновлён ✓') : _netErr);
+      if (!silent) _toast(okCount > 0 ? tr('Пинг обновлён ✓') : _netErr);
     } finally {
       if (mounted) { rebuild(() => _pinging = false); } else { _pinging = false; }
     }
@@ -525,6 +544,9 @@ extension ShellApi on ShellState {
       if (sub.ok && sub.nodes.isNotEmpty) {
         rebuild(() => subNotice = null);
         _applyNodes(sub.nodes);
+        // Один автозамер на сессию: иначе список серверов встречает человека сплошными
+        // прочерками, а карточка сервера на Главной — без отклика вовсе.
+        if (pingMeasured.isEmpty) _pingServers(silent: true);
       } else if (note != null && note.isNotEmpty) {
         rebuild(() => subNotice = note);
       }

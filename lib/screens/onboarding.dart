@@ -2,7 +2,7 @@ part of '../main.dart';
 
 // ============================ ONBOARDING (первый запуск) ============================
 // Три карточки-знакомства в общем glass-токен-языке: что такое bitaps → способы входа →
-// демо-режим + кнопки входа и «Посмотреть без входа» (гость → Главная в демо).
+// подключение на этой системе + кнопки входа и «Посмотреть без входа» (гость → Главная).
 // Показывается один раз (флаг seen_onboarding в prefs) и по «Показать знакомство» из Настроек.
 // Формулировки про сеть/туннель — ТОЛЬКО существующие в приложении («Демо-режим»,
 // «демо — без реального туннеля»); новых обещаний не добавляем.
@@ -60,7 +60,7 @@ extension ShellOnboarding on ShellState {
             Expanded(child: PageView(
               controller: _onbCtrl,
               onPageChanged: (i) => rebuild(() => _onbPage = i),
-              children: [_onbCardAbout(), _onbCardLogin(), _onbCardDemo()],
+              children: [_onbCardAbout(), _onbCardLogin(), _onbCardConnect()],
             )),
             // точки-индикатор
             Row(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -122,7 +122,9 @@ extension ShellOnboarding on ShellState {
         Text(tr('Подписка живёт в Telegram-боте, а этот клиент — её пульт: ключ, устройства и кабинет в одном окне.'),
             style: mono(12.5, c: C.muted)),
         const SizedBox(height: 8),
-        _onbRow(Icons.qr_code_2, tr('Личный VPN-ключ'), tr('один ключ — до 10 устройств на одной подписке')),
+        // «до 10 устройств» здесь было обещанием несуществующего тарифа: подписка продаётся
+        // на одно устройство, лишние докупаются отдельно (см. faqs в models.dart).
+        _onbRow(Icons.qr_code_2, tr('Личный VPN-ключ'), tr('один ключ на подписку — доп. устройства докупаются отдельно')),
         _onbRow(Icons.devices, tr('Все платформы'), tr('Windows, macOS, Linux, Android — одно приложение')),
         _onbRow(Icons.payments_outlined, tr('Оплата как удобно'), tr('Telegram Stars, СБП или крипта — в пару тапов')),
       ]);
@@ -140,13 +142,19 @@ extension ShellOnboarding on ShellState {
         Text(tr('Всё это — на вкладке «Кабинет».'), style: mono(11.5, c: C.muted)),
       ]);
 
-  // Карточка 3: демо-режим (текущие формулировки приложения) + кнопки входа и гость.
-  Widget _onbCardDemo() => _onbShell([
-        _kicker(tr('демо')),
+  // Карточка 3: что происходит при подключении НА ЭТОЙ системе + кнопки входа и гость.
+  // Про демо говорим только там, где движка действительно нет: на остальных платформах туннель
+  // настоящий, и старый текст «подключение сейчас — демо» занижал продукт на первом же экране.
+  Widget _onbCardConnect() => _onbShell([
+        _kicker(TunnelEngine.kind() == EngineKind.none ? tr('демо') : tr('подключение')),
         const SizedBox(height: 14),
-        Text(tr('Демо-режим'), style: disp(24, w: FontWeight.w800)),
+        Text(TunnelEngine.kind() == EngineKind.none ? tr('Демо-режим') : tr('Настоящий туннель'),
+            style: disp(24, w: FontWeight.w800)),
         const SizedBox(height: 10),
-        Text(tr('Подключение сейчас — демо, без реального туннеля. Интерфейс можно посмотреть целиком, вход не обязателен.'),
+        Text(
+            TunnelEngine.kind() == EngineKind.none
+                ? tr('Туннель на этой системе пока не поднимается — интерфейс можно посмотреть целиком, вход не обязателен.')
+                : tr('Ключ из аккаунта поднимает туннель прямо в приложении. Интерфейс можно посмотреть и без входа.'),
             style: mono(12.5, c: C.muted)),
         const SizedBox(height: 16),
         _btn(tr('Войти через Telegram'), kind: 0, icon: Icons.send,

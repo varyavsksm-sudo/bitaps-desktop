@@ -202,6 +202,9 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   int accentIdx = 0, btnStyle = 0;
   int themeMode = 0; // 0 тёмная · 1 светлая · 2 системная
   bool autoConnect = false;
+  /// Демо-сессия там, где туннель поднять нечем (тумблер в Настройках, по умолчанию ВЫКЛ).
+  /// Раньше демо включалось само и молча — оплативший человек видел «подключено» без туннеля.
+  bool demoMode = false;
   // Режим «лучший сервер»: при подключении сами берём оптимальный сервер (ползунок на Главной).
   // Выбор конкретного сервера в списке выключает режим (см. _pickServer).
   bool bestServer = true;
@@ -216,6 +219,9 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   // запуске и живёт в prefs: по нему сервис считает устройства в лимите тарифа.
   String hwid = '';
   final TextEditingController _support = TextEditingController();
+  // Куда ответить на обращение (почта или @ник): без него заявка из приложения уходила
+  // с пустым контактом, и ответить человеку было физически некуда.
+  final TextEditingController _supportContact = TextEditingController();
   final Set<String> favs = {};
   // вход / подписка / устройства (реальные данные из Supabase)
   int? tgId;
@@ -242,6 +248,9 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   int get down => _conn.down;
   int get up => _conn.up;
   int get sessions => _conn.sessions;
+  /// Причина последней неудачи подключения и предлагаемое действие — карточка на Главной.
+  String? get connFail => _conn.failMsg;
+  ConnFix get connFix => _conn.failFix;
   void toggle() {
     // Режим «лучший сервер»: перед стартом коннекта сами берём оптимальный для текущего режима
     // сервер (для «Авто»/«Игры» это минимальный пинг — с учётом живых замеров pingOf). Только при
@@ -336,6 +345,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       nodeTagOf: () => server.id.isEmpty ? null : server.id,
       dropAlertOn: () => tgl2,
       trafWarnOn: () => tgl4,
+      demoOn: () => demoMode,
       onToast: _toast,
       onPersist: _save,
       onSpin: _spinConn,
@@ -563,6 +573,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     _wave.dispose();
     _twinkle.dispose();
     _support.dispose();
+    _supportContact.dispose();
     _loginCtrl.dispose();
     _pinCtrl.dispose();
     super.dispose();
@@ -605,6 +616,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       mode = (p.getInt('mode') ?? 0).clamp(0, modeLabels.length - 1);
       themeMode = (p.getInt('themeMode') ?? 0).clamp(0, 2);
       autoConnect = p.getBool('autoConnect') ?? false;
+      demoMode = p.getBool('demoMode') ?? false;
       bestServer = p.getBool('bestServer') ?? true;
       tgl1 = p.getBool('tgl1') ?? false;
       appPin = secPin;
@@ -724,6 +736,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     await p.setInt('themeMode', themeMode);
     await p.setString('lang', appLang);
     await p.setBool('autoConnect', autoConnect);
+    await p.setBool('demoMode', demoMode);
     await p.setBool('bestServer', bestServer);
     await p.setString('serverId', server.id); // ручной выбор восстанавливаем в _load при bestServer=false
     await p.setBool('tgl1', tgl1);
@@ -778,16 +791,23 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     });
   }
 
+  int _betterServer(Server a, Server b) => compareServers(a, b, pingOf);
+
   // режим реально подбирает сервер: Стрим→мин.нагрузка, Игры/Авто→мин.пинг, Прив→зарубежный (иначе лучший)
   Server serverForMode(int m) {
     final avail = fleet.where((s) => s.available).toList();
     if (avail.isEmpty) return kNoServer;
-    if (m == 1) { avail.sort((a, b) => a.load.compareTo(b.load)); return avail.first; }
+    // Нагрузку узлов подписка не сообщает (у всех 0) — тогда «Стрим» сортировал список
+    // произвольно. Есть настоящие цифры — сортируем по ним, нет — как везде, по отклику.
+    if (m == 1 && avail.any((s) => s.load > 0)) {
+      avail.sort((a, b) => a.load.compareTo(b.load));
+      return avail.first;
+    }
     if (m == 3) {
       final intl = avail.where((s) => s.country != 'Россия').toList();
-      if (intl.isNotEmpty) { intl.sort((a, b) => pingOf(a).compareTo(pingOf(b))); return intl.first; }
+      if (intl.isNotEmpty) { intl.sort(_betterServer); return intl.first; }
     }
-    avail.sort((a, b) => pingOf(a).compareTo(pingOf(b)));
+    avail.sort(_betterServer);
     return avail.first;
   }
 

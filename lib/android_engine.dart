@@ -46,6 +46,10 @@ class AndroidXrayEngine {
     return v;
   }
 
+  /// Системный диалог «разрешить VPN» отдельным шагом — чтобы время на раздумье не съедало
+  /// таймаут подключения (см. TunnelEngine.ensurePermission).
+  Future<bool> requestPermission() async => (await _engine()).requestPermission();
+
   /// Поднять туннель. [remark] попадает в системное уведомление Android.
   Future<void> connect(
     String configJson, {
@@ -53,8 +57,9 @@ class AndroidXrayEngine {
     required void Function(String state) onState,
   }) async {
     final v = await _engine();
-    // Системный диалог «разрешить VPN». Пользователь может отказаться — это не сбой движка,
-    // а осознанный отказ: говорим об этом прямо, без «не удалось подключиться».
+    // Разрешение спрашиваем ещё раз: обычно оно уже получено в ensurePermission() до отсчёта
+    // таймаута и этот вызов возвращается мгновенно, но connect() должен оставаться безопасным
+    // и при прямом вызове. Отказ — не сбой движка, а осознанное решение человека.
     final allowed = await v.requestPermission();
     if (!allowed) {
       throw EngineUnavailable('нужно разрешить приложению создавать VPN-подключение');

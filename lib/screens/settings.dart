@@ -261,16 +261,28 @@ extension ShellSettings on ShellState {
           _kicker(tr('подключение')),
           const SizedBox(height: 10),
           // padding 6+8=14 — инсет строки как у _navRow-строк карточки «Инструменты» выше
-          _card(padding: 6, child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-            child: Row(children: [
-              Icon(Icons.bolt, size: 19, color: C.accent),
-              const SizedBox(width: 12),
-              Text(tr('Протокол'), style: disp(15, w: FontWeight.w500)),
-              const Spacer(),
-              Text(_protoLabel(), style: mono(13, c: C.muted)),
-            ]),
-          )),
+          _card(padding: 6, child: Column(children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+              child: Row(children: [
+                Icon(Icons.bolt, size: 19, color: C.accent),
+                const SizedBox(width: 12),
+                Text(tr('Протокол'), style: disp(15, w: FontWeight.w500)),
+                const Spacer(),
+                Text(_protoLabel(), style: mono(13, c: C.muted)),
+              ]),
+            ),
+            // Демо-сессия — только там, где туннель поднять нечем, и только по явной просьбе.
+            // Где движок есть, тумблер бессмыслен, поэтому его там просто нет.
+            if (_noEngine) ...[
+              _divider(),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: _toggle(tr('Демо-режим'), tr('Показать интерфейс без реального туннеля'), demoMode,
+                    (v) { rebuild(() => demoMode = v); _save(); }),
+              ),
+            ],
+          ])),
           const SizedBox(height: 8),
           Text(tr('Протокол подбирается автоматически под твой ключ. Настраивать ничего не нужно.'),
               style: mono(11, c: C.muted)),
@@ -312,6 +324,10 @@ extension ShellSettings on ShellState {
       );
 
   bool get _isDesktop => Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+
+  /// Туннель на этой системе поднять нечем (десктоп без бинаря xray рядом и т.п.).
+  /// От этого зависят тумблер «Демо-режим» и честные формулировки в знакомстве/диагностике.
+  bool get _noEngine => TunnelEngine.kind() == EngineKind.none;
 
   // ---------------- ГЛОБАЛЬНЫЙ ХОТКЕЙ (строка + рекордер) ----------------
   Widget _hotkeyRow() => Padding(
@@ -393,7 +409,9 @@ extension ShellSettings on ShellState {
           ? tr('Код входа доступен (для входа без ключа)')
           : tr('Кода входа нет — получи в боте (/start → Код входа)')));
     }
-    // честный дисклеймер про демо-туннель — чтобы «всё зелёное» не читалось как «VPN защищает»
+    // честный дисклеймер: «всё зелёное» не должно читаться как «VPN сейчас защищает».
+    // Сверяемся с фактическим движком, а не с const-флагом kRealTunnel: он всегда true, и
+    // ветка про демо была мертва ровно на тех системах, где демо и происходит.
     showDialog<void>(context: context, builder: (_) => AlertDialog(
       backgroundColor: C.bg2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
@@ -404,8 +422,8 @@ extension ShellSettings on ShellState {
         _divider(),
         const SizedBox(height: 8),
         Text(
-          kRealTunnel ? tr('Диагностика проверяет доступ к аккаунту, не качество канала.')
-                      : tr('Подключение сейчас демонстрационное — реального туннеля нет.'),
+          _noEngine ? tr('Подключение сейчас демонстрационное — реального туннеля нет.')
+                    : tr('Диагностика проверяет доступ к аккаунту, не качество канала.'),
           style: mono(10.5, c: C.muted)),
       ])),
       actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Ок'), style: mono(13, c: C.accent)))],

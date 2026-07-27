@@ -76,6 +76,19 @@ class TunnelEngine {
   static bool get supportsWhitelist =>
       kind() == EngineKind.desktopXray || kind() == EngineKind.androidXray;
 
+  /// Спросить у системы разрешение на VPN — ДО начала отсчёта таймаута подключения.
+  ///
+  /// Раньше запрос жил внутри connect(), а connect() был обёрнут таймаутом в 40 секунд: пока
+  /// человек читал системный диалог «разрешить VPN», таймаут тикал. Кто читал дольше, получал
+  /// «Подключение не удалось — таймаут» и при этом ЖИВОЙ туннель, поднявшийся сразу после
+  /// разрешения: ключ в шторке есть, а интерфейс говорит «Отключено». Ровно на это и жаловались.
+  ///
+  /// true — разрешение есть (или платформе оно не нужно), false — человек отказался.
+  Future<bool> ensurePermission() async {
+    if (kind() == EngineKind.androidXray) return _android.requestPermission();
+    return true;
+  }
+
   /// Поднять туннель по узлам подписки. [onlyTag] — если пользователь выбрал сервер вручную.
   /// Бросает [EngineUnavailable] / [TunnelUnavailable] с текстом для пользователя.
   Future<void> connect(List<SubNode> nodes, {String? onlyTag, String server = ''}) async {

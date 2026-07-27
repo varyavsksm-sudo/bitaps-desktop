@@ -136,25 +136,30 @@ extension ShellServers on ShellState {
 
   Widget _serverRow(Server s, bool locked) {
     final sel = s.id == server.id;
-    final ping = pingOf(s); // живой замер (кнопка «Пинг»), иначе статичный из models.dart
-    final pingCol = ping < 60 ? C.ok : ping < 120 ? C.warn : C.danger;
-    final pingLabel = ping < 60 ? tr('быстрый отклик') : ping < 120 ? tr('средний отклик') : tr('медленный отклик');
+    final ping = pingOf(s); // живой замер (кнопка «Пинг» / автозамер после загрузки узлов)
+    // Замера ещё не было (0) — это НЕ «0 мс». Зелёный «быстрый отклик» на пустом месте обещал
+    // мгновенный сервер; показываем прочерк серым, пока настоящего числа нет.
+    final measured = ping > 0;
+    final pingCol = !measured ? C.muted : ping < 60 ? C.ok : ping < 120 ? C.warn : C.danger;
+    final pingLabel = !measured
+        ? tr('отклик не замерен')
+        : ping < 60 ? tr('быстрый отклик') : ping < 120 ? tr('средний отклик') : tr('медленный отклик');
     // При locked (conn!=0) все строки кроме текущего сервера некликабельны-сейчас → приглушаем их,
     // чтобы список не выглядел обманчиво активным. Текущий сервер (sel) оставляем читаемым.
     final dimmed = (locked && !sel) || !s.available;
-    return IgnorePointer(
-      ignoring: !s.available,
-      child: Opacity(
-        opacity: dimmed ? 0.55 : 1,
-        // Semantics: строка — кнопка выбора сервера с признаком выбора (как кнопка «Пинг» выше);
-        // лейбл (город/страна/пинг) собирается из дочерних текстов автоматически.
-        child: Semantics(
-          button: true,
-          selected: sel,
-          enabled: s.available,
-          child: GestureDetector(
+    return Opacity(
+      opacity: dimmed ? 0.55 : 1,
+      // Semantics: строка — кнопка выбора сервера с признаком выбора (как кнопка «Пинг» выше);
+      // лейбл (город/страна/пинг) собирается из дочерних текстов автоматически.
+      child: Semantics(
+        button: true,
+        selected: sel,
+        enabled: s.available,
+        child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: s.available ? () => _pickServer(s) : null,
+          // Недоступную строку раньше глушил IgnorePointer — тап проваливался в тишину. Тап
+          // отдаём всегда: _pickServer сам объяснит и «сервер пока недоступен», и «сначала отключись».
+          onTap: () => _pickServer(s),
           child: Container(
             margin: const EdgeInsets.only(bottom: 8),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
@@ -167,24 +172,36 @@ extension ShellServers on ShellState {
                 child: Text(s.flag, style: const TextStyle(fontSize: 20))),
               const SizedBox(width: 12),
               // Город — отдельной строкой (на окне 390px бейджи в одной строке с городом
-              // схлопывали его до «А…»), PRO-бейдж — к строке страны. Пер-строчный бейдж
-              // «Скоро» убран: недоступные серверы живут только в секции «зарубежные · скоро».
+              // схлопывали его до «А…»), бейджи — к строке страны: PRO и «скоро» для строк,
+              // которые выбрать пока нельзя (без бейджа приглушённая строка выглядела просто
+              // блёклой, и человек жал её впустую).
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(tr(s.city), style: disp(15, w: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
                 const SizedBox(height: 2),
                 Row(children: [
-                  Flexible(child: Text(tr(s.country), style: mono(12), overflow: TextOverflow.ellipsis)),
+                  // У узлов подписки поля «страна» нет (название узла — уже страна), и строка
+                  // оставалась пустой. Пишем рельсу: в «⭐ избранном» прямые узлы и узлы через
+                  // CDN лежат вперемешку без заголовков групп, и отличить их иначе нечем.
+                  Flexible(child: Text(
+                    s.country.isNotEmpty ? tr(s.country)
+                      : tr(s.proto.startsWith('LTE') ? 'через CDN' : 'прямой узел'),
+                    style: mono(12), overflow: TextOverflow.ellipsis)),
                   if (s.premium) ...[const SizedBox(width: 6), _badge('PRO', accentSoftInk)],
+                  if (!s.available) ...[const SizedBox(width: 6), _badge(tr('скоро'), C.muted)],
                 ]),
               ])),
-              Tooltip(message: '$pingLabel · $ping ms',
-                child: Text('$ping ms', style: mono(13, c: pingCol, w: FontWeight.w600))),
-              const SizedBox(width: 10),
-              Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.end, children: [
-                Text('${s.load}%', style: mono(10, c: C.muted)),
-                const SizedBox(height: 3),
-                SizedBox(width: 42, child: _loadBar(s.load)),
-              ]),
+              Tooltip(message: measured ? '$pingLabel · $ping ms' : pingLabel,
+                child: Text(measured ? '$ping ms' : '—', style: mono(13, c: pingCol, w: FontWeight.w600))),
+              // Нагрузку узла подписка не сообщает — «0 %» с пустой полоской читались как
+              // «сервер совершенно свободен». Показываем колонку, только когда число настоящее.
+              if (s.load > 0) ...[
+                const SizedBox(width: 10),
+                Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.end, children: [
+                  Text('${s.load}%', style: mono(10, c: C.muted)),
+                  const SizedBox(height: 3),
+                  SizedBox(width: 42, child: _loadBar(s.load)),
+                ]),
+              ],
               const SizedBox(width: 2),
               // Тап-таргет звезды ≥40px (было 18px — слишком мелко для касания)
               IconButton(
@@ -201,7 +218,6 @@ extension ShellServers on ShellState {
               Icon(sel ? Icons.check_circle : Icons.circle_outlined, size: 20, color: sel ? C.accent : C.muted),
             ]),
           ),
-        ),
         ),
       ),
     );
