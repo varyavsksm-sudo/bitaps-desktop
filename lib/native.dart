@@ -39,14 +39,13 @@ extension ShellNative on ShellState {
       final key = uri.queryParameters['key']?.trim();
       if (key != null && key.isNotEmpty) {
         _goTab(2);
-        // Доверенный ключ/подписка у гостя привёл бы к МОЛЧАЛИВОМУ входу — сначала подтверждение
-        // (отказ = не импортируем вовсе), как у login-ссылки ниже.
-        if (!loggedIn) {
-          final h = isSubscriptionUrl(key) ? '' : (_hostOf(key) ?? '');
-          if (isSubscriptionUrl(key) || (h.isNotEmpty && _isTrustedHost(h))) {
-            _confirmDeepLinkAction(() => _importKeyString(key));
-            return;
-          }
+        // Доверенный ключ/подписка по deep-link приводил бы к МОЛЧАЛИВОЙ подмене ключа —
+        // подтверждение ВСЕГДА (и у гостя, и у залогиненного: чужая ссылка подменяет выдачу
+        // на ноды атакующего — аудит A10). Отказ = не импортируем вовсе.
+        final h = isSubscriptionUrl(key) ? '' : (_hostOf(key) ?? '');
+        if (isSubscriptionUrl(key) || (h.isNotEmpty && _isTrustedHost(h))) {
+          _confirmDeepLinkAction(() => _importKeyString(key));
+          return;
         }
         _importKeyString(key);
         return;

@@ -379,7 +379,9 @@ Map<String, dynamic>? _transportBlock(Map<String, String> q) {
 /// импортирует singbox_config.dart, а models.dart — лишь `part of main.dart` и извне не виден.
 /// bit-core.online — домен доставки: origin.bit-core.online отдаёт подписку /u/<token>,
 /// cdn*.bit-core.online — узлы «белого списка». Без него подписка не прошла бы гард импорта.
-const List<String> kTrustedBitapsDomains = ['bitaps.app', 'bitapsvpn.com', 'bit-core.online'];
+/// bitaps.app УБРАН (аудит A10, 2026-07-29): домен НЕ зарегистрирован и свободен для захвата —
+/// доверие к нему давало one-click MITM через bitaps://import. Если его купим — вернуть сюда.
+const List<String> kTrustedBitapsDomains = ['bitapsvpn.com', 'bit-core.online'];
 
 bool isTrustedBitapsHost(String host) {
   final h = host.toLowerCase();

@@ -33,9 +33,10 @@ const int kXrayProbeSocksPort = 10837;
 /// а старый cdn.bit-core.online больше не отвечает — используем ориджин выдачи, он живой.
 const String kXrayObservatoryUrl = 'https://origin.bit-core.online/gen204';
 
-/// DNS как в записях подписки: Яндекс-резолверы (доступны в РФ) + системный.
+/// DNS как в записях подписки: DoH-резолверы (запросы зашифрованы) + системный.
+/// Plain `77.88.8.8` убран (аудит A14): весь DNS уходил провайдеру открытым текстом — полная
+/// история резолвов, включая блокируемые домены, у которых дальше трафик идёт туннелем.
 const List<dynamic> _kDns = [
-  {'address': '77.88.8.8', 'tag': 'dns-yandex'},
   {'address': 'https://77.88.8.8/dns-query', 'tag': 'doh-yandex'},
   {'address': 'https://8.8.8.8/dns-query', 'tag': 'doh-google'},
   'localhost',
