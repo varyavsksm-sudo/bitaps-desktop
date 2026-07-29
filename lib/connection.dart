@@ -119,6 +119,9 @@ class ConnectionController extends ChangeNotifier {
         // trim + lowercase-схема как в парсере (singboxConfigJson тоже триммит/нормализует): иначе
         // ключ с ведущим пробелом или «VLESS://» гард отверг бы, хотя парсер его разбирает.
         final key = keyOf().trim();
+        // Демо-заглушка — НЕ ключ: синтаксически она валидна (vless://…), но pbk у неё
+        // ненастоящий, и без этого гарда коннект умирал бы невнятной ошибкой движка.
+        if (key == kDemoKey) { _fail(gen, tr('Сначала войди или импортируй ключ'), fix: ConnFix.refreshSub); return; }
         // Подписка (https://…/u/<token>) — не одиночный ключ: её надо СКАЧАТЬ и собрать конфиг
         // из всех узлов сразу. Одиночные share-link'и идут прежним путём без изменений.
         final isSub = isSubscriptionUrl(key);

@@ -201,7 +201,7 @@ extension ShellHome on ShellState {
                       onTap: () => _open(kDownloadUrl))),
                 ]),
               ConnFix.refreshSub => _btn(tr('Обновить подписку'), kind: 1, icon: Icons.refresh,
-                  onTap: _subLoading ? null : () => _refreshSub()),
+                  onTap: _subVisibleLoading ? null : () => _refreshSub()),
               // Узел не пропустил трафик — ведём к списку, где уже видно, какие сервера рабочие
               ConnFix.pickOther => Row(children: [
                   Expanded(child: _btn(tr('Выбрать сервер'), kind: 1, icon: Icons.dns_outlined, onTap: () => _goTab(1))),

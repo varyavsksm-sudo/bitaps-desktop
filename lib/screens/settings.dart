@@ -145,16 +145,18 @@ extension ShellSettings on ShellState {
             onPressed: () async {
               final t = ctrl.text.trim();
               Navigator.pop(context);
-              if (kSupportedKeySchemes.any((s) => t.startsWith(s))) {
+              if (kSupportedKeySchemes.any((s) => t.toLowerCase().startsWith(s))) {
                 // ТОТ ЖE trusted-host гейт, что и в _importKey: без него «вставь это в Свой конфиг»
                 // обходил защиту и при kRealTunnel=true трафик молча ушёл бы на хост атакующего.
                 // Принимаем ВСЕ схемы singbox_config (vless/trojan/vmess/ss/hysteria2), а не только
                 // vless:// — и реально ПРИМЕНЯЕМ конфиг как ключ подключения (keyStr), а не мёртвый customCfg.
                 final host = _hostOf(t);
-                if (host == null || !_isTrustedHost(host)) {
-                  final ok = await _confirmForeignHost(host ?? tr('неизвестный хост'));
-                  if (ok != true) return;
-                }
+                // Ключ самого bitaps — тем же путём, что _importKeyString (вход/рефреш аккаунта):
+                // importedHost/customCfg НЕ выставляем, иначе авто-рефреш подписки навсегда
+                // перестал бы обновлять этот ключ (см. гард importedHost==null в _applySub).
+                if (host != null && _isTrustedHost(host)) { await _importKeyString(t); return; }
+                final ok = await _confirmForeignHost(host ?? tr('неизвестный хост'));
+                if (ok != true) return;
                 if (!mounted) return;
                 rebuild(() { keyStr = t; importedHost = host; customCfg = t; });
                 _save();
@@ -213,7 +215,7 @@ extension ShellSettings on ShellState {
           _kicker(tr('безопасность')),
           const SizedBox(height: 10),
           _card(child: Column(children: [
-            _toggle(tr('Блокировка входа'), tr('PIN при открытии приложения'), tgl1, (v) { if (v) { _enableLock(); } else { _pinFails = 0; _clearPinThrottle(); rebuild(() { tgl1 = false; appPin = null; }); _save(); } }),
+            _toggle(tr('Блокировка входа'), tr('Только экран: от доступа к устройству не защищает'), tgl1, (v) { if (v) { _enableLock(); } else { _pinFails = 0; _clearPinThrottle(); rebuild(() { tgl1 = false; appPin = null; }); _save(); } }),
             _divider(),
             _toggle(tr('Обрыв соединения'), tr('Уведомлять, если VPN отвалился'), tgl2, (v) { rebuild(() => tgl2 = v); _save(); }),
             _divider(),

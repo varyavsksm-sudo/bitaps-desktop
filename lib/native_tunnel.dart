@@ -1,15 +1,15 @@
 import 'dart:async';
 import 'package:flutter/services.dart';
 
-/// Мост к НАСТОЯЩЕМУ нативному VPN-движку (sing-box) через MethodChannel/EventChannel.
+/// Мост к нативному VPN-движку через MethodChannel/EventChannel — LEGACY-контракт, оставлен
+/// под iOS (NetworkExtension). Десктоп и Android работают на xray (engine.dart /
+/// android_engine.dart) и сюда не ходят.
 ///
 /// Туннель живёт в платформенном коде, здесь — только контракт вызова:
-///   • Apple (iOS/macOS): NetworkExtension PacketTunnelProvider + Libbox.xcframework.
-///     Готовая реализация уже есть — ~/bitaps-vpn-app/PacketTunnel (startOrReloadService
-///     на переданном конфиге) + собранный движок ~/bitaps-libbox/Libbox.xcframework.
-///     Её нужно подключить как extension-таргет к этому раннеру (Xcode + App Group + подпись).
-///   • Android: VpnService + libbox (gomobile .aar) — тот же конфиг.
-///   • Windows/Linux: процесс sing-box + wintun/tun.
+///   • iOS: NetworkExtension PacketTunnelProvider + sing-box/libbox (Libbox.xcframework).
+///     Реализация — ~/bitaps-vpn-app/PacketTunnel (startOrReloadService на переданном конфиге),
+///     её нужно подключить extension-таргетом к раннеру (Xcode + App Group + подпись).
+///   • Windows/Linux/Android: НЕ используется — там engine.dart (xray).
 ///
 /// Пока нативная сторона на платформе НЕ подключена, connect() бросает [TunnelUnavailable] —
 /// UI показывает честную ошибку и НЕ рисует фейковое «Подключено». Никаких выдуманных

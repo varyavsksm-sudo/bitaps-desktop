@@ -79,12 +79,12 @@ extension ShellServers on ShellState {
     return many;
   }
 
-  // Секция сортируется по фактическому пингу (живой замер приоритетнее статичного):
-  // лучшие сверху; во время замера «Пинг» строки пересортировываются на лету —
-  // rebuild после каждого замеренного сервера в _pingServers.
+  // Секция сортируется общим компаратором compareServers (как «лучший сервер» на Главной):
+  // рабочие впереди непроверенных, незамеренные (пинг 0) — в конец, а не в топ списка;
+  // во время замера «Пинг» строки пересортировываются на лету (rebuild в _pingServers).
   List<Server> _byPing(Iterable<Server> src) {
     final l = src.toList();
-    l.sort((a, b) => pingOf(a).compareTo(pingOf(b)));
+    l.sort(_betterServer);
     return l;
   }
 
@@ -132,7 +132,7 @@ extension ShellServers on ShellState {
         const SizedBox(height: 14),
         Row(children: [
           Expanded(child: _btn(tr('Обновить'), kind: 1, icon: Icons.refresh,
-              onTap: _subLoading ? null : () => _refreshSub())),
+              onTap: _subVisibleLoading ? null : () => _refreshSub())),
           const SizedBox(width: 12),
           Expanded(child: _btn(tr('Кабинет'), kind: 0, icon: Icons.person_outline, onTap: () => _goTab(2))),
         ]),

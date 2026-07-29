@@ -25,6 +25,9 @@ extension ShellNative on ShellState {
   void _handleDeepLink(Uri uri) {
     if (!mounted) return;
     if (uri.scheme.toLowerCase() != kUrlScheme) return;
+    // Под замком ссылку не исполняем (вход/импорт поверх PIN-экрана недопустим), но и не
+    // роняем: откладываем и разбираем сразу после разблокировки (_processPendingDeepLink).
+    if (_locked) { _pendingDeepLink = uri; return; }
     // окно могло быть свёрнуто (старт свёрнутым/трей) — поднимаем на ссылку
     if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
       windowManager.setSkipTaskbar(false).catchError((_) {});
@@ -34,17 +37,56 @@ extension ShellNative on ShellState {
     final host = uri.host.toLowerCase();
     if (host == 'import') {
       final key = uri.queryParameters['key']?.trim();
-      if (key != null && key.isNotEmpty) { _goTab(2); _importKeyString(key); return; }
+      if (key != null && key.isNotEmpty) {
+        _goTab(2);
+        // Доверенный ключ/подписка у гостя привёл бы к МОЛЧАЛИВОМУ входу — сначала подтверждение
+        // (отказ = не импортируем вовсе), как у login-ссылки ниже.
+        if (!loggedIn) {
+          final h = isSubscriptionUrl(key) ? '' : (_hostOf(key) ?? '');
+          if (isSubscriptionUrl(key) || (h.isNotEmpty && _isTrustedHost(h))) {
+            _confirmDeepLinkAction(() => _importKeyString(key));
+            return;
+          }
+        }
+        _importKeyString(key);
+        return;
+      }
     }
     if (host == 'login') {
       final secret = uri.queryParameters['secret']?.trim();
       if (secret != null && secret.isNotEmpty) {
         _goTab(2);
-        if (!loggedIn) { _login(secret); } else { _toast(tr('Ты уже вошёл')); }
+        if (!loggedIn) { _confirmDeepLinkAction(() => _login(secret)); } else { _toast(tr('Ты уже вошёл')); }
         return;
       }
     }
     _toast(tr('Не удалось разобрать ссылку'));
+  }
+
+  // Действие, приводящее ко ВХОДУ, по deep-link — только с явным подтверждением человека:
+  // ссылку может открыть кто угодно (чат/письмо/QR), а bitaps:// раньше логинил молча.
+  // Диалог по образцу _confirmForeignHost.
+  void _confirmDeepLinkAction(Future<void> Function() run) {
+    showDialog(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        backgroundColor: C.bg2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
+        title: Text(tr('Вход по ссылке'), style: disp(18, w: FontWeight.w700)),
+        content: Text(tr('Войти в аккаунт по ссылке?'), style: mono(13, c: C.muted)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dctx), child: Text(tr('Отмена'), style: mono(13, c: C.muted))),
+          TextButton(onPressed: () { Navigator.pop(dctx); run(); }, child: Text(tr('Войти'), style: mono(13, c: C.accent))),
+        ],
+      ),
+    );
+  }
+
+  // Ссылка, пришедшая под замком: разбираем после разблокировки (зеркало _maybeAutoConnect).
+  void _processPendingDeepLink() {
+    final u = _pendingDeepLink;
+    _pendingDeepLink = null;
+    if (u != null && mounted && !_locked) _handleDeepLink(u);
   }
 
   // ---------------- РЕГИСТРАЦИЯ СХЕМЫ bitaps:// (Windows/Linux при первом запуске) ----------------

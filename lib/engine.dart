@@ -4,9 +4,10 @@
 // Две реализации:
 //   • ДЕСКТОП (Windows/macOS/Linux) — рядом лежащий xray-core как процесс + системный прокси.
 //     xray понимает ВСЕ узлы подписки, включая «белый список» на транспорте xhttp.
-//   • ПЛАТФОРМЫ С НАТИВНОЙ СТОРОНОЙ (Android/iOS) — движок в платформенном коде через
-//     MethodChannel (native_tunnel.dart). Там сейчас sing-box, поэтому узлы «БС» ему недоступны:
-//     их отдаём только там, где движок их понимает.
+//   • ANDROID — тот же xray, но внутри системного VpnService (плагин flutter_v2ray_client):
+//     умеет все узлы, включая БС.
+//   • iOS — нативной стороны пока нет (заглушка native_tunnel.dart): connect() честно падает
+//     с TunnelUnavailable, БС недоступен.
 // Если движка нет — честно говорим об этом, а не рисуем фейковое «подключено».
 
 import 'dart:async';
@@ -26,7 +27,7 @@ enum EngineKind {
   /// xray внутри системного VpnService (Android). Тоже умеет все узлы, включая БС.
   androidXray,
 
-  /// Нативная сторона платформы (iOS/macOS-расширение). Пока sing-box → без БС.
+  /// Нативная сторона платформы (iOS). Пока не подключена → без БС, connect() бросает.
   native,
 
   /// Движка нет — туннель поднять нечем.
@@ -48,6 +49,9 @@ class TunnelEngine {
 
   XrayProcess? _proc;
   int? _metricsPort;
+  /// Локальный HTTP-вход поднятого десктоп-туннеля: verifyConnected идёт ЧЕРЕЗ него —
+  /// dart:io системный прокси на десктопе игнорирует, и прямой запрос мерил бы мимо туннеля.
+  int? _activeHttpPort;
   Timer? _statsTimer;
   (int, int)? _lastTotals;
   final StreamController<EngineEvent> _events = StreamController<EngineEvent>.broadcast();
@@ -125,11 +129,15 @@ class TunnelEngine {
     final proc = await XrayProcess.start(cfg, socksPort: socksPort, binaryPath: bin);
     final proxyOk = await SystemProxy.enable(socksPort: socksPort, httpPort: httpPort);
     if (!proxyOk) {
+      // Прокси мог встать частично (на части сервисов/платформы) — снимаем ДО остановки
+      // движка, иначе система остаётся с указателем в порт, который сейчас умрёт.
+      try { await SystemProxy.disable(); } catch (_) {/* при откате ошибки глотаем */}
       await proc.stop();
       throw EngineUnavailable('не удалось включить системный прокси');
     }
     _proc = proc;
     _metricsPort = metricsPort;
+    _activeHttpPort = httpPort;
     _lastTotals = null;
     _events.add(const EngineEvent('connected'));
     // Реальные счётчики движка раз в секунду → скорость в интерфейсе.
@@ -149,13 +157,9 @@ class TunnelEngine {
       if (hit.isNotEmpty) return hit.first;
       throw const FormatException('выбранный сервер отсутствует в подписке');
     }
-    // Авто: берём узел с наименьшим измеренным откликом; без замеров — первый прямой
-    // (у прямых отклик заведомо ниже, чем у узлов через CDN), иначе просто первый.
-    final measured = nodes.where((n) => (nodePings[n.tag] ?? 0) > 0).toList();
-    if (measured.isNotEmpty) {
-      measured.sort((a, b) => (nodePings[a.tag] ?? 9999).compareTo(nodePings[b.tag] ?? 9999));
-      return measured.first;
-    }
+    // Авто: первый прямой узел (у прямых отклик заведомо ниже, чем у узлов через CDN),
+    // иначе просто первый. Пер-узловых замеров на Android нет: конфиг подписки метрик не
+    // несёт, а serverDelay живёт на временном экземпляре и результаты сюда не пишет.
     final direct = nodes.where((n) => n.singboxReady);
     return direct.isNotEmpty ? direct.first : nodes.first;
   }
@@ -195,8 +199,8 @@ class TunnelEngine {
 
   Future<void> _pollStats() async {
     final port = _metricsPort;
-    // на десктопе статистику снимаем только при живом процессе; на Android процесса у нас нет —
-    // движок живёт в системном сервисе, поэтому проверяем только порт метрик
+    // Статистика есть только на десктопе: метрики поднимает наш процесс xray. На Android
+    // конфиг подписки метрик не содержит, порт всегда null — счётчиков скорости там нет.
     if (port == null || (kind() == EngineKind.desktopXray && _proc == null)) return;
     final r = await XrayStats.read(port);
     if (r == null) return;
@@ -238,6 +242,7 @@ class TunnelEngine {
     final p = _proc;
     _proc = null;
     _metricsPort = null;
+    _activeHttpPort = null;
     _lastTotals = null;
     if (p != null) await p.stop();
   }
@@ -301,8 +306,12 @@ class TunnelEngine {
           if (ms > 0) return true;
           continue;
         }
-        // Десктоп: системный прокси уже указывает на наш вход, обычного запроса достаточно.
+        // Десктоп: системный прокси для dart:io не существует (HttpClient его игнорирует) —
+        // прямой запрос измерял бы НАШУ сеть, а не туннель. Идём через локальный HTTP-вход
+        // поднятого движка, как в _probeDesktop; порта нет (не должно быть) — прямой запрос.
         final client = HttpClient()..connectionTimeout = probeTimeout;
+        final httpPort = kind() == EngineKind.desktopXray ? _activeHttpPort : null;
+        if (httpPort != null) client.findProxy = (_) => 'PROXY 127.0.0.1:$httpPort';
         try {
           final req = await client.getUrl(Uri.parse(url)).timeout(probeTimeout);
           final res = await req.close().timeout(probeTimeout);

@@ -85,8 +85,13 @@ extension ShellApi on ShellState {
     // без URL-хоста (vmess/base64-ss) → доп. страхуемся на customCfg, иначе свой конфиг молча терялся
     if (d['vpn_key'] is String && importedHost == null && customCfg == null) keyStr = d['vpn_key'] as String;
     if (d['login_secret'] is String) loginSecret = d['login_secret'] as String;
-    final dl = d['devices'];
-    devices = (dl is List) ? dl.whereType<Map>().map((e) => e.cast<String, dynamic>()).toList() : [];
+    // devices_unknown: хаб молчал — «devices» в ответе пустой, но это НЕ «устройств нет».
+    // Кэш не перетираем, а поднимаем флаг: кабинет покажет «не удалось получить список».
+    devicesUnknown = d['devices_unknown'] == true;
+    if (!devicesUnknown) {
+      final dl = d['devices'];
+      devices = (dl is List) ? dl.whereType<Map>().map((e) => e.cast<String, dynamic>()).toList() : [];
+    }
     // Статистика аккаунта (карточка «// статистика») + стрик-подсказка пейвола. app-sub отдаёт
     // их fail-soft (при сбое RPC поля null) — не перетираем закэшированное значение null'ом,
     // а вот 0 — честное значение, применяем. app-login stats не отдаёт — там поля просто отсутствуют.
@@ -155,7 +160,7 @@ extension ShellApi on ShellState {
     // остальное — как {secret} (UUID «Кода входа»). 403 use_login_secret остаётся обработан
     // на случай аварийного рубильника DISABLE_KEY_LOGIN на сервере. _pairLogin передаёт сюда
     // UUID → идёт по ветке secret.
-    final isShareLink = kSupportedKeySchemes.any((s) => key.startsWith(s));
+    final isShareLink = kSupportedKeySchemes.any((s) => key.toLowerCase().startsWith(s));
     // Ссылка на подписку (https://…/u/<token>) — такой же credential, как ключ: app-login ищет
     // строку по точному совпадению vpn_key, а после перехода на подписки vpn_key и ЕСТЬ эта
     // ссылка. Гард isSubscriptionUrl узкий (только доверенный домен bitaps + путь /u/<token>).
@@ -400,8 +405,17 @@ extension ShellApi on ShellState {
         return;
       }
       if (r.statusCode == 401 || r.statusCode == 403) {
-        if (!silent) _toast(tr('Сессия истекла — войди снова'));
-        _doLogout(silent: true);
+        // Разлогиниваем ТОЛЬКО на собственный «unauthorized» функции ({error:"unauthorized"}):
+        // 401 от gateway/прокси и чужие 403 — транзиент, сессию из-за них не роняем.
+        final d401 = _asObj(r.body);
+        if (d401 != null && d401['error'] == 'unauthorized') {
+          _doLogout(silent: true);
+          // Даже при тихом фоновом рефреше (старт приложения) сообщаем явно: иначе человек
+          // смотрел бы на устаревший кабинет, не зная, что сессия уже не его.
+          _toast(tr('Сессия истекла — войди снова'));
+        } else if (!silent) {
+          _toast(_srvErr(r.statusCode));
+        }
         return;
       }
       if (r.statusCode >= 500) {

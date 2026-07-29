@@ -120,6 +120,7 @@ const Map<String, String> _kEn = {
   'Закрыть': 'Close',
   'Открыть бота': 'Open the bot',
   'Сначала войди по ключу': 'Sign in with your key first',
+  'Сначала войди или импортируй ключ': 'Sign in or import a key first',
   'Удаляю устройство…': 'Removing device…',
   'Обновляю…': 'Refreshing…',
   'Уже обновляю — секунду': 'Still refreshing — one sec',
@@ -322,7 +323,9 @@ const Map<String, String> _kEn = {
   'Код входа': 'Login code',
   'Сменить': 'Change',
   'Пока нет устройств.\nПодключись с устройства — оно появится здесь.':
-      "No devices yet.\nConnect from a device — it'll show up here.",
+      "No devices yet.\nConnect from a device — it will show up here.",
+  'Не удалось получить список устройств.\nПопробуй обновить.':
+      "Couldn't fetch the device list.\nTry refreshing.",
   'Устройство': 'Device',
   'Удалить устройство?': 'Remove device?',
   'Удалить': 'Remove',
@@ -344,7 +347,7 @@ const Map<String, String> _kEn = {
   'Язык': 'Language',
   'безопасность': 'security',
   'Блокировка входа': 'App lock',
-  'PIN при открытии приложения': 'PIN when opening the app',
+  'Только экран: от доступа к устройству не защищает': 'Screen only — it does not protect against device access',
   'Обрыв соединения': 'Connection drop',
   'Уведомлять, если VPN отвалился': 'Notify if the VPN drops',
   'Напомнить за пару дней': 'Remind me a couple of days ahead',
@@ -379,7 +382,8 @@ const Map<String, String> _kEn = {
   'Разблокировать': 'Unlock',
   'Не помню PIN — сбросить': 'Forgot PIN — reset lock',
   'Сбросить PIN?': 'Reset PIN?',
-  'Блокировка отключится, но ты останешься в аккаунте.': "The lock turns off, but you stay signed in.",
+  'Блокировка отключится, но ты останешься в аккаунте. PIN защищает только экран: сбросить его может любой, у кого есть доступ к этому устройству.':
+      "The lock turns off, but you stay signed in. The PIN protects only the screen: anyone with access to this device can reset it.",
   'Сбросить': 'Reset',
   'Неверный PIN': 'Wrong PIN',
   'Блокировка сброшена': 'Lock reset',
@@ -427,8 +431,8 @@ const Map<String, String> _kEn = {
   'тарифы': 'plans',
   'устройства': 'devices',
   '+50 ₽/мес за каждое доп-устройство · максимум 10': '+50 ₽/mo per extra device · 10 max',
-  'доп. устройство докупается в боте за токены — цена за остаток срока':
-      'extra devices are bought in the bot with tokens — priced for the remaining term',
+  'число устройств (1–10) выбирается в боте при оплате · +50 ₽/мес за доп-устройство':
+      'device count (1–10) is chosen in the bot at checkout · +50 ₽/mo per extra device',
   'выбор большинства': 'most popular',
   'Итого': 'Total',
   'VIP: цена считается по тарифу на 10 устройств — точный итог покажет бот':
@@ -459,6 +463,8 @@ const Map<String, String> _kEn = {
   // ---- deep-link / share / QR (native.dart, account.dart) ----
   'Ты уже вошёл': "You're already signed in",
   'Не удалось разобрать ссылку': "Couldn't parse the link",
+  'Вход по ссылке': 'Sign-in link',
+  'Войти в аккаунт по ссылке?': 'Sign in to the account via this link?',
   'Это не VPN-ключ': 'This is not a VPN key',
   'Показать QR': 'Show QR',
   'QR ключа': 'Key QR',
@@ -504,8 +510,8 @@ const Map<String, String> _kEn = {
 
   // ---- faq (account) ----
   'Сколько устройств можно подключить?': 'How many devices can I connect?',
-  'Подписка работает на одном устройстве. Дополнительные докупаются в боте за токены — цена считается за остаток срока.':
-      'A subscription covers one device. Extra devices are bought in the bot with tokens — priced for the remaining term.',
+  'От 1 до 10 — число выбираешь при покупке (в боте или на сайте). Каждое дополнительное: +50 ₽/мес.':
+      'From 1 to 10 — you pick the count at checkout (in the bot or on the website). Each extra device: +50 ₽/mo.',
   'Вы ведёте логи?': 'Do you keep logs?',
   'Нет. Мы не храним логи активности — только техническую информацию для работы сервиса.':
       "No. We don't store activity logs — only technical info to run the service.",

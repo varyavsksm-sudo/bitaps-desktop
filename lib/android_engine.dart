@@ -97,7 +97,7 @@ class AndroidXrayEngine {
   /// Версия ядра внутри плагина — для экрана самодиагностики.
   Future<String> coreVersion() async {
     try {
-      return await (_v2ray ??= V2ray(onStatusChanged: (_) {})).getCoreVersion();
+      return await (await _engine()).getCoreVersion();
     } catch (_) {
       return '';
     }
@@ -106,7 +106,7 @@ class AndroidXrayEngine {
   /// Последние строки лога ядра — чтобы ошибка подключения была диагностируемой.
   Future<List<String>> logs() async {
     try {
-      return await (_v2ray ??= V2ray(onStatusChanged: (_) {})).getLogs();
+      return await (await _engine()).getLogs();
     } catch (_) {
       return const [];
     }
@@ -143,7 +143,9 @@ class AndroidXrayEngine {
   /// адреса при глушении интернета проходит, а сессия внутри — нет.
   Future<int> serverDelay(String configJson, String url) async {
     try {
-      final v = _v2ray ??= V2ray(onStatusChanged: (_) {});
+      // Экземпляр создаёт ТОЛЬКО _engine() — с настоящим колбэком состояния: если автопинг
+      // придёт раньше первого коннекта, ??= с пустым колбэком навсегда отрезал бы статусы.
+      final v = await _engine();
       await v.initialize(notificationIconResourceName: 'ic_launcher', notificationIconResourceType: 'mipmap');
       return await v.getServerDelay(config: configJson, url: url);
     } catch (_) {

@@ -6,10 +6,9 @@ part of '../main.dart';
 // (?start=subscribe_<plan>_<dev>) для Telegram-аккаунтов или pay.html?plan=&dev= для веб-аккаунтов
 // (отрицательный tgId).
 //
-// Селектор устройств показываем ТОЛЬКО веб-аккаунтам. Бот продаёт подписку ровно на одно
-// устройство (PLAN_DEVICES=1) и число из deep-link игнорирует, а web-pay честно считает
-// device_limit. Раньше селектор стоял для всех: человек выбирал 4 устройства, видел 4 190 ₽,
-// уходил в бота, платил 2 990 ₽ за одно — и через день упирался в «Лимит устройств исчерпан».
+// Селектор устройств (➖/➕) считает итог ТОЛЬКО веб-аккаунтам: web-pay принимает device_limit
+// в чекауте. Бот принимает число устройств в самом deep-link (subscribe_<plan>_<dev>, 1..10,
+// +50 ₽/мес за доп-устройство) — передаём текущий лимит аккаунта, итог считает бот.
 extension ShellPaywall on ShellState {
   void _openPaywall() {
     // страховка: гостю показывать нечего — его «Продлить» не рисуется (см. _subCard)
@@ -22,8 +21,8 @@ extension ShellPaywall on ShellState {
     final webAcc = tgId != null && tgId! < 0; // веб-аккаунт продлевается на сайте, не в боте
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => StatefulBuilder(builder: (ctx, setSt) {
       final plan = kPlanDefs[sel];
-      // В боте устройство ровно одно, что бы ни стояло в селекторе, — считаем итог по факту,
-      // а не по несуществующему выбору.
+      // Веб-чекаут считает device_limit из селектора; у бота число устройств выбирается в нём
+      // самом — здесь показываем базовую цену за одно, а не несуществующий «итог».
       final devCount = webAcc ? dev : 1;
       final total = plan.base + (devCount - 1) * kExtraPerMonthRub * plan.months;
       final perMo = (total / plan.months).round();
@@ -69,7 +68,7 @@ extension ShellPaywall on ShellState {
                   Text(
                       webAcc
                           ? tr('+50 ₽/мес за каждое доп-устройство · максимум 10')
-                          : tr('доп. устройство докупается в боте за токены — цена за остаток срока'),
+                          : tr('число устройств (1–10) выбирается в боте при оплате · +50 ₽/мес за доп-устройство'),
                       style: mono(11, c: C.muted)),
                 ])),
                 // ➖/➕ — только веб-чекауту: он единственный принимает device_limit
@@ -117,11 +116,13 @@ extension ShellPaywall on ShellState {
                 ],
                 const SizedBox(height: 14),
                 _btn(tr('Оплатить'), kind: 0, icon: Icons.bolt, onTap: () {
-                  // Суффикс «_1» боту нужен: по нему его регулярка узнаёт тариф и открывает сразу
-                  // способ оплаты. Само число он игнорирует — подписка всегда на одно устройство.
+                  // Суффикс «_<dev>» боту нужен: по нему его регулярка узнаёт тариф и число
+                  // устройств (1..10). Передаём ТЕКУЩИЙ лимит аккаунта, если он известен, —
+                  // иначе продление молча сузило бы подписку до одного устройства.
+                  final curDev = (subLimit ?? 0) > 0 ? subLimit! : 1;
                   _open(webAcc
                       ? '$kPayUrl?plan=${plan.code}&dev=$dev'
-                      : '$kBot?start=subscribe_${plan.code}_1');
+                      : '$kBot?start=subscribe_${plan.code}_$curDev');
                 }),
                 const SizedBox(height: 10),
                 Center(child: Text(

@@ -98,6 +98,13 @@ class XrayProcess {
     final p = XrayProcess._(proc, socksPort);
     proc.stderr.transform(utf8.decoder).transform(const LineSplitter()).listen(p._onLog);
     proc.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen(p._onLog);
+    // Смерть процесса вне stop(): помечаем и пишем в лог. Без этого цикл готовности ниже
+    // ждал бы весь таймаут уже умерший движок, а обрыв посреди сессии нигде не отражался.
+    proc.exitCode.then((code) {
+      if (p._stopped) return; // своя остановка — не событие
+      p._exited = true;
+      p._onLog('xray exited: $code');
+    });
     // Готовность = локальный socks реально принимает соединения. Пока порт не слушает,
     // включать системный прокси нельзя — иначе весь трафик уедет в закрытый порт.
     final deadline = DateTime.now().add(readyTimeout);
@@ -197,10 +204,18 @@ class SystemProxy {
   static bool _enabled = false;
   static List<String> _macServices = [];
 
+  // Снимок настроек прокси ДО нашего включения (у части пользователей свой прокси уже стоял):
+  // disable() вернёт его, а не безусловное «выкл». null/пусто — снимка нет (свежий процесс,
+  // напр. уборка за упавшей сессией) → прежнее поведение: просто снять.
+  static Map<String, String>? _winSaved; // ProxyEnable (0/1) + ProxyServer
+  static Map<String, String>? _linuxSaved; // mode + http host/port
+  static final Map<String, Map<String, List<String>>> _macSaved = {}; // сервис → тип → строки вывода -get*proxy
+
   static bool get enabled => _enabled;
 
   static Future<bool> enable({required int socksPort, required int httpPort}) async {
     try {
+      await _snapshot(); // до любой записи: потом вернуть систему как было
       if (Platform.isMacOS) {
         _macServices = await _macNetworkServices();
         if (_macServices.isEmpty) return false;
@@ -229,7 +244,15 @@ class SystemProxy {
         return _enabled;
       }
       if (Platform.isLinux) {
-        // GNOME/GTK-окружения читают gsettings; на прочих DE пользователь настраивает сам.
+        // gsettings читают только GTK-окружения. На KDE/LXQt и прочих запись «проходит», но
+        // настройку никто не применяет (см. _linuxApplied — она читает те же ключи, что пишет,
+        // и потому там врёт). Честно говорим «не поддержано» вместо ложного «защищено».
+        final de = (Platform.environment['XDG_CURRENT_DESKTOP'] ?? '').toUpperCase();
+        const gtk = ['GNOME', 'UNITY', 'PANTHEON', 'CINNAMON', 'BUDGIE', 'MATE', 'XFCE'];
+        if (de.isNotEmpty && !gtk.any(de.contains)) {
+          stderr.writeln('system proxy: окружение «$de» не читает gsettings — режим прокси не поддержан');
+          return false;
+        }
         await Process.run('gsettings', ['set', 'org.gnome.system.proxy', 'mode', 'manual']);
         for (final e in {'http': httpPort, 'https': httpPort, 'socks': socksPort}.entries) {
           await Process.run('gsettings', ['set', 'org.gnome.system.proxy.${e.key}', 'host', '127.0.0.1']);
@@ -251,6 +274,16 @@ class SystemProxy {
   static Future<void> disable() async {
     _enabled = false;
     try {
+      // Есть снимок: возвращаем чужие настройки ТОЛЬКО если текущие всё ещё наши (localhost).
+      // Прокси сменился под нами — человек настроил свой сам: его выбор не трогаем вовсе.
+      if (_winSaved != null || _linuxSaved != null || _macSaved.isNotEmpty) {
+        if (await looksOurs()) await _restore();
+        _winSaved = null;
+        _linuxSaved = null;
+        _macSaved.clear();
+        _macServices = [];
+        return;
+      }
       if (Platform.isMacOS) {
         final services = _macServices.isNotEmpty ? _macServices : await _macNetworkServices();
         await _macRun([
@@ -275,7 +308,85 @@ class SystemProxy {
     } catch (_) {/* при выключении ошибки глотаем: главное — не мешать выходу */}
   }
 
+  // ── снимок/восстановление чужих настроек (до нашего включения и после) ──
+  static Future<void> _snapshot() async {
+    try {
+      if (Platform.isWindows) {
+        const key = r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings';
+        final en = await Process.run('reg', ['query', key, '/v', 'ProxyEnable']);
+        final srv = await Process.run('reg', ['query', key, '/v', 'ProxyServer']);
+        _winSaved = {
+          'enable': (en.stdout ?? '').toString().contains('0x1') ? '1' : '0',
+          'server': RegExp(r'ProxyServer\s+REG_SZ\s+(\S.*)')
+                  .firstMatch((srv.stdout ?? '').toString())?.group(1)?.trim() ?? '',
+        };
+        return;
+      }
+      if (Platform.isMacOS) {
+        final services = _macServices.isNotEmpty ? _macServices : await _macNetworkServices();
+        _macSaved.clear();
+        for (final svc in services) {
+          final m = <String, List<String>>{};
+          for (final t in ['-getwebproxy', '-getsecurewebproxy', '-getsocksfirewallproxy']) {
+            final r = await Process.run('/usr/sbin/networksetup', [t, svc]);
+            m[t] = (r.stdout ?? '').toString().split('\n');
+          }
+          _macSaved[svc] = m;
+        }
+        return;
+      }
+      if (Platform.isLinux) {
+        Future<String> get(String key, String field) async =>
+            (await Process.run('gsettings', ['get', key, field]))
+                .stdout?.toString().trim().replaceAll("'", '') ?? '';
+        final mode = await get('org.gnome.system.proxy', 'mode');
+        _linuxSaved = {
+          'mode': mode.isEmpty ? 'none' : mode,
+          'httpHost': await get('org.gnome.system.proxy.http', 'host'),
+          'httpPort': await get('org.gnome.system.proxy.http', 'port'),
+        };
+        return;
+      }
+    } catch (_) {/* снимок не снялся — disable() отработает по-старому (просто снять) */}
+  }
 
+  static Future<void> _restore() async {
+    try {
+      if (Platform.isWindows && _winSaved != null) {
+        const key = r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings';
+        final srv = _winSaved!['server'] ?? '';
+        if (srv.isNotEmpty) {
+          await Process.run('reg', ['add', key, '/v', 'ProxyServer', '/t', 'REG_SZ', '/d', srv, '/f']);
+        }
+        await Process.run('reg', ['add', key, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', _winSaved!['enable'] ?? '0', '/f']);
+        return;
+      }
+      if (Platform.isMacOS) {
+        final cmds = <List<String>>[];
+        for (final e in _macSaved.entries) {
+          for (final t in ['-getwebproxy', '-getsecurewebproxy', '-getsocksfirewallproxy']) {
+            final lines = e.value[t] ?? const <String>[];
+            String f(String k) => lines
+                .firstWhere((l) => l.startsWith('$k:'), orElse: () => '')
+                .split(':').last.trim();
+            final host = f('Server'), port = f('Port'), on = f('Enabled') == 'Yes';
+            final set = t.replaceFirst('-get', '-set'); // -getwebproxy → -setwebproxy
+            if (host.isNotEmpty) cmds.add([set, e.key, host, port]);
+            cmds.add(['${set}state', e.key, on ? 'on' : 'off']);
+          }
+        }
+        if (cmds.isNotEmpty) await _macRun(cmds);
+        _macServices = [];
+        return;
+      }
+      if (Platform.isLinux && _linuxSaved != null) {
+        await Process.run('gsettings', ['set', 'org.gnome.system.proxy.http', 'host', _linuxSaved!['httpHost'] ?? '']);
+        await Process.run('gsettings', ['set', 'org.gnome.system.proxy.http', 'port', _linuxSaved!['httpPort'] ?? '0']);
+        await Process.run('gsettings', ['set', 'org.gnome.system.proxy', 'mode', _linuxSaved!['mode'] ?? 'none']);
+        return;
+      }
+    } catch (_) {/* восстановление best-effort: хуже, чем надо, не сделаем */}
+  }
 
   /// Выполнить пачку команд networksetup. Сначала пробуем как есть: если приложение уже
   /// запущено с нужными правами, лишний запрос пароля не нужен. Не получилось — повторяем

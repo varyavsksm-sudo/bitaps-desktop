@@ -45,7 +45,7 @@ extension ShellAccount on ShellState {
     // Иначе принимаем только сам VPN-ключ (любая схема из kSupportedKeySchemes — как гард
     // коннекта и «Свой конфиг»). Прочие http(s)-ссылки не принимаем: раньше такая ссылка молча
     // сохранялась как ключ и коннект падал.
-    if (!kSupportedKeySchemes.any((s) => t.startsWith(s))) {
+    if (!kSupportedKeySchemes.any((s) => t.toLowerCase().startsWith(s))) {
       _toast(fromClipboard ? tr('В буфере нет VPN-ключа') : tr('Это не VPN-ключ'));
       return;
     }
@@ -544,7 +544,14 @@ extension ShellAccount on ShellState {
                   tooltip: tr('Обновить'),
                   icon: Icon(Icons.refresh, color: C.accent))]),
         const SizedBox(height: 8),
-        if (devices.isEmpty)
+        if (devicesUnknown)
+          // хаб молчал (devices_unknown): это НЕ «устройств нет» — кэш мог и не обновиться
+          Padding(padding: const EdgeInsets.symmetric(vertical: 16), child: Column(children: [
+            Icon(Icons.cloud_off, size: 30, color: C.muted),
+            const SizedBox(height: 8),
+            Text(tr('Не удалось получить список устройств.\nПопробуй обновить.'), textAlign: TextAlign.center, style: mono(12)),
+          ]))
+        else if (devices.isEmpty)
           Padding(padding: const EdgeInsets.symmetric(vertical: 16), child: Column(children: [
             Icon(Icons.devices_other, size: 30, color: C.muted),
             const SizedBox(height: 8),

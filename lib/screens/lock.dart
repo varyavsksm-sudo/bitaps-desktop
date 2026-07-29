@@ -56,6 +56,7 @@ extension ShellLock on ShellState {
       _syncAnimations(); // разблокировали → поднимаем анимации, погашенные на замке
       _pinCtrl.clear();
       _maybeAutoConnect(); // отложенный авто-коннект стартует только после разблокировки
+      _processPendingDeepLink(); // и deep-link, пришедший под замком
     } else {
       _pinFails++;
       _pinCtrl.clear();
@@ -108,7 +109,7 @@ extension ShellLock on ShellState {
         backgroundColor: C.bg2,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
         title: Text(tr('Сбросить PIN?'), style: disp(18, w: FontWeight.w700)),
-        content: Text(tr('Блокировка отключится, но ты останешься в аккаунте.'), style: mono(13, c: C.muted)),
+        content: Text(tr('Блокировка отключится, но ты останешься в аккаунте. PIN защищает только экран: сбросить его может любой, у кого есть доступ к этому устройству.'), style: mono(13, c: C.muted)),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dctx), child: Text(tr('Отмена'), style: mono(13, c: C.muted))),
           TextButton(
@@ -123,6 +124,7 @@ extension ShellLock on ShellState {
               _save(); // _secWrite(appPin=null) удаляет PIN из secure storage
               _toast(tr('Блокировка сброшена'));
               _maybeAutoConnect(); // разблокировались → поднимаем отложенный авто-коннект, если включён
+              _processPendingDeepLink(); // и deep-link, пришедший под замком
             },
             child: Text(tr('Сбросить'), style: mono(13, c: C.accent)),
           ),

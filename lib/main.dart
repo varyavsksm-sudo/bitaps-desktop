@@ -184,7 +184,7 @@ class Shell extends StatefulWidget {
   State<Shell> createState() => ShellState();
 }
 
-class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBindingObserver, TrayListener {
+class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBindingObserver, TrayListener, WindowListener {
   int tab = 0;
   int mode = 0;
   Server server = kNoServer;
@@ -210,6 +210,9 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   // Режим «лучший сервер»: при подключении сами берём оптимальный сервер (ползунок на Главной).
   // Выбор конкретного сервера в списке выключает режим (см. _pickServer).
   bool bestServer = true;
+  // Ручной выбор сервера, сохранённый до загрузки узлов: парк на старте пуст, поэтому
+  // применяем его в _applyNodes, когда узлы подписки реально придут.
+  String? _pendingServerId;
   // Живые замеры отклика (кнопка «Пинг» на Серверах): id сервера → мс. Пока замера не было —
   // показываем статичный s.ping из models.dart. Не персистим: замер живёт в рамках сессии.
   final Map<String, int> pingMeasured = {};
@@ -245,6 +248,9 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   bool _loggingIn = false; // идёт вход по ключу — гвард от двойного входа
   bool _rotating = false; // идёт ротация «Кода входа» — гвард от двойного тапа (два POST)
   List<Map<String, dynamic>> devices = [];
+  /// app-sub не смог получить список устройств с хаба (devices_unknown): показывать
+  /// «не удалось получить список», а не «устройств нет» — разница принципиальная.
+  bool devicesUnknown = false;
   final TextEditingController _loginCtrl = TextEditingController();
   bool get loggedIn => tgId != null && appToken != null;
 
@@ -336,6 +342,8 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   // ----- deep-link (bitaps://): приём кастомной схемы -----
   // Подписку держим в поле — она удерживает AppLinks живым и отменяется в dispose.
   StreamSubscription<Uri>? _linkSub;
+  // Ссылка, пришедшая под PIN-замком: исполняем после разблокировки, а не поверх него.
+  Uri? _pendingDeepLink;
 
   @override
   void initState() {
@@ -386,6 +394,8 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     // Tray — только десктоп; вся инициализация fail-soft (без нативной стороны/библиотеки
     // приложение просто живёт без трея, не падая).
     if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) _initTray();
+    // закрытие окна крестиком/Alt+F4: гасим туннель до выхода (см. onWindowClose ниже)
+    if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) windowManager.addListener(this);
     // deep-link (bitaps://) — все платформы; автозапуск+хоткей — только десктоп. Всё fail-soft.
     _initDeepLinks();
     if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) _initNativeDesktop();
@@ -508,6 +518,10 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
         _refreshTray();
         break;
       case 'quit':
+        // Перед выходом обязательно гасим туннель: _stopDesktop снимает системный прокси
+        // ПЕРВЫМ, иначе после закрытия приложения у пользователя остался бы прокси в мёртвый
+        // порт и «пропавший интернет». Сбой disconnect выход не блокирует.
+        try { _conn.reset(); await TunnelEngine.instance.disconnect(); } catch (_) {}
         // сначала убираем иконку из трея, затем закрываем окно/процесс
         try { await trayManager.destroy(); } catch (_) {}
         await windowManager.destroy();
@@ -523,6 +537,13 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
           _refreshTray();
         }
     }
+  }
+
+  // Крестик/Alt+F4: до фактического закрытия гасим туннель (прокси снимается первым — см.
+  // _stopDesktop). Окно не удерживаем: сбой disconnect не должен блокировать выход.
+  @override
+  void onWindowClose() async {
+    try { _conn.reset(); await TunnelEngine.instance.disconnect(); } catch (_) {}
   }
 
   Future<void> _toggleWindowVisible() async {
@@ -574,6 +595,9 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     // выглядит зависшим. Фон для анимаций — только paused/hidden/detached (свёрнуто/скрыто).
     _foreground = state == AppLifecycleState.resumed || state == AppLifecycleState.inactive;
     _syncAnimations(); // свернули → гасим анимации; вернулись → поднимаем нужные
+    // Возврат из фона (напр. после оплаты в браузере/боте): тихо подтягиваем подписку —
+    // статус мог смениться, пока приложение стояло. Гвард _subLoading внутри _refreshSub.
+    if (state == AppLifecycleState.resumed && loggedIn) _refreshSub(silent: true);
     if (bg && tgl1 && (appPin?.isNotEmpty ?? false) && !_locked) {
       setState(() => _locked = true);
     }
@@ -583,6 +607,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     if (_trayReady) trayManager.removeListener(this);
+    if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) windowManager.removeListener(this);
     _linkSub?.cancel();
     _disposeHotkey();
     _onbCtrl.dispose();
@@ -703,8 +728,10 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       // иначе после рестарта плашка говорила бы «сервер выбираешь ты», а стоял бы автоподобранный.
       // Фолбэк на serverForMode выше, если сохранённый сервер исчез/стал недоступен.
       if (!bestServer) {
-        final saved = p.getString('serverId');
-        final match = fleet.where((s) => s.id == saved && s.available);
+        // Парк узлов на старте ещё пуст — запоминаем выбор и применяем его в _applyNodes,
+        // когда подписка подтянется; иначе первая же загрузка узлов затирала ручной выбор авто.
+        _pendingServerId = p.getString('serverId');
+        final match = fleet.where((s) => s.id == _pendingServerId && s.available);
         if (match.isNotEmpty) server = match.first;
       }
     });
@@ -836,6 +863,14 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     if (!mounted || ns.isEmpty) return;
     rebuild(() {
       subNodes = ns;
+      // Отложенный ручной выбор (serverId, сохранённый до загрузки узлов): сервер ещё есть
+      // в свежем парке — возвращаем его; нет — обычный авто-подбор ниже.
+      final pending = _pendingServerId;
+      if (!bestServer && pending != null) {
+        _pendingServerId = null;
+        final hit = fleet.where((s) => s.id == pending && s.available);
+        if (hit.isNotEmpty) { server = hit.first; return; }
+      }
       if (bestServer || !fleet.any((s) => s.id == server.id)) server = serverForMode(mode);
     });
   }
@@ -978,6 +1013,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       subLimit = null;
       subActive = false;
       devices = [];
+      devicesUnknown = false;
       // статистика аккаунта — тоже персональные данные: чистим при выходе
       statMemberSince = null;
       statPaidDays = null;
