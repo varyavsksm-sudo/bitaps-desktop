@@ -8,6 +8,13 @@ on:
 permissions:
   contents: write
 
+# Релиз latest один на все платформы: два прогона одновременно перезаписывали его ассеты
+# в произвольном порядке (уже ловили испорченный build_number.txt в раздаче). Теперь строго
+# по очереди; текущий прогон не прерываем — релиз недопустимо резать посередине.
+concurrency:
+  group: release-desktop
+  cancel-in-progress: false
+
 jobs:
   # Быстрый гейт качества перед сборками: анализатор + юнит-тесты (генератор конфига туннеля
   # и разбор подписки). Платформенные каркасы для этого не нужны — только pub get.
@@ -22,6 +29,17 @@ jobs:
       # infos не роняют релиз — блокируют только настоящие ошибки компиляции/анализа
       - run: flutter analyze --no-fatal-infos
       - run: flutter test
+      # Гейт настоящим движком: генерируем конфиг из фикстуры подписки и проверяем xray'ем.
+      # Регрессия генератора или несовместимость с бинарём ловятся здесь, а не у пользователя.
+      - name: Конфиг → настоящий xray run -test
+        run: |
+          ver=v26.3.27
+          sha=23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae
+          curl -sSL -o xray.zip "https://github.com/XTLS/Xray-core/releases/download/$ver/Xray-linux-64.zip"
+          echo "$sha  xray.zip" | sha256sum -c -
+          unzip -o -q xray.zip -d xray-tmp
+          dart run tool/check_config.dart test/fixtures/subscription-live.json > /tmp/bitaps-cfg.json
+          XRAY_LOCATION_ASSET=xray-tmp xray-tmp/xray run -test -c /tmp/bitaps-cfg.json
 
   windows:
     needs: test
@@ -143,6 +161,9 @@ jobs:
           grep -q 'android:allowBackup="false"' android/app/src/main/AndroidManifest.xml && echo "allowBackup ok" || (echo "allowBackup MISSING" && exit 1)
           sed -i.bak 's/minSdk = flutter.minSdkVersion/minSdk = 24/; s/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' android/app/build.gradle.kts 2>/dev/null || true
           sed -i.bak 's/minSdk = flutter.minSdkVersion/minSdk = 24/; s/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' android/app/build.gradle 2>/dev/null || true
+          # тот же grep-гейт, что у остальных патчей: сменится форма записи в шаблоне — узнаем сразу,
+          # а не после того, как APK выйдет с дефолтным minSdk (для VPN-плагина он не проверялся)
+          (grep -q "minSdk = 24" android/app/build.gradle.kts 2>/dev/null || grep -q "minSdkVersion 24" android/app/build.gradle 2>/dev/null) && echo "minSdk ok" || (echo "minSdk MISSING" && exit 1)
           # ── Распаковывать нативные библиотеки на диск (extractNativeLibs) ──
           # ОБЯЗАТЕЛЬНО. Современная упаковка (по умолчанию) держит .so внутри APK и не пишет их
           # в каталог lib/ — система грузит их прямо из архива. Для обычных библиотек это нормально,
@@ -206,8 +227,9 @@ jobs:
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: yes | flutter doctor --android-licenses || true
-      # split-per-abi: с VPN-движком внутри универсальный APK весит вдвое больше нужного
-      - run: flutter build apk --release --split-per-abi --dart-define=BUILD_NUMBER=${{ github.run_number }}
+      # split-per-abi: с VPN-движком внутри универсальный APK весит вдвое больше нужного.
+      # x86_64 не собираем: его всё равно никто не публикует (эмуляторы на Google Play — ниша).
+      - run: flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 --dart-define=BUILD_NUMBER=${{ github.run_number }}
       # ПОДПИСЬ ПОСТОЯННЫМ КЛЮЧОМ. Без неё Flutter подписывает релиз отладочным ключом, который
       # на раннере генерируется заново КАЖДУЮ сборку — и новая версия не встаёт поверх старой:
       # Android отклоняет установку по несовпадению подписи («приложение не установлено»).
