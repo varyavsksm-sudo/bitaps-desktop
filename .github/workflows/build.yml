@@ -338,8 +338,9 @@ jobs:
           files: bitaps-macos.dmg
 
   # iOS: дым-тест компиляции без подписи (Flutter-приложение + наш AppDelegate.swift).
-  # ios/ закоммичен с нашими правками — flutter create НЕ вызываем (перезаписал бы их).
-  # Подпись и выгрузка в App Store — через команду владельца в Xcode (см. ios/README-IOS.md).
+  # Платформенные папки в git не хранятся (см. .gitignore) — ios/ генерируется заново,
+  # а наши нативные файлы применяются поверх из native_ios/ (паттерн Android-манифеста).
+  # Подпись и выгрузка в App Store — через команду владельца в Xcode (см. native_ios/README-IOS.md).
   ios:
     needs: test
     runs-on: macos-latest
@@ -349,5 +350,13 @@ jobs:
         with:
           channel: stable
       - run: flutter --version
+      - run: flutter create --org com.bitapsvpn --platforms=ios --project-name bitaps_vpn .
+      - name: Применить нативную сторону (мост + PacketTunnel)
+        run: |
+          cp native_ios/AppDelegate.swift ios/Runner/AppDelegate.swift
+          cp native_ios/Runner.entitlements ios/Runner/Runner.entitlements
+          cp -R native_ios/PacketTunnel ios/PacketTunnel
+          grep -q "app.bitaps.vpn/control" ios/Runner/AppDelegate.swift || (echo "AppDelegate не применён" && exit 1)
+          echo OK
       - run: flutter pub get
       - run: flutter build ios --release --no-codesign --dart-define=BUILD_NUMBER=${{ github.run_number }}
