@@ -77,10 +77,46 @@ jobs:
           foreach ($f in @("xray.exe","geoip.dat","geosite.dat")) {
             if (-not (Test-Path "$dest\$f")) { throw "$f not packaged" }
           }
+      # ПОДПИСЬ КОДА (SmartScreen): если в секретах лежит Authenticode-сертификат
+      # (WINDOWS_CERT_BASE64 = base64 .pfx, WINDOWS_CERT_PASSWORD), подписываем exe приложения,
+      # движок и дальше установщик — без подписи Windows пугает пользователя «неизвестным
+      # издателем». Секрета нет — собираем как раньше, без подписи (мягкий фолбэк).
+      - name: Подписать exe (если есть сертификат)
+        shell: pwsh
+        env:
+          CERT_B64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          CERT_PASS: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:CERT_B64)) { echo "сертификата нет — пропускаю подпись"; exit 0 }
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\codesign.pfx", [Convert]::FromBase64String($env:CERT_B64))
+          $st = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1).FullName
+          if (-not $st) { throw "signtool не найден на раннере" }
+          $dest = "build\windows\x64\runner\Release"
+          foreach ($f in @("$dest\bitaps_vpn.exe", "$dest\xray.exe")) {
+            & $st sign /fd SHA256 /f "$env:RUNNER_TEMP\codesign.pfx" /p $env:CERT_PASS /tr http://timestamp.digicert.com /td SHA256 /d "bitaps VPN" $f
+            if ($LASTEXITCODE -ne 0) { throw "подпись $f не удалась ($LASTEXITCODE)" }
+            & $st verify /pa $f | Out-Null
+          }
+          Remove-Item "$env:RUNNER_TEMP\codesign.pfx" -Force
+          echo "exe подписаны"
       - name: Portable zip
         run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath bitaps-windows-x64.zip -Force
       - name: Installer (Inno Setup)
         run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" pkg\installer.iss'
+      # Установщик подписываем ОТДЕЛЬНО после сборки: SmartScreen смотрит подпись скачанного файла.
+      - name: Подписать установщик (если есть сертификат)
+        shell: pwsh
+        env:
+          CERT_B64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          CERT_PASS: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:CERT_B64)) { echo "сертификата нет — пропускаю подпись"; exit 0 }
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\codesign.pfx", [Convert]::FromBase64String($env:CERT_B64))
+          $st = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1).FullName
+          & $st sign /fd SHA256 /f "$env:RUNNER_TEMP\codesign.pfx" /p $env:CERT_PASS /tr http://timestamp.digicert.com /td SHA256 /d "bitaps VPN" bitaps-setup.exe
+          if ($LASTEXITCODE -ne 0) { throw "подпись установщика не удалась ($LASTEXITCODE)" }
+          Remove-Item "$env:RUNNER_TEMP\codesign.pfx" -Force
+          echo "установщик подписан"
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
