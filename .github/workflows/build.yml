@@ -253,11 +253,13 @@ jobs:
               --ks-pass env:KS_PASS --key-pass env:KS_PASS --ks-key-alias "$KS_ALIAS" "$f"
             "$APKSIGNER" verify --print-certs "$f" | grep -E "Signer #1 certificate DN|SHA-256" | head -2
           done
-          # AAB для Google Play подписываем тем же релизным ключом (требование консоли).
-          "$APKSIGNER" sign --ks /tmp/release.p12 --ks-type PKCS12 \
-            --ks-pass env:KS_PASS --key-pass env:KS_PASS --ks-key-alias "$KS_ALIAS" \
-            build/app/outputs/bundle/release/app-release.aab
-          "$APKSIGNER" verify --print-certs build/app/outputs/bundle/release/app-release.aab | grep -E "Signer #1 certificate DN|SHA-256" | head -2
+          # AAB для Google Play: apksigner НЕ умеет AAB (Missing AndroidManifest) — подписываем jarsigner,
+          # это стандартная подпись App Bundle, принимаемая консолью.
+          JARSIGNER=$(ls -d "$JAVA_HOME"/bin/jarsigner "$ANDROID_HOME"/java/*/bin/jarsigner 2>/dev/null | head -1)
+          [ -x "$JARSIGNER" ] || JARSIGNER=jarsigner
+          "$JARSIGNER" -keystore /tmp/release.p12 -storetype PKCS12 -storepass:env KS_PASS -keypass:env KS_PASS \
+            build/app/outputs/bundle/release/app-release.aab "$KS_ALIAS"
+          "$JARSIGNER" -verify -certs build/app/outputs/bundle/release/app-release.aab 2>/dev/null | grep -E "X.509|SHA-256" | head -2 || true
           rm -f /tmp/release.p12
       - name: APK/AAB для релиза (arm64 — основной, armeabi — старые устройства, AAB — Google Play)
         run: |
