@@ -108,8 +108,8 @@ class TunnelEngine {
         await _connectAndroid(usable, onlyTag, server);
         return;
       case EngineKind.native:
-        // Нативной стороне отдаём sing-box конфиг — формат, который она ожидает.
-        await NativeTunnel.connect(singboxConfigJsonFromNodes(usable), server: server);
+        // Нативной стороне отдаём конфиг xray с tun-входом (движок — libXray в расширении).
+        await NativeTunnel.connect(xrayConfigJsonForIos(usable), server: server);
         return;
       case EngineKind.none:
         throw EngineUnavailable('VPN-движок не установлен в этой сборке');

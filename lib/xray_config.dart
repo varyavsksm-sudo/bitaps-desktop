@@ -154,6 +154,43 @@ Map<String, dynamic> xrayConfigFromNodes(
   return cfg;
 }
 
+/// iOS-вариант конфига: те же узлы/балансировщик/правила/DNS, но входом служит tun-интерфейс
+/// NetworkExtension (fd движку передаётся через env {"xray.tun.fd"} на старте — см.
+/// ios/PacketTunnel/PacketTunnelProvider.swift). socks/http входы на iOS не нужны — трафик
+/// приходит из utun, а не из системного прокси.
+Map<String, dynamic> xrayConfigForIos(
+  List<SubNode> nodes, {
+  String? only,
+}) {
+  final base = xrayConfigFromNodes(nodes, only: only, socksPort: kXraySocksPort);
+  base['inbounds'] = [
+    {
+      'protocol': 'tun',
+      'tag': 'tun',
+      'settings': {
+        'name': 'bitaps-tun',
+        'MTU': 1500,
+        'address': ['172.19.0.1/30', 'fdfe:dcba:9876::1/126'],
+        // Маршруты ставит NetworkExtension (includedRoutes), а не xray — иначе конфликт
+        // таблиц маршрутизации с системным провайдером.
+        'autoRoute': false,
+        'strictRoute': false,
+        'stack': 'system',
+      },
+      'sniffing': {
+        'enabled': true,
+        'destOverride': ['http', 'tls', 'quic'],
+        'routeOnly': true,
+      },
+    },
+  ];
+  return base;
+}
+
+/// То же, JSON-строкой (для MethodChannel).
+String xrayConfigJsonForIos(List<SubNode> nodes, {String? only}) =>
+    jsonEncode(xrayConfigForIos(nodes, only: only));
+
 /// Конфиг ОДНОГО узла — ровно тот, что наш сервис кладёт в подписку и что исполняют сторонние
 /// клиенты. Используется на Android.
 ///

@@ -229,7 +229,10 @@ jobs:
       - run: yes | flutter doctor --android-licenses || true
       # split-per-abi: с VPN-движком внутри универсальный APK весит вдвое больше нужного.
       # x86_64 не собираем: его всё равно никто не публикует (эмуляторы на Google Play — ниша).
-      - run: flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 --dart-define=BUILD_NUMBER=${{ github.run_number }}
+      # --build-number: versionCode для Google Play (требует монотонного роста между выкладками).
+      - run: flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 --build-number=${{ github.run_number }} --dart-define=BUILD_NUMBER=${{ github.run_number }}
+      # AAB для Google Play: консоль принимает только App Bundle (APK — для прямой раздачи).
+      - run: flutter build appbundle --release --build-number=${{ github.run_number }} --dart-define=BUILD_NUMBER=${{ github.run_number }}
       # ПОДПИСЬ ПОСТОЯННЫМ КЛЮЧОМ. Без неё Flutter подписывает релиз отладочным ключом, который
       # на раннере генерируется заново КАЖДУЮ сборку — и новая версия не встаёт поверх старой:
       # Android отклоняет установку по несовпадению подписи («приложение не установлено»).
@@ -250,12 +253,18 @@ jobs:
               --ks-pass env:KS_PASS --key-pass env:KS_PASS --ks-key-alias "$KS_ALIAS" "$f"
             "$APKSIGNER" verify --print-certs "$f" | grep -E "Signer #1 certificate DN|SHA-256" | head -2
           done
+          # AAB для Google Play подписываем тем же релизным ключом (требование консоли).
+          "$APKSIGNER" sign --ks /tmp/release.p12 --ks-type PKCS12 \
+            --ks-pass env:KS_PASS --key-pass env:KS_PASS --ks-key-alias "$KS_ALIAS" \
+            build/app/outputs/bundle/release/app-release.aab
+          "$APKSIGNER" verify --print-certs build/app/outputs/bundle/release/app-release.aab | grep -E "Signer #1 certificate DN|SHA-256" | head -2
           rm -f /tmp/release.p12
-      - name: APK для релиза (arm64 — основной, armeabi — старые устройства)
+      - name: APK/AAB для релиза (arm64 — основной, armeabi — старые устройства, AAB — Google Play)
         run: |
           cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk bitaps.apk
           cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk bitaps-armv7.apk
-          ls -la bitaps.apk bitaps-armv7.apk
+          cp build/app/outputs/bundle/release/app-release.aab bitaps.aab
+          ls -la bitaps.apk bitaps-armv7.apk bitaps.aab
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
@@ -264,6 +273,7 @@ jobs:
           files: |
             bitaps.apk
             bitaps-armv7.apk
+            bitaps.aab
 
 
   # macOS: раздаём DMG напрямую (без App Store), поэтому подпись — ad-hoc. Пользователь один раз
@@ -326,3 +336,18 @@ jobs:
           tag_name: latest
           name: Последняя сборка
           files: bitaps-macos.dmg
+
+  # iOS: дым-тест компиляции без подписи (Flutter-приложение + наш AppDelegate.swift).
+  # ios/ закоммичен с нашими правками — flutter create НЕ вызываем (перезаписал бы их).
+  # Подпись и выгрузка в App Store — через команду владельца в Xcode (см. ios/README-IOS.md).
+  ios:
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter --version
+      - run: flutter pub get
+      - run: flutter build ios --release --no-codesign --dart-define=BUILD_NUMBER=${{ github.run_number }}
