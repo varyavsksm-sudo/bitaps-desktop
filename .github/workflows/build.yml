@@ -361,12 +361,12 @@ jobs:
       - run: flutter pub get
       # Пакет flutter_v2ray_client переименовал плагин, но не podspec: podhelper ищет
       # flutter_v2ray_client.podspec, а лежит flutter_v2ray.podspec — pod install падает.
-      # Копируем на ожидаемое имя (содержимое корректное, API-compat stub).
+      # Копируем на ожидаемое имя прямо в pub-cache (содержимое корректное, API-compat stub).
       - name: Починить podspec flutter_v2ray_client для iOS
         run: |
-          P=.symlinks/plugins/flutter_v2ray_client/ios
-          if [ -d "$P" ] && [ ! -f "$P/flutter_v2ray_client.podspec" ]; then
-            cp "$P/flutter_v2ray.podspec" "$P/flutter_v2ray_client.podspec"
-          fi
-          ls "$P"/*.podspec
+          P="$(find "$PUB_CACHE" -maxdepth 4 -type d -name ios -path "*flutter_v2ray_client*" | head -1)"
+          echo "pkg ios dir: $P"
+          [ -n "$P" ] || { echo "пакет не найден в pub-cache"; exit 1; }
+          [ -f "$P/flutter_v2ray_client.podspec" ] || cp "$P/flutter_v2ray.podspec" "$P/flutter_v2ray_client.podspec"
+          ls "$P"
       - run: flutter build ios --release --no-codesign --dart-define=BUILD_NUMBER=${{ github.run_number }}
