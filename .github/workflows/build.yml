@@ -359,4 +359,14 @@ jobs:
           grep -q "app.bitaps.vpn/control" ios/Runner/AppDelegate.swift || (echo "AppDelegate не применён" && exit 1)
           echo OK
       - run: flutter pub get
+      # Пакет flutter_v2ray_client переименовал плагин, но не podspec: podhelper ищет
+      # flutter_v2ray_client.podspec, а лежит flutter_v2ray.podspec — pod install падает.
+      # Копируем на ожидаемое имя (содержимое корректное, API-compat stub).
+      - name: Починить podspec flutter_v2ray_client для iOS
+        run: |
+          P=.symlinks/plugins/flutter_v2ray_client/ios
+          if [ -d "$P" ] && [ ! -f "$P/flutter_v2ray_client.podspec" ]; then
+            cp "$P/flutter_v2ray.podspec" "$P/flutter_v2ray_client.podspec"
+          fi
+          ls "$P"/*.podspec
       - run: flutter build ios --release --no-codesign --dart-define=BUILD_NUMBER=${{ github.run_number }}
