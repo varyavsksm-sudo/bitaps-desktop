@@ -24,6 +24,7 @@ import 'package:app_links/app_links.dart';
 import 'package:launch_at_startup/launch_at_startup.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
+import 'package:in_app_purchase/in_app_purchase.dart';
 
 // Приложение разбито на модули; все они — части одной библиотеки (part/part of),
 // чтобы приватные имена (_secRead, _load, _conn и т.п.) и extension'ы на ShellState
@@ -43,6 +44,7 @@ part 'screens/settings.dart';
 part 'screens/lock.dart';
 part 'screens/onboarding.dart';
 part 'screens/paywall.dart';
+part 'screens/billing.dart'; // Play Billing: покупка подписки из приложения (Google Play)
 part 'screens/bbox.dart';    // B-box: свой экран товара, предзаказ и «поторопить сборку»
 
 Future<void> main(List<String> args) async {
@@ -391,6 +393,9 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     });
     _load();
     _checkUpdate();
+    // Play Billing (Android): поднимаем purchaseStream и кэш цен заранее, чтобы пейвол
+    // открывался с готовыми ценами магазина. Fail-soft — без Play-сервисов просто выключен.
+    _initBilling();
     // Tray — только десктоп; вся инициализация fail-soft (без нативной стороны/библиотеки
     // приложение просто живёт без трея, не падая).
     if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) _initTray();

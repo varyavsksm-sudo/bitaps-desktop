@@ -2,13 +2,18 @@ part of '../main.dart';
 
 // ============================ PAYWALL («Продлить» внутри приложения) ============================
 // Нативная витрина тарифов: 4 канон-тарифа (kPlanDefs = зеркало _shared/plans.ts, 399/999/1790/2990 ₽)
-// + стрик-подсказка из app-sub. НОВЫХ платёжных рельсов нет: «Оплатить» — deep-link в бота
-// (?start=subscribe_<plan>_<dev>) для Telegram-аккаунтов или pay.html?plan=&dev= для веб-аккаунтов
-// (отрицательный tgId).
+// + стрик-подсказка из app-sub. Рельсы оплаты по приоритету:
+//   1) Android + Play Billing доступен → покупка ИЗ ПРИЛОЖЕНИЯ (разовый продукт sub_mo/…/sub_yr,
+//      серверная верификация в google-play-verify; грант 1 устройства на продукт);
+//   2) иначе (и НЕ store-сборка) — deep-link в бота (?start=subscribe_<plan>_<dev>) для
+//      Telegram-аккаунтов или pay.html?plan=&dev= для веб-аккаунтов (отрицательный tgId);
+//   3) store-сборка (kStoreBuild) без биллинга — внешние ссылки НЕ показываем (anti-steering,
+//      политика Google Play: цифровые подписки только через Play Billing).
 //
 // Селектор устройств (➖/➕) считает итог ТОЛЬКО веб-аккаунтам: web-pay принимает device_limit
 // в чекауте. Бот принимает число устройств в самом deep-link (subscribe_<plan>_<dev>, 1..10,
 // +50 ₽/мес за доп-устройство) — передаём текущий лимит аккаунта, итог считает бот.
+// Play Billing продукт грантует ровно 1 устройство — селектор на него не влияет.
 extension ShellPaywall on ShellState {
   void _openPaywall() {
     // страховка: гостю показывать нечего — его «Продлить» не рисуется (см. _subCard)
@@ -26,6 +31,9 @@ extension ShellPaywall on ShellState {
       final devCount = webAcc ? dev : 1;
       final total = plan.base + (devCount - 1) * kExtraPerMonthRub * plan.months;
       final perMo = (total / plan.months).round();
+      // Android с Play-сервисами → оплата из приложения; цена магазина локальная и важнее ₽-расчёта.
+      final useBilling = Platform.isAndroid && billingAvailable;
+      final playPrice = useBilling ? playPriceOf(plan.code) : null;
       return Scaffold(
         backgroundColor: C.bg,
         body: Stack(children: [
@@ -102,20 +110,23 @@ extension ShellPaywall on ShellState {
                 Row(children: [
                   Text(tr('Итого'), style: disp(16, w: FontWeight.w600)),
                   const Spacer(),
-                  Text('${_fmtRub(total)} ₽', style: TextStyle(fontFamily: 'JetBrainsMono',
+                  Text(playPrice ?? '${_fmtRub(total)} ₽', style: TextStyle(fontFamily: 'JetBrainsMono',
                       fontSize: 26, fontWeight: FontWeight.w700, color: C.accent)),
                 ]),
                 const SizedBox(height: 4),
                 Text(appLang == 'en' ? '≈ ${_fmtRub(perMo)} ₽/mo · ${tr(plan.title)}' : '≈ ${_fmtRub(perMo)} ₽/мес · ${plan.title}',
                     style: mono(12, c: C.muted)),
                 // VIP платит по цене тарифа на 10 устройств — точный итог посчитает чекаут
-                if (subVip) ...[
+                if (subVip && !useBilling) ...[
                   const SizedBox(height: 6),
                   Text(tr('VIP: цена считается по тарифу на 10 устройств — точный итог покажет бот'),
                       style: mono(11, c: C.warn)),
                 ],
                 const SizedBox(height: 14),
                 _btn(tr('Оплатить'), kind: 0, icon: Icons.bolt, onTap: () {
+                  if (useBilling) { _buyPlan(plan.code); return; }
+                  // Store-сборка без работающего биллинга не имеет права уводить оплату наружу.
+                  if (kStoreBuild) { _toast(tr('Google Play недоступен — попробуй позже')); return; }
                   // Суффикс «_<dev>» боту нужен: по нему его регулярка узнаёт тариф и число
                   // устройств (1..10). Передаём ТЕКУЩИЙ лимит аккаунта, если он известен, —
                   // иначе продление молча сузило бы подписку до одного устройства.
@@ -126,7 +137,13 @@ extension ShellPaywall on ShellState {
                 }),
                 const SizedBox(height: 10),
                 Center(child: Text(
-                  webAcc ? tr('оплата на сайте — СБП или крипта') : tr('оплата в боте — Stars, СБП, крипта или токены'),
+                  useBilling
+                      ? tr('оплата картой в Google Play · 1 устройство')
+                      : kStoreBuild
+                          ? tr('оплата через Google Play')
+                          : webAcc
+                              ? tr('оплата на сайте — СБП или крипта')
+                              : tr('оплата в боте — Stars, СБП, крипта или токены'),
                   style: mono(11, c: C.muted))),
               ])),
             ]),
@@ -173,7 +190,10 @@ extension ShellPaywall on ShellState {
               const SizedBox(height: 3),
               Text('≈ ${_fmtRub(perMo)} ₽/${appLang == 'en' ? 'mo' : 'мес'}', style: mono(11.5, c: C.muted)),
             ])),
-            Text('${_fmtRub(total)} ₽', style: mono(15, c: selected ? C.accent : C.text, w: FontWeight.w700)),
+            Text(Platform.isAndroid && billingAvailable && playPriceOf(pl.code) != null
+                ? playPriceOf(pl.code)!
+                : '${_fmtRub(total)} ₽',
+                style: mono(15, c: selected ? C.accent : C.text, w: FontWeight.w700)),
           ]),
         ),
       ),

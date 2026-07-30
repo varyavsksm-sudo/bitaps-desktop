@@ -440,6 +440,17 @@ const Map<String, String> _kEn = {
   'Оплатить': 'Pay',
   'оплата на сайте — СБП или крипта': 'pay on the website — SBP or crypto',
   'оплата в боте — Stars, СБП, крипта или токены': 'pay in the bot — Stars, SBP, crypto or tokens',
+  'оплата картой в Google Play · 1 устройство': 'card payment in Google Play · 1 device',
+  'оплата через Google Play': 'payment via Google Play',
+  'Google Play недоступен — попробуй позже': 'Google Play unavailable — try again later',
+  'Открываю оплату…': 'Opening checkout…',
+  'Проверяю покупку…': 'Verifying purchase…',
+  'Подписка активна 🙌': 'Subscription active 🙌',
+  'Покупка не подтверждена — напиши в поддержку': 'Purchase not confirmed — contact support',
+  'Магазин недоступен — попробуй позже': 'Store unavailable — try again later',
+  'Продукт ещё не создан в Play Console (sub_mo/sub_q/sub_h/sub_yr)':
+      'Product not created in Play Console yet (sub_mo/sub_q/sub_h/sub_yr)',
+  'Тариф не найден': 'Plan not found',
 
   // ---- stats card (account.dart) ----
   'статистика': 'stats',

@@ -233,6 +233,11 @@ jobs:
       - run: flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 --build-number=${{ github.run_number }} --dart-define=BUILD_NUMBER=${{ github.run_number }}
       # AAB для Google Play: консоль принимает только App Bundle (APK — для прямой раздачи).
       - run: flutter build appbundle --release --build-number=${{ github.run_number }} --dart-define=BUILD_NUMBER=${{ github.run_number }}
+      # Store-вариант AAB: kStoreBuild=true убирает из пейвола внешние способы оплаты (бот/сайт) —
+      # anti-steering по политике Play. Отличие только в dart-define, подпись та же. Первый AAB
+      # уносим из выходного каталога, иначе вторая сборка перезапишет его.
+      - run: mv build/app/outputs/bundle/release/app-release.aab /tmp/app-direct.aab
+      - run: flutter build appbundle --release --build-number=${{ github.run_number }} --dart-define=BUILD_NUMBER=${{ github.run_number }} --dart-define=STORE_BUILD=true
       # ПОДПИСЬ ПОСТОЯННЫМ КЛЮЧОМ. Без неё Flutter подписывает релиз отладочным ключом, который
       # на раннере генерируется заново КАЖДУЮ сборку — и новая версия не встаёт поверх старой:
       # Android отклоняет установку по несовпадению подписи («приложение не установлено»).
@@ -254,19 +259,23 @@ jobs:
             "$APKSIGNER" verify --print-certs "$f" | grep -E "Signer #1 certificate DN|SHA-256" | head -2
           done
           # AAB для Google Play: apksigner НЕ умеет AAB (Missing AndroidManifest) — подписываем jarsigner,
-          # это стандартная подпись App Bundle, принимаемая консолью.
+          # это стандартная подпись App Bundle, принимаемая консолью. Подписываем ОБА варианта:
+          # /tmp/app-direct.aab (прямая раздача) и свежий app-release.aab (STORE_BUILD, в консоль).
           JARSIGNER=$(ls -d "$JAVA_HOME"/bin/jarsigner "$ANDROID_HOME"/java/*/bin/jarsigner 2>/dev/null | head -1)
           [ -x "$JARSIGNER" ] || JARSIGNER=jarsigner
-          "$JARSIGNER" -keystore /tmp/release.p12 -storetype PKCS12 -storepass:env KS_PASS -keypass:env KS_PASS \
-            build/app/outputs/bundle/release/app-release.aab "$KS_ALIAS"
-          "$JARSIGNER" -verify -certs build/app/outputs/bundle/release/app-release.aab 2>/dev/null | grep -E "X.509|SHA-256" | head -2 || true
+          for AAB in /tmp/app-direct.aab build/app/outputs/bundle/release/app-release.aab; do
+            "$JARSIGNER" -keystore /tmp/release.p12 -storetype PKCS12 -storepass:env KS_PASS -keypass:env KS_PASS \
+              "$AAB" "$KS_ALIAS"
+            "$JARSIGNER" -verify -certs "$AAB" 2>/dev/null | grep -E "X.509|SHA-256" | head -2 || true
+          done
           rm -f /tmp/release.p12
       - name: APK/AAB для релиза (arm64 — основной, armeabi — старые устройства, AAB — Google Play)
         run: |
           cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk bitaps.apk
           cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk bitaps-armv7.apk
-          cp build/app/outputs/bundle/release/app-release.aab bitaps.aab
-          ls -la bitaps.apk bitaps-armv7.apk bitaps.aab
+          cp /tmp/app-direct.aab bitaps.aab
+          cp build/app/outputs/bundle/release/app-release.aab bitaps-play.aab
+          ls -la bitaps.apk bitaps-armv7.apk bitaps.aab bitaps-play.aab
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
@@ -276,6 +285,7 @@ jobs:
             bitaps.apk
             bitaps-armv7.apk
             bitaps.aab
+            bitaps-play.aab
 
 
   # macOS: раздаём DMG напрямую (без App Store), поэтому подпись — ad-hoc. Пользователь один раз

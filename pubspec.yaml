@@ -28,6 +28,10 @@ dependencies:
   hotkey_manager: ^0.2.3
   # нужен launch_at_startup на macOS/Windows для определения пути к бинарю
   package_info_plus: ^8.1.2
+  # Google Play Billing — покупка подписки ИЗ ПРИЛОЖЕНИЯ (требование Play для цифровых подписок).
+  # Модель: разовые managed-продукты (sub_mo/sub_q/sub_h/sub_yr) — как наши предоплаченные тарифы,
+  # не auto-renew. Верификация — серверная (edge google-play-verify), consume после гранта.
+  in_app_purchase: ^3.2.3
   # Android: xray-core внутри VpnService. Именно xray, а не sing-box, потому что узлы «белого
   # списка» ходят транспортом xhttp, которого в sing-box нет. Пакет принимает СЫРОЙ xray-конфиг —
   # тот же, что мы собираем для десктопа. Android-часть бесплатна и под MIT.

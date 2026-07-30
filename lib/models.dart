@@ -15,6 +15,9 @@ const bool kRealTunnel = true;
 // сторона). Интерфейс красит «защищено» зелёным только по этому флагу, чтобы демо-сессия никогда
 // не выглядела как реальная защита.
 bool gEngineReal = false;
+// Сборка для Google Play (CI: --dart-define=STORE_BUILD=true → bitaps-play.aab).
+// Anti-steering: в store-сборке НЕ показываем внешние способы оплаты (бот/сайт) — только Play Billing.
+const bool kStoreBuild = bool.fromEnvironment('STORE_BUILD');
 // Базовый URL edge-функций (functions/v1) — вынесен, чтобы не повторять один и тот же префикс
 // в каждом эндпоинте. Значения эндпоинтов идентичны прежним полным литералам.
 const kFnBase = 'https://bjkozsukvifkxriojxrz.supabase.co/functions/v1/';
