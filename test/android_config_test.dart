@@ -1,13 +1,16 @@
 // Конфиг, который приложение отдаёт движку на Android.
 //
-// Здесь проверяется главное свойство: он должен быть ТЕМ ЖЕ конфигом, что наш сервис кладёт
-// в подписку, а не собранным нами заново. Собственная сборка (все узлы + балансировщик +
-// обсерватория + метрики) внутри системного VpnService поднимала туннель, но трафик через
-// него не шёл, тогда как та же подписка в стороннем клиенте работала. Поэтому на Android
-// берём запись подписки как есть и меняем в ней только порт socks-входа — его ищет плагин.
+// Здесь проверяются два свойства. Первое: это ЗАПИСЬ подписки, а не собранный нами заново
+// конфиг — собственная сборка (все узлы + балансировщик + обсерватория + метрики) внутри
+// системного VpnService поднимала туннель, но трафик через него не шёл, тогда как та же
+// подписка в стороннем клиенте работала. Второе: запись САНИТИЗОВАНА (аудит, HIGH) — из неё
+// вырезаны чужие секции управления движком (dns/routing/log/metrics/…), входы только
+// локальные socks/http на 127.0.0.1, а dns/routing подложены наши. Порт socks-входа
+// перезаписывается: его ищет плагин.
 //
-// Образец подписки снят с живой выдачи (uuid обезличен) и содержит узел через CDN, прямой
-// узел и служебную запись-балансировщик.
+// Образец подписки снят с живой выдачи (uuid и адреса обезличены; адреса — хостнеймы в
+// доверенных доменах, т.к. гейт подписки сырые IP не пропускает) и содержит узел через CDN,
+// прямой узел и служебную запись-балансировщик.
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
@@ -72,5 +75,121 @@ void main() {
     final ss = ((cfg['outbounds'] as List).first as Map)['streamSettings'] as Map;
     expect(ss['network'], 'xhttp', reason: 'без xhttp узел белого списка не поднимется');
     expect(ss['xhttpSettings'], isNotNull);
+  });
+
+  // Вредоносная запись: публичные входы, резолвер атакующего, freedom-даунгрейд и чужие
+  // секции управления движком. Всё это раньше уходило движку verbatim (аудит, HIGH).
+  Map<String, dynamic> evilEntry() => <String, dynamic>{
+        'remarks': '🇫🇮 Финляндия',
+        'log': {'loglevel': 'debug'},
+        'dns': {
+          'servers': ['1.2.3.4'], // резолвер атакующего: вся история резолвов ему
+        },
+        'routing': {
+          // freedom-даунгрейд: весь трафик мимо туннеля, человек думает, что защищён
+          'rules': [
+            {'type': 'field', 'network': 'tcp,udp', 'outboundTag': 'direct'},
+          ],
+        },
+        'metrics': {'listen': '0.0.0.0:11111'},
+        'policy': {'system': {'statsOutboundUplink': true}},
+        'stats': <String, dynamic>{},
+        'api': {'tag': 'api'},
+        'reverse': {'bridges': []},
+        'fakedns': [],
+        'observatory': <String, dynamic>{},
+        'transport': <String, dynamic>{},
+        'inbounds': [
+          // публичный SOCKS на устройстве — бесплатный прокси для всей локальной сети
+          {'listen': '0.0.0.0', 'port': 1080, 'protocol': 'socks'},
+          {'listen': '0.0.0.0', 'port': 8080, 'protocol': 'http'},
+          // не-socks/http вход вообще выбрасываем
+          {'listen': '0.0.0.0', 'port': 5353, 'protocol': 'dokodemo-door', 'settings': {'address': '8.8.8.8'}},
+        ],
+        'outbounds': [
+          {
+            'tag': 'proxy',
+            'protocol': 'vless',
+            'settings': {
+              'vnext': [
+                {
+                  'address': 'fi1.bitapsvpn.com',
+                  'port': 443,
+                  'users': [
+                    {'id': '11111111-2222-3333-4444-555555555555', 'encryption': 'none'},
+                  ],
+                },
+              ],
+            },
+            'streamSettings': {'network': 'tcp'},
+          },
+        ],
+      };
+
+  SubNode evilNode() {
+    final entry = evilEntry();
+    return SubNode(
+      remark: '🇫🇮 Финляндия',
+      tag: '🇫🇮 Финляндия',
+      server: 'fi1.bitapsvpn.com',
+      port: 443,
+      xray: (entry['outbounds'] as List).first as Map<String, dynamic>,
+      full: entry,
+    );
+  }
+
+  test('вредоносная запись санитизуется перед отдачей движку', () {
+    final cfg = json.decode(xrayEntryConfigJson(evilNode(), socksPort: 10836)) as Map<String, dynamic>;
+
+    // чужие секции управления движком вырезаны
+    for (final s in ['log', 'metrics', 'policy', 'stats', 'api', 'reverse', 'fakedns', 'observatory', 'transport']) {
+      expect(cfg.containsKey(s), isFalse, reason: 'секция $s не должна попасть к движку');
+    }
+    expect(cfg.containsKey('remarks'), isFalse, reason: 'служебное поле подписки движку не нужно');
+
+    // dns — НАШ (DoH), не резолвер атакующего
+    final dnsServers = ((cfg['dns'] as Map)['servers'] as List).join('|');
+    expect(dnsServers, isNot(contains('1.2.3.4')));
+    expect(dnsServers, contains('dns-query'));
+
+    // routing — НАШ: маршрут по умолчанию в туннель, а не freedom-даунгрейд
+    final rulesJson = json.encode((cfg['routing'] as Map)['rules']);
+    expect(rulesJson, contains('"outboundTag":"proxy"'));
+
+    // входы: только socks/http и только на 127.0.0.1; порт socks перезаписан как раньше
+    final inbounds = (cfg['inbounds'] as List).cast<Map>();
+    expect(inbounds.length, 2, reason: 'dokodemo-door обязан быть выброшен');
+    for (final i in inbounds) {
+      expect(i['listen'], '127.0.0.1', reason: 'публичный listen — это открытый прокси на устройстве');
+      expect(['socks', 'http'].contains(i['protocol']), isTrue);
+    }
+    expect(inbounds.firstWhere((i) => i['protocol'] == 'socks')['port'], 10836);
+
+    // сам узел не тронут — иначе подключаться стало бы не к тому серверу
+    final vnext = ((cfg['outbounds'] as List).first as Map)['settings']['vnext'] as List;
+    expect((vnext.first as Map)['address'], 'fi1.bitapsvpn.com');
+  });
+
+  test('запись без входов и без direct/block достраивается нашими, а не ломается', () {
+    final entry = evilEntry()
+      ..remove('inbounds')
+      ..remove('outbounds');
+    entry['outbounds'] = (evilEntry()['outbounds'] as List).take(1).toList(); // только proxy
+    final node = SubNode(
+      remark: 'x', tag: 'x', server: 'fi1.bitapsvpn.com', port: 443,
+      xray: (entry['outbounds'] as List).first as Map<String, dynamic>,
+      full: entry,
+    );
+    final cfg = json.decode(xrayEntryConfigJson(node, socksPort: 10836)) as Map<String, dynamic>;
+
+    // socks-вход обязан появиться: плагин ищет его в конфиге
+    final inbounds = (cfg['inbounds'] as List).cast<Map>();
+    final socks = inbounds.singleWhere((i) => i['protocol'] == 'socks');
+    expect(socks['listen'], '127.0.0.1');
+    expect(socks['port'], 10836);
+
+    // наши правила ссылаются на direct/block — они гарантированно есть, иначе движок не стартует
+    final tags = (cfg['outbounds'] as List).map((o) => (o as Map)['tag']).toList();
+    expect(tags, containsAll(['proxy', 'direct', 'block']));
   });
 }

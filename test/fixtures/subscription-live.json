@@ -154,7 +154,7 @@
     "settings": {
      "vnext": [
       {
-       "address": "212.237.219.223",
+       "address": "fi1.bitapsvpn.com",
        "port": 8443,
        "users": [
         {
@@ -266,7 +266,7 @@
     "settings": {
      "vnext": [
       {
-       "address": "212.237.219.223",
+       "address": "fi1.bitapsvpn.com",
        "port": 8443,
        "users": [
         {

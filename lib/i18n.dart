@@ -81,6 +81,7 @@ const Map<String, String> _kEn = {
   // ---- connection.dart ----
   'Нужен рабочий VPN-ключ': 'Need a working VPN key',
   'В подписке нет доступных серверов': 'No servers available in your subscription',
+  'Узлы подписки отклонены: чужие адреса': 'Subscription servers rejected: foreign addresses',
   'Узлы подписки не поддерживаются этой сборкой': 'This build cannot use the subscription servers',
   'На этой системе туннель ещё не поддержан': 'This system cannot run the tunnel yet',
   'подписка bitaps': 'bitaps subscription',
@@ -447,6 +448,8 @@ const Map<String, String> _kEn = {
   'Проверяю покупку…': 'Verifying purchase…',
   'Подписка активна 🙌': 'Subscription active 🙌',
   'Покупка не подтверждена — напиши в поддержку': 'Purchase not confirmed — contact support',
+  'Оплата не прошла — попробуй ещё раз': 'Payment failed — try again',
+  'Оплата не открылась — попробуй ещё раз': "Couldn't open checkout — try again",
   'Магазин недоступен — попробуй позже': 'Store unavailable — try again later',
   'Продукт ещё не создан в Play Console (sub_mo/sub_q/sub_h/sub_yr)':
       'Product not created in Play Console yet (sub_mo/sub_q/sub_h/sub_yr)',

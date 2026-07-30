@@ -191,18 +191,24 @@ Map<String, dynamic> xrayConfigForIos(
 String xrayConfigJsonForIos(List<SubNode> nodes, {String? only}) =>
     jsonEncode(xrayConfigForIos(nodes, only: only));
 
-/// Конфиг ОДНОГО узла — ровно тот, что наш сервис кладёт в подписку и что исполняют сторонние
-/// клиенты. Используется на Android.
+/// Конфиг ОДНОГО узла — запись подписки после САНИТИЗАЦИИ. Используется на Android.
 ///
 /// Почему не общий конфиг со всеми узлами. На Android движок живёт внутри системного
 /// VpnService (плагин), и там наша сборка «15 исходов + балансировщик + обсерватория +
 /// метрики» вела себя так: туннель поднимался, а трафик не шёл. Тот же телефон с тем же
 /// сервером в стороннем клиенте работал — потому что клиент берёт ИМЕННО эту запись подписки,
 /// без наших надстроек. Вместо того чтобы гадать, какая из надстроек мешает внутри чужого
-/// VpnService, отдаём проверенный конфиг как есть.
+/// VpnService, отдаём проверенную запись — но НЕ verbatim (аудит, HIGH).
 ///
-/// Меняем в нём только порт socks-входа: плагин ищет его в конфиге и на него натравливает
-/// свой перехватчик трафика.
+/// Запись приходит по сети и для движка является чужим контентом: вредоносная запись могла
+/// поднять на устройстве публичный SOCKS (inbound с listen 0.0.0.0), подменить резолвер
+/// (dns), молча опустить туннель до прямого выхода (routing → freedom) или выставить наружу
+/// метрики и управление движком. Поэтому перед отдачей движку из записи вырезаются все
+/// top-level секции управления ([_kEntryStripSections]), dns/routing кладутся НАШИ (те же,
+/// что в десктопной сборке), а из входов остаются только локальные socks/http на 127.0.0.1.
+///
+/// Порт socks-входа перезаписываем как раньше: плагин ищет его в конфиге и на него
+/// натравливает свой перехватчик трафика.
 String xrayEntryConfigJson(SubNode node, {int socksPort = kXraySocksPort}) {
   final full = node.full;
   if (full == null) {
@@ -211,24 +217,91 @@ String xrayEntryConfigJson(SubNode node, {int socksPort = kXraySocksPort}) {
   }
   final cfg = json.decode(json.encode(full)) as Map<String, dynamic>;
   cfg.remove('remarks'); // служебное поле подписки, движку не нужно
-  final inbounds = cfg['inbounds'];
-  if (inbounds is List && inbounds.isNotEmpty) {
-    for (final i in inbounds) {
-      if (i is Map && i['protocol'] == 'socks') i['port'] = socksPort;
-    }
-  } else {
-    cfg['inbounds'] = [
-      {
-        'listen': '127.0.0.1',
-        'port': socksPort,
-        'protocol': 'socks',
-        'settings': {'udp': true, 'auth': 'noauth'},
-        'sniffing': {'enabled': true, 'destOverride': ['http', 'tls', 'quic'], 'routeOnly': true},
-        'tag': 'socks',
-      }
-    ];
+  // Чужие секции управления движком — вон. Всё нужное ниже кладём своё.
+  for (final s in _kEntryStripSections) {
+    cfg.remove(s);
   }
+  // DNS — наш (DoH + системный), как в десктопной сборке: серверский резолвер мог бы
+  // оказаться резолвером атакующего с полной историей запросов пользователя.
+  cfg['dns'] = {'queryStrategy': 'UseIPv4', 'disableCache': false, 'servers': _kDns};
+  // Маршрутизация — наша, цель правила — тег прокси-исхода ЭТОЙ записи (у записей нашего
+  // сервиса это 'proxy'). Серверский routing мог отправить всё в freedom — молчаливый
+  // даунгрейд туннеля до прямого выхода.
+  cfg['routing'] = {
+    'domainMatcher': 'hybrid',
+    'domainStrategy': 'IPIfNonMatch',
+    'rules': _rules(false, _proxyTagOf(cfg['outbounds'])),
+  };
+  // Правила ссылаются на direct/block — гарантируем их наличие, иначе движок не стартует.
+  final outbounds = cfg['outbounds'];
+  if (outbounds is List) {
+    bool hasTag(String t) => outbounds.any((o) => o is Map && o['tag'] == t);
+    if (!hasTag('direct')) {
+      outbounds.add({
+        'protocol': 'freedom',
+        'tag': 'direct',
+        'settings': {'domainStrategy': 'UseIPv4'},
+      });
+    }
+    if (!hasTag('block')) outbounds.add({'protocol': 'blackhole', 'tag': 'block'});
+  }
+  // Входы: только локальные socks/http. Чужой dokodemo-door/vless-вход открыл бы на
+  // устройстве публичный прокси, а listen 0.0.0.0 — доступ к нему из локальной сети.
+  final clean = <Map<String, dynamic>>[];
+  final inbounds = cfg['inbounds'];
+  if (inbounds is List) {
+    for (final i in inbounds) {
+      if (i is! Map) continue;
+      final proto = (i['protocol'] ?? '').toString().toLowerCase();
+      if (proto != 'socks' && proto != 'http') continue;
+      final m = i.cast<String, dynamic>();
+      m['listen'] = '127.0.0.1';
+      m['protocol'] = proto;
+      clean.add(m);
+    }
+  }
+  // socks-вход обязан быть: плагин ищет его в конфиге и на него натравливает перехватчик.
+  if (!clean.any((i) => i['protocol'] == 'socks')) {
+    clean.add({
+      'listen': '127.0.0.1',
+      'port': socksPort,
+      'protocol': 'socks',
+      'settings': {'udp': true, 'auth': 'noauth'},
+      'sniffing': {'enabled': true, 'destOverride': ['http', 'tls', 'quic'], 'routeOnly': true},
+      'tag': 'socks',
+    });
+  }
+  for (final i in clean) {
+    if (i['protocol'] == 'socks') i['port'] = socksPort;
+  }
+  cfg['inbounds'] = clean;
   return const JsonEncoder.withIndent('  ').convert(cfg);
+}
+
+/// Top-level секции записи подписки, которые движок НЕ должен получить от сервера (аудит):
+/// dns — резолвер атакующего, routing — даунгрейд туннеля до freedom, остальные — логи,
+/// метрики и управление движком наружу. Если движку они нужны, мы кладём СВОИ (см. выше),
+/// а не серверские.
+const List<String> _kEntryStripSections = [
+  'dns', 'routing', 'log', 'metrics', 'policy', 'stats', 'transport', 'api', 'reverse',
+  'fakedns', 'observatory',
+];
+
+/// Тег прокси-исхода записи (vless/vmess/trojan/shadowsocks). У записей нашего сервиса это
+/// 'proxy'; у чужой записи берём реальный тег, чтобы правило маршрутизации не ссылалось
+/// в никуда.
+String _proxyTagOf(dynamic outbounds) {
+  if (outbounds is List) {
+    for (final o in outbounds) {
+      if (o is! Map) continue;
+      final proto = (o['protocol'] ?? '').toString().toLowerCase();
+      if (['vless', 'vmess', 'trojan', 'shadowsocks'].contains(proto)) {
+        final tag = (o['tag'] ?? '').toString();
+        return tag.isEmpty ? 'proxy' : tag;
+      }
+    }
+  }
+  return 'proxy';
 }
 
 /// Тот же конфиг строкой — именно он уходит в движок.

@@ -35,12 +35,17 @@ extension ShellBilling on ShellState {
       if (!ok) return;
       _billing.sub ??= _billing.iap.purchaseStream.listen(_onPurchases,
           onError: (_) {}, onDone: () {});
+      // Плагин переотдаёт непогашенные покупки (оплатил, но приложение умерло до верификации)
+      // в purchaseStream ТОЛЬКО после restorePurchases() — без вызова такие деньги «зависали».
+      await _billing.iap.restorePurchases();
       final resp =
           await _billing.iap.queryProductDetails(_planToProduct.values.toSet());
       for (final p in resp.productDetails) {
         _billing.playPrices[p.id] = p.price;
       }
-      _billing.ready = true;
+      // Готовность — только при непустой витрине: если продукты ещё не созданы в Play Console,
+      // ready=true включал бы billingAvailable и отрезал Android-пользователям фолбэк на бота.
+      _billing.ready = resp.productDetails.isNotEmpty;
     } catch (_) {
       _billing.ready = false;
     }
@@ -59,9 +64,17 @@ extension ShellBilling on ShellState {
       return;
     }
     _toast(tr('Открываю оплату…'));
-    await _billing.iap.buyNonConsumable(
-      purchaseParam: PurchaseParam(productDetails: resp.productDetails.first),
+    // applicationUserName → obfuscatedExternalAccountId у Google: сервер сверяет его с
+    // sha256(tgId), поэтому чужой/перехваченный purchaseToken не зачислится на наш аккаунт.
+    final ok = await _billing.iap.buyNonConsumable(
+      purchaseParam: PurchaseParam(
+        productDetails: resp.productDetails.first,
+        applicationUserName:
+            tgId == null ? null : sha256.convert(utf8.encode('$tgId')).toString(),
+      ),
     );
+    // false = окно оплаты даже не открылось (сбой Play/нет сервисов) — показываем, не молчим.
+    if (!ok) _toast(tr('Оплата не открылась — попробуй ещё раз'));
   }
 
   Future<void> _onPurchases(List<PurchaseDetails> list) async {
@@ -69,6 +82,9 @@ extension ShellBilling on ShellState {
       if (p.status == PurchaseStatus.purchased ||
           p.status == PurchaseStatus.restored) {
         await _verifyPurchase(p);
+      } else if (p.status == PurchaseStatus.error) {
+        // Ошибку оплаты показываем пользователю — иначе тап по «Оплатить» выглядел «мёртвым».
+        _toast(tr('Оплата не прошла — попробуй ещё раз'));
       }
     }
   }

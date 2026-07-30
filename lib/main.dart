@@ -25,6 +25,8 @@ import 'package:launch_at_startup/launch_at_startup.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
+// sha256(tgId) → applicationUserName покупки: привязка purchaseToken к аккаунту (сверка на edge).
+import 'package:crypto/crypto.dart';
 
 // Приложение разбито на модули; все они — части одной библиотеки (part/part of),
 // чтобы приватные имена (_secRead, _load, _conn и т.п.) и extension'ы на ShellState

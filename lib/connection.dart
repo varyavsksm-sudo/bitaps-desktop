@@ -140,10 +140,14 @@ class ConnectionController extends ChangeNotifier {
           nodes = TunnelEngine.usableNodes(sub.nodes);
           if (nodes.isEmpty) {
             // Узлы пришли, но наш движок их не понимает → Happ понимает: это не тупик, а обход.
+            // Если же записи были, но ВСЕ отброшены гейтом/капом (skipped > 0), говорим честно:
+            // иначе человек видел бы «нет серверов» при живой, но отрезанной выдаче.
             _fail(gen,
                 sub.nodes.isNotEmpty
                     ? tr('Узлы подписки не поддерживаются этой сборкой')
-                    : tr('В подписке нет доступных серверов'),
+                    : sub.skipped > 0
+                        ? tr('Узлы подписки отклонены: чужие адреса')
+                        : tr('В подписке нет доступных серверов'),
                 fix: sub.nodes.isNotEmpty ? ConnFix.happ : ConnFix.refreshSub);
             return;
           }

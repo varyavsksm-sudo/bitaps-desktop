@@ -49,6 +49,8 @@ class TunnelEngine {
 
   XrayProcess? _proc;
   int? _metricsPort;
+  /// Подписка на статусы NetworkExtension (iOS): живёт от connect() до disconnect().
+  StreamSubscription<Map<String, dynamic>>? _nativeSub;
   /// Локальный HTTP-вход поднятого десктоп-туннеля: verifyConnected идёт ЧЕРЕЗ него —
   /// dart:io системный прокси на десктопе игнорирует, и прямой запрос мерил бы мимо туннеля.
   int? _activeHttpPort;
@@ -110,6 +112,20 @@ class TunnelEngine {
       case EngineKind.native:
         // Нативной стороне отдаём конфиг xray с tun-входом (движок — libXray в расширении).
         await NativeTunnel.connect(xrayConfigJsonForIos(usable), server: server);
+        // Реальные статусы NetworkExtension проксируем в общий поток: расширение живёт в
+        // своём процессе и может умереть в любой момент (краш libXray, смена сети, kill
+        // системы) — без этого UI тикал бы «Подключено» при трафике, идущем мимо туннеля.
+        _nativeSub?.cancel();
+        _nativeSub = NativeTunnel.events().listen((e) {
+          final state = e['state']?.toString() ?? '';
+          // «connecting» — промежуточное: контроллер принял бы его за обрыв. Остальное
+          // честно проксируем: «disconnected»/«error» роняют туннель в UI.
+          if (state.isEmpty || state == 'connecting') return;
+          _events.add(EngineEvent(state,
+              upKbps: (e['up'] as num?)?.toInt() ?? 0,
+              downKbps: (e['down'] as num?)?.toInt() ?? 0));
+        }, onError: (_) => _events.add(const EngineEvent('disconnected')));
+        _events.add(const EngineEvent('connected'));
         return;
       case EngineKind.none:
         throw EngineUnavailable('VPN-движок не установлен в этой сборке');
@@ -218,6 +234,11 @@ class TunnelEngine {
     switch (kind()) {
       case EngineKind.native:
         await NativeTunnel.disconnect();
+        // Подписку на статусы гасим ПОСЛЕ отключения: иначе «disconnected» от собственного
+        // disconnect прилетел бы в поток (для слушателя он безвреден — он уже отписался, —
+        // но и смысла в нём нет). Пересоздаётся на следующем connect().
+        _nativeSub?.cancel();
+        _nativeSub = null;
         return;
       case EngineKind.androidXray:
         _statsTimer?.cancel();

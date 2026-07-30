@@ -6,9 +6,10 @@ import 'package:flutter/services.dart';
 /// android_engine.dart) и сюда не ходят.
 ///
 /// Туннель живёт в платформенном коде, здесь — только контракт вызова:
-///   • iOS: NetworkExtension PacketTunnelProvider + sing-box/libbox (Libbox.xcframework).
-///     Реализация — ~/bitaps-vpn-app/PacketTunnel (startOrReloadService на переданном конфиге),
-///     её нужно подключить extension-таргетом к раннеру (Xcode + App Group + подпись).
+///   • iOS: NetworkExtension PacketTunnelProvider + libXray (LibXray.xcframework, Xray-core):
+///     вызовы — через Invoke(runXrayFromJson), utun-fd движку — в env["xray.tun.fd"].
+///     Реализация — native_ios/ (AppDelegate.swift + PacketTunnel/), накатывается поверх
+///     сгенерированного ios/ (см. native_ios/README-IOS.md и CI build.yml, job ios).
 ///   • Windows/Linux/Android: НЕ используется — там engine.dart (xray).
 ///
 /// Пока нативная сторона на платформе НЕ подключена, connect() бросает [TunnelUnavailable] —
@@ -28,7 +29,7 @@ class NativeTunnel {
   static const MethodChannel _ctrl = MethodChannel('app.bitaps.vpn/control');
   static const EventChannel _evt = EventChannel('app.bitaps.vpn/events');
 
-  /// Запустить туннель на готовом sing-box конфиге (JSON). Возвращает при успешном старте.
+  /// Запустить туннель на готовом конфиге движка (JSON, см. xray_config.dart). Возвращает при успешном старте.
   /// Бросает [TunnelUnavailable], если движок не установлен (нет нативного канала) или отказал.
   static Future<void> connect(String configJson, {String server = ''}) async {
     try {

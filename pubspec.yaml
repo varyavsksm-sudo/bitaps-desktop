@@ -32,6 +32,8 @@ dependencies:
   # Модель: разовые managed-продукты (sub_mo/sub_q/sub_h/sub_yr) — как наши предоплаченные тарифы,
   # не auto-renew. Верификация — серверная (edge google-play-verify), consume после гранта.
   in_app_purchase: ^3.2.3
+  # sha256(tgId) → applicationUserName покупки: привязка purchaseToken к аккаунту (сверка на edge)
+  crypto: ^3.0.7
   # Android: xray-core внутри VpnService. Именно xray, а не sing-box, потому что узлы «белого
   # списка» ходят транспортом xhttp, которого в sing-box нет. Пакет принимает СЫРОЙ xray-конфиг —
   # тот же, что мы собираем для десктопа. Android-часть бесплатна и под MIT.

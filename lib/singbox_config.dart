@@ -8,6 +8,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -383,6 +384,20 @@ Map<String, dynamic>? _transportBlock(Map<String, String> q) {
 /// доверие к нему давало one-click MITM через bitaps://import. Если его купим — вернуть сюда.
 const List<String> kTrustedBitapsDomains = ['bitapsvpn.com', 'bit-core.online'];
 
+/// Точный allowlist IP боевых нод — зеркало REALITY в subserver.py на хабе.
+/// Зачем: гейт узлов подписки доменный (чужой хост = MITM), а живая выдача отдаёт прямые
+/// ноды сырыми IP. Доверять ЛЮБОМУ IP нельзя (тот же MITM), поэтому список закрытый и
+/// вшит в приложение: скомпрометированная выдача сможет указать только наши же машины,
+/// а подделать их REALITY-ключи со стороны нельзя. NL/FR/HK здесь НАМЕРЕННО нет
+/// (инцидент 29.07 — ноды скомпрометированы). При смене флота править ВМЕСТЕ с
+/// subserver.py/healer.py, иначе новые ноды не пройдут гейт у пользователей.
+const Set<String> kTrustedNodeIps = {
+  '212.237.219.223',  // 🇫🇮 Финляндия
+  '82.40.37.176',     // 🇵🇱 Польша
+  '185.165.171.176',  // 🇷🇴 Румыния
+  '185.146.234.208',  // 🇮🇸 Исландия
+};
+
 bool isTrustedBitapsHost(String host) {
   final h = host.toLowerCase();
   for (final d in kTrustedBitapsDomains) {
@@ -390,6 +405,12 @@ bool isTrustedBitapsHost(String host) {
   }
   return false;
 }
+
+/// Гейт узлов подписки: доверенный домен bitaps ИЛИ точный IP из боевого флота.
+/// Отдельно от isTrustedBitapsHost, т.к. тот используется и для URL/ключей — там
+/// сырым IP доверять нельзя (поддельная ссылка вида https://1.2.3.4/u/...).
+bool isTrustedNodeHost(String host) =>
+    isTrustedBitapsHost(host) || kTrustedNodeIps.contains(host.trim());
 
 /// Доверенные bitaps-хосты, которым позволено запрашивать insecure-TLS (отключение проверки
 /// сертификата). Для любого другого хоста insecure игнорируется — иначе чужой ключ открыл бы MITM.
@@ -435,6 +456,12 @@ int? _int(dynamic v) {
 /// Токен подписки в пути /u/<token> — тот же алфавит, что выдаёт сервис доставки.
 final RegExp _kSubToken = RegExp(r'^[A-Za-z0-9]{8,64}$');
 
+/// Лимиты подписки (аудит): без них гигабайтное тело — это OOM при буферизации, а 10^5
+/// узлов — часы проб на живом устройстве. 5 МБ с запасом накрывает боевую выдачу
+/// (десятки узлов ≈ сотни КБ), 200 узлов — больше любого реального тарифа.
+const int kSubMaxBytes = 5 * 1024 * 1024;
+const int kSubMaxNodes = 200;
+
 /// Это ссылка на подписку bitaps? Гард НАМЕРЕННО узкий: только https, только доверенный
 /// домен bitaps и только путь /u/<token>. Любой другой URL остаётся отвергнутым, как и раньше,
 /// иначе «ключом» стала бы произвольная ссылка (вектор подмены конфига).
@@ -462,9 +489,9 @@ class SubNode {
   final Map<String, dynamic>? singbox;
 
   /// ЦЕЛИКОМ запись подписки — готовый конфиг на один узел, ровно такой, каким его выдаёт наш
-  /// сервис и каким его исполняют сторонние клиенты (Happ). На Android отдаём движку именно
-  /// его: собственная сборка со всеми узлами, балансировщиком и метриками там не заработала,
-  /// а эта — работает у пользователей каждый день.
+  /// сервис и каким его исполняют сторонние клиенты (Happ). На Android отдаём движку эту
+  /// запись после санитизации (см. xrayEntryConfigJson): собственная сборка со всеми узлами,
+  /// балансировщиком и метриками там не заработала, а эта — работает у пользователей каждый день.
   final Map<String, dynamic>? full;
 
   const SubNode({
@@ -488,7 +515,8 @@ class SubParseResult {
   /// Сервис прислал уведомление вместо узлов («Подписка истекла», «Лимит устройств») —
   /// показываем его пользователю вместо попытки подключения.
   final String? notice;
-  /// Записи, которые не удалось разобрать вообще (битые), — не путать с узлами,
+  /// Записи, которые не попали в список узлов: битые (без адреса), отброшенные гейтом
+  /// доверия (чужой хост) и обрезанные капом [kSubMaxNodes], — не путать с узлами,
   /// которые просто не поддерживает конкретный движок.
   final int skipped;
   const SubParseResult({this.nodes = const [], this.notice, this.skipped = 0});
@@ -533,6 +561,21 @@ SubParseResult parseSubscription(String body, {String? headerNotice}) {
     final host = _xrayHostPort(proxy);
     if (host == null) {
       skipped++; // запись без адреса — разобрать нечего
+      continue;
+    }
+    // Узел обязан жить на доверенном хосте bitaps (аудит): одна поддельная запись с ремарком
+    // «🇫🇮 Финляндия» и адресом атакующего — и через неё пойдёт ВЕСЬ трафик (десктопный
+    // роутинг гонит всё через node-*), то есть MITM туннеля. Гейт двойной: доверенный домен
+    // ИЛИ точный IP боевой ноды (kTrustedNodeIps — выдача отдаёт прямые ноды сырыми IP).
+    // Отброшенные честно считаем — пользователю видно, что часть выдачи отрезана.
+    if (!isTrustedNodeHost(host.$1)) {
+      skipped++;
+      continue;
+    }
+    // Кап на число узлов (аудит: 10^5 записей = часы проб и лишняя память). Лишние
+    // считаем в skipped, как остальные отброшенные записи.
+    if (nodes.length >= kSubMaxNodes) {
+      skipped++;
       continue;
     }
     // sing-box-версия узла может не получиться (xhttp) — это НЕ причина терять узел:
@@ -635,16 +678,35 @@ Future<SubFetchResult> fetchSubscription(
   final ownClient = client == null;
   final c = client ?? http.Client();
   try {
-    final r = await c.get(Uri.parse(url), headers: {
+    final req = http.Request('GET', Uri.parse(url));
+    req.headers.addAll({
       'accept': 'application/json',
       if (hwid.isNotEmpty) 'x-hwid': hwid,
       if (deviceOs.isNotEmpty) 'x-device-os': deviceOs,
-    }).timeout(timeout);
+    });
+    // Ответ читаем потоком с жёстким капом (аудит): c.get буферизует тело целиком, и
+    // гигабайтный ответ — это OOM ещё до разбора. content-length проверяем первым (дёшево),
+    // но не верим ему: заголовок может отсутствовать (chunked) или врать — режем по факту.
+    final r = await c.send(req).timeout(timeout);
     if (r.statusCode != 200) {
       return SubFetchResult(error: 'сервер подписки ответил ${r.statusCode}');
     }
+    final declared = r.contentLength;
+    if (declared != null && declared > kSubMaxBytes) {
+      return const SubFetchResult(error: 'подписка слишком большая');
+    }
+    final buf = BytesBuilder();
+    var tooBig = false;
+    await for (final chunk in r.stream.timeout(timeout)) {
+      buf.add(chunk);
+      if (buf.length > kSubMaxBytes) {
+        tooBig = true;
+        break;
+      }
+    }
+    if (tooBig) return const SubFetchResult(error: 'подписка слишком большая');
     final parsed = parseSubscription(
-      utf8.decode(r.bodyBytes),
+      utf8.decode(buf.takeBytes()),
       headerNotice: _decodeSubHeader(r.headers['sub-info-text'] ?? r.headers['announce']),
     );
     return SubFetchResult(

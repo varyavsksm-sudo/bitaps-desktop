@@ -24,7 +24,7 @@ const String _subBody = '''
  {"remarks":"🇫🇮 Финляндия",
   "outbounds":[
    {"tag":"proxy","protocol":"vless",
-    "settings":{"vnext":[{"address":"212.237.219.223","port":8443,
+    "settings":{"vnext":[{"address":"fi1.bitapsvpn.com","port":8443,
       "users":[{"id":"11111111-2222-3333-4444-555555555555","encryption":"none","flow":"xtls-rprx-vision"}]}]},
     "streamSettings":{"security":"reality","network":"tcp",
       "realitySettings":{"serverName":"ya.ru","fingerprint":"firefox",
@@ -33,7 +33,7 @@ const String _subBody = '''
  {"remarks":"🇳🇱 Нидерланды",
   "outbounds":[
    {"tag":"proxy","protocol":"vless",
-    "settings":{"vnext":[{"address":"176.222.53.193","port":8443,
+    "settings":{"vnext":[{"address":"nl1.bitapsvpn.com","port":8443,
       "users":[{"id":"11111111-2222-3333-4444-555555555555","encryption":"none","flow":"xtls-rprx-vision"}]}]},
     "streamSettings":{"security":"reality","network":"tcp",
       "realitySettings":{"serverName":"ya.ru","fingerprint":"firefox",
@@ -208,7 +208,7 @@ void main() {
 
       final fi = r.singboxNodes.first.singbox!;
       expect(fi['type'], 'vless');
-      expect(fi['server'], '212.237.219.223');
+      expect(fi['server'], 'fi1.bitapsvpn.com');
       expect(fi['server_port'], 8443);
       expect(fi['uuid'], '11111111-2222-3333-4444-555555555555');
       expect(fi['flow'], 'xtls-rprx-vision');
@@ -231,9 +231,11 @@ void main() {
     });
 
     test('Reality без публичного ключа не попадает в sing-box конфиг', () {
+      // адрес — на доверенном домене, чтобы узел прошёл гейт хостов и тест проверял
+      // именно отсеивание по битому Reality, а не по адресу
       const body = '''
 [{"remarks":"битый","outbounds":[{"tag":"proxy","protocol":"vless",
-  "settings":{"vnext":[{"address":"1.2.3.4","port":443,"users":[{"id":"u"}]}]},
+  "settings":{"vnext":[{"address":"broken.bitapsvpn.com","port":443,"users":[{"id":"u"}]}]},
   "streamSettings":{"security":"reality","network":"tcp","realitySettings":{"serverName":"ya.ru"}}}]}]''';
       final r = parseSubscription(body);
       // узел разобран (xray попробует), но для sing-box он невалиден → в его конфиг не попадёт
@@ -250,6 +252,64 @@ void main() {
 
     test('не-массив в теле → FormatException', () {
       expect(() => parseSubscription('{"remarks":"x"}'), throwsFormatException);
+    });
+
+    test('узел с ЧУЖИМ адресом отбрасывается (MITM-гейт) и честно считается в skipped', () {
+      // Поддельная запись с говорящим ремарком и адресом атакующего: без гейта через неё
+      // пошёл бы ВЕСЬ трафик (десктопный роутинг гонит всё через node-*).
+      const body = '''
+[
+ {"remarks":"🇫🇮 Финляндия","outbounds":[
+  {"tag":"proxy","protocol":"vless",
+   "settings":{"vnext":[{"address":"evil.example.com","port":443,
+     "users":[{"id":"11111111-2222-3333-4444-555555555555","encryption":"none"}]}]},
+   "streamSettings":{"network":"tcp"}}]},
+ {"remarks":"🇳🇱 Нидерланды","outbounds":[
+  {"tag":"proxy","protocol":"vless",
+   "settings":{"vnext":[{"address":"nl1.bitapsvpn.com","port":443,
+     "users":[{"id":"11111111-2222-3333-4444-555555555555","encryption":"none"}]}]},
+   "streamSettings":{"network":"tcp"}}]}
+]
+''';
+      final r = parseSubscription(body);
+      expect(r.nodes.length, 1, reason: 'чужой узел не должен попасть в конфиг');
+      expect(r.nodes.single.server, 'nl1.bitapsvpn.com');
+      expect(r.skipped, 1, reason: 'отброшенный узел должен быть виден в счётчике');
+      // домен-обманка гейт не пропускает
+      expect(isTrustedBitapsHost('bitapsvpn.com.evil.example.com'), isFalse);
+      // сырые IP: доменный гейт не пропускает (URL/ключи), а узловый пропускает ТОЛЬКО
+      // точные IP боевого флота — произвольный IP атакующего по-прежнему отброшен
+      expect(isTrustedBitapsHost('212.237.219.223'), isFalse);
+      expect(isTrustedNodeHost('212.237.219.223'), isTrue, reason: 'IP боевой ноды FI');
+      expect(isTrustedNodeHost('203.0.113.66'), isFalse, reason: 'чужой IP отброшен');
+    });
+
+    test('узел с IP боевой ноды (как в живой выдаче) проходит гейт', () {
+      // subserver.py отдаёт прямые ноды сырыми IP — гейт обязан их принимать.
+      const body = '''
+[
+ {"remarks":"🇫🇮 Финляндия","outbounds":[
+  {"tag":"proxy","protocol":"vless",
+   "settings":{"vnext":[{"address":"212.237.219.223","port":8443,
+     "users":[{"id":"11111111-2222-3333-4444-555555555555","encryption":"none"}]}]},
+   "streamSettings":{"network":"tcp"}}]}
+]
+''';
+      final r = parseSubscription(body);
+      expect(r.nodes.length, 1);
+      expect(r.nodes.single.server, '212.237.219.223');
+      expect(r.skipped, 0);
+    });
+
+    test('кап на число узлов: лишние обрезаются и считаются в skipped', () {
+      String entry(int i) => '{"remarks":"n$i","outbounds":[{"tag":"proxy","protocol":"vless",'
+          '"settings":{"vnext":[{"address":"n$i.bitapsvpn.com","port":443,'
+          '"users":[{"id":"11111111-2222-3333-4444-555555555555","encryption":"none"}]}]},'
+          '"streamSettings":{"network":"tcp"}}]}';
+      final body = '[${[for (var i = 0; i < kSubMaxNodes + 25; i++) entry(i)].join(',')}]';
+      final r = parseSubscription(body);
+      expect(r.nodes.length, kSubMaxNodes, reason: '10^5 узлов = часы проб, список капаем');
+      expect(r.skipped, 25);
     });
   });
 
@@ -280,8 +340,8 @@ void main() {
       final r = parseSubscription(_subBody);
       final decoded = json.decode(singboxConfigJsonFromNodes(r.nodes));
       expect(decoded, isA<Map>());
-      expect(json.encode(decoded).contains('212.237.219.223'), true);
-      expect(json.encode(decoded).contains('176.222.53.193'), true);
+      expect(json.encode(decoded).contains('fi1.bitapsvpn.com'), true);
+      expect(json.encode(decoded).contains('nl1.bitapsvpn.com'), true);
       // xhttp-узел в конфиг не попал
       expect(json.encode(decoded).contains('cdn2.bit-core.online'), false);
     });
@@ -346,6 +406,18 @@ void main() {
           hwid: 'abcdef0123456789', client: slow, timeout: const Duration(milliseconds: 50));
       expect(res.ok, false);
       expect(res.error, isNotNull);
+    });
+
+    test('тело больше лимита отвергается ДО разбора — защита от OOM', () async {
+      // Валидный по форме JSON, но за капом по размеру: режем на чтении, не буферизуя всё.
+      final big = '${' ' * (kSubMaxBytes + 1)}[]';
+      final client = MockClient((_) async => http.Response(big, 200,
+          headers: {'content-type': 'application/json; charset=utf-8'}));
+      final res = await fetchSubscription('https://origin.bit-core.online/u/abcdefghij',
+          hwid: 'abcdef0123456789', client: client);
+      expect(res.ok, false);
+      expect(res.error, contains('слишком большая'));
+      expect(res.nodes, isEmpty);
     });
   });
 }

@@ -6,7 +6,8 @@
 //
 //  Поток конфигурации:
 //    Flutter (Dart, xray_config.dart forIOS) → MethodChannel → AppDelegate
-//      → App Group UserDefaults["xray_config_json"]  →  этот провайдер.
+//      → файл xray_config.json в App Group-контейнере (NSFileProtectionComplete,
+//        атомарная запись temp+rename)  →  этот провайдер.
 //
 //  libXray API (XTLS/libXray, MIT): единая точка `Invoke(requestJSON) -> responseJSON`.
 //  Поддерживаемые методы: runXray/runXrayFromJson/stopXray/xrayVersion/getXrayState.
@@ -25,7 +26,15 @@ import LibXray
 
 /// Маркер App Group — тот же, что в entitlements обоих таргетов и в AppDelegate.swift.
 private let kAppGroup = "group.com.bitapsvpn.bitapsVpn"
+/// Конфиг — файл-конверт в контейнере App Group (НЕ UserDefaults: там UUID/ключи узлов
+/// лежали plaintext бессрочно, плюс была гонка записи (app) / чтения (extension)).
+private let kConfigFile = "xray_config.json"
 private let kConfigKey = "xray_config_json"
+private let kServerKey = "xray_server_id"
+private let kConfigAtKey = "xray_config_at"
+/// Конфиг пишется приложением прямо перед startVPNTunnel; всё старше — не наше
+/// (система переподняла extension сама) → честный отказ, а не работа на старых ключах.
+private let kMaxConfigAge: TimeInterval = 10
 
 final class PacketTunnelProvider: NEPacketTunnelProvider {
 
@@ -35,6 +44,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         static let tunnelRemoteAddress = "172.19.0.1"
         static let ipv4Address         = "172.19.0.2"
         static let ipv4SubnetMask      = "255.255.255.252"
+        // ULA-подсеть — зеркало IPv4: ::1 — сторона движка (декларировано в xray_config.dart,
+        // tun address fdfe:dcba:9876::1/126), ::2 — наш конец туннеля.
+        static let ipv6Address         = "fdfe:dcba:9876::2"
+        static let ipv6PrefixLength: NSNumber = 126
         static let dnsServers          = ["77.88.8.8", "8.8.8.8"]
     }
 
@@ -67,12 +80,22 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                              completionHandler: @escaping (Error?) -> Void) {
         os_log("startTunnel", log: log, type: .info)
 
-        // 1. Конфиг из App Group (его записал AppDelegate по MethodChannel из Dart).
-        let ud = UserDefaults(suiteName: kAppGroup)
-        self.configJSON = ud?.string(forKey: kConfigKey)
-        self.serverID = ud?.string(forKey: "xray_server_id")
+        // 1. Конфиг из App Group — ФАЙЛ (его атомарно записал AppDelegate по MethodChannel
+        //    из Dart): temp+rename на той стороне гарантирует, что читаем версию целиком.
+        var configAt: TimeInterval = 0
+        if let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: kAppGroup),
+           let data = try? Data(contentsOf: container.appendingPathComponent(kConfigFile)),
+           let env = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            self.configJSON = env[kConfigKey] as? String
+            self.serverID = env[kServerKey] as? String
+            configAt = env[kConfigAtKey] as? TimeInterval ?? 0
+        }
 
-        guard let config = configJSON, !config.isEmpty else {
+        // Свежесть: конфиг пишется приложением прямо перед startVPNTunnel. Просрочен (>10 c)
+        // или файла нет вовсе — значит, туннель поднимает система без приложения: честный
+        // отказ, а не работа на старых ключах.
+        guard let config = configJSON, !config.isEmpty,
+              Date().timeIntervalSince1970 - configAt <= kMaxConfigAge else {
             let e = NSError(domain: "bitaps.PacketTunnel", code: 1, userInfo: [
                 NSLocalizedDescriptionKey: "нет конфигурации — откройте приложение и подключитесь заново"
             ])
@@ -172,6 +195,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         let ipv4 = NEIPv4Settings(addresses: [Net.ipv4Address], subnetMasks: [Net.ipv4SubnetMask])
         ipv4.includedRoutes = [NEIPv4Route.default()]
         settings.ipv4Settings = ipv4
+        // IPv6 — зеркало IPv4-блока: без ipv6Settings система пускала весь v6-трафик мимо
+        // туннеля открытым текстом, пока UI показывал «Подключено».
+        let ipv6 = NEIPv6Settings(addresses: [Net.ipv6Address],
+                                  networkPrefixLengths: [Net.ipv6PrefixLength])
+        ipv6.includedRoutes = [NEIPv6Route.default()]
+        settings.ipv6Settings = ipv6
+        // DNS общий для обоих стеков (matchDomains = [""] — резолв всего и только через туннель).
         let dns = NEDNSSettings(servers: Net.dnsServers)
         dns.matchDomains = [""]
         settings.dnsSettings = dns
