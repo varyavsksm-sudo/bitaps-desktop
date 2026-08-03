@@ -284,6 +284,28 @@ void main() {
       expect(isTrustedNodeHost('203.0.113.66'), isFalse, reason: 'чужой IP отброшен');
     });
 
+    test('ADV-3: multi-member vnext с чужим вторым членом отбрасывается целиком', () {
+      // Гейт проверял только ПЕРВЫЙ член vnext/servers, а multi-member запись движок не
+      // поднимает вообще: доверенный первый + evil второй проходили проверку доверия,
+      // и гейт с движком расходились (аудит, defense-in-depth). Теперь член обязан быть
+      // ровно один — иначе запись отбрасывается, как поступил бы и движок.
+      const body = '''
+[
+ {"remarks":"🇫🇮 Финляндия","outbounds":[
+  {"tag":"proxy","protocol":"vless",
+   "settings":{"vnext":[
+     {"address":"fi1.bitapsvpn.com","port":443,
+      "users":[{"id":"11111111-2222-3333-4444-555555555555","encryption":"none"}]},
+     {"address":"evil.example.com","port":443,
+      "users":[{"id":"11111111-2222-3333-4444-555555555555","encryption":"none"}]}]},
+   "streamSettings":{"network":"tcp"}}]}
+]
+''';
+      final r = parseSubscription(body);
+      expect(r.nodes, isEmpty, reason: 'multi-member запись гейт пропускать не должен');
+      expect(r.skipped, 1, reason: 'отброшенная запись должна быть видна в счётчике');
+    });
+
     test('узел с IP боевой ноды (как в живой выдаче) проходит гейт', () {
       // subserver.py отдаёт прямые ноды сырыми IP — гейт обязан их принимать.
       const body = '''

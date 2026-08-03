@@ -205,7 +205,11 @@ String xrayConfigJsonForIos(List<SubNode> nodes, {String? only}) =>
 /// (dns), молча опустить туннель до прямого выхода (routing → freedom) или выставить наружу
 /// метрики и управление движком. Поэтому перед отдачей движку из записи вырезаются все
 /// top-level секции управления ([_kEntryStripSections]), dns/routing кладутся НАШИ (те же,
-/// что в десктопной сборке), а из входов остаются только локальные socks/http на 127.0.0.1.
+/// что в десктопной сборке), исходы с тегами direct/block заменяются нашими БЕЗУСЛОВНО,
+/// а из входов остаётся только локальный socks на 127.0.0.1 (http-вход записи выбрасывается:
+/// Android-плагину нужен только socks — см. engine.dart, туда уходит лишь socksPort, —
+/// а чужой http-порт был бы неаутентифицированным локальным прокси через VPN для любого
+/// приложения на телефоне).
 ///
 /// Порт socks-входа перезаписываем как раньше: плагин ищет его в конфиге и на него
 /// натравливает свой перехватчик трафика.
@@ -224,6 +228,25 @@ String xrayEntryConfigJson(SubNode node, {int socksPort = kXraySocksPort}) {
   // DNS — наш (DoH + системный), как в десктопной сборке: серверский резолвер мог бы
   // оказаться резолвером атакующего с полной историей запросов пользователя.
   cfg['dns'] = {'queryStrategy': 'UseIPv4', 'disableCache': false, 'servers': _kDns};
+  // Исходы с тегами direct/block из записи выбрасываем БЕЗУСЛОВНО и кладём свои (аудит,
+  // HIGH): наши правила ниже шлют geosite:category-ru/private, geoip:ru/private и bittorrent
+  // в тег direct — чужой outbound {tag:'direct', protocol:'vless', адрес атакующего}
+  // превращал это в молчаливый MITM RU-трафика. Чистим ДО построения routing, чтобы и цель
+  // правил (_proxyTagOf) не могла указать на выброшенный исход. Прокси-исход записи
+  // (тег 'proxy' у записей нашего сервиса) при этом сохраняется.
+  final entryOutbounds = cfg['outbounds'];
+  final keptOutbounds = <dynamic>[
+    if (entryOutbounds is List)
+      for (final o in entryOutbounds)
+        if (o is! Map || (o['tag'] != 'direct' && o['tag'] != 'block')) o,
+  ];
+  keptOutbounds.add({
+    'protocol': 'freedom',
+    'tag': 'direct',
+    'settings': {'domainStrategy': 'UseIPv4'},
+  });
+  keptOutbounds.add({'protocol': 'blackhole', 'tag': 'block'});
+  cfg['outbounds'] = keptOutbounds;
   // Маршрутизация — наша, цель правила — тег прокси-исхода ЭТОЙ записи (у записей нашего
   // сервиса это 'proxy'). Серверский routing мог отправить всё в freedom — молчаливый
   // даунгрейд туннеля до прямого выхода.
@@ -232,28 +255,18 @@ String xrayEntryConfigJson(SubNode node, {int socksPort = kXraySocksPort}) {
     'domainStrategy': 'IPIfNonMatch',
     'rules': _rules(false, _proxyTagOf(cfg['outbounds'])),
   };
-  // Правила ссылаются на direct/block — гарантируем их наличие, иначе движок не стартует.
-  final outbounds = cfg['outbounds'];
-  if (outbounds is List) {
-    bool hasTag(String t) => outbounds.any((o) => o is Map && o['tag'] == t);
-    if (!hasTag('direct')) {
-      outbounds.add({
-        'protocol': 'freedom',
-        'tag': 'direct',
-        'settings': {'domainStrategy': 'UseIPv4'},
-      });
-    }
-    if (!hasTag('block')) outbounds.add({'protocol': 'blackhole', 'tag': 'block'});
-  }
-  // Входы: только локальные socks/http. Чужой dokodemo-door/vless-вход открыл бы на
-  // устройстве публичный прокси, а listen 0.0.0.0 — доступ к нему из локальной сети.
+  // Входы: только локальный socks. http-вход записи выбрасываем целиком (аудит, LOW):
+  // плагину нужен только socks (engine.dart передаёт движку лишь socksPort), а чужой
+  // http-вход с его портом — неаутентифицированный локальный прокси через VPN для любого
+  // приложения на телефоне. Чужой dokodemo-door/vless-вход открыл бы на устройстве
+  // публичный прокси, а listen 0.0.0.0 — доступ к нему из локальной сети.
   final clean = <Map<String, dynamic>>[];
   final inbounds = cfg['inbounds'];
   if (inbounds is List) {
     for (final i in inbounds) {
       if (i is! Map) continue;
       final proto = (i['protocol'] ?? '').toString().toLowerCase();
-      if (proto != 'socks' && proto != 'http') continue;
+      if (proto != 'socks') continue;
       final m = i.cast<String, dynamic>();
       m['listen'] = '127.0.0.1';
       m['protocol'] = proto;
@@ -261,7 +274,7 @@ String xrayEntryConfigJson(SubNode node, {int socksPort = kXraySocksPort}) {
     }
   }
   // socks-вход обязан быть: плагин ищет его в конфиге и на него натравливает перехватчик.
-  if (!clean.any((i) => i['protocol'] == 'socks')) {
+  if (clean.isEmpty) {
     clean.add({
       'listen': '127.0.0.1',
       'port': socksPort,
@@ -272,19 +285,20 @@ String xrayEntryConfigJson(SubNode node, {int socksPort = kXraySocksPort}) {
     });
   }
   for (final i in clean) {
-    if (i['protocol'] == 'socks') i['port'] = socksPort;
+    i['port'] = socksPort;
   }
   cfg['inbounds'] = clean;
   return const JsonEncoder.withIndent('  ').convert(cfg);
 }
 
 /// Top-level секции записи подписки, которые движок НЕ должен получить от сервера (аудит):
-/// dns — резолвер атакующего, routing — даунгрейд туннеля до freedom, остальные — логи,
-/// метрики и управление движком наружу. Если движку они нужны, мы кладём СВОИ (см. выше),
-/// а не серверские.
+/// dns — резолвер атакующего, routing — даунгрейд туннеля до freedom, observatory и
+/// burstObservatory — чужой pingConfig (движок исполнял бы его пробы: маячок атакующему
+/// с устройства), остальные — логи, метрики и управление движком наружу. Если движку они
+/// нужны, мы кладём СВОИ (см. выше), а не серверские.
 const List<String> _kEntryStripSections = [
   'dns', 'routing', 'log', 'metrics', 'policy', 'stats', 'transport', 'api', 'reverse',
-  'fakedns', 'observatory',
+  'fakedns', 'observatory', 'burstObservatory',
 ];
 
 /// Тег прокси-исхода записи (vless/vmess/trojan/shadowsocks). У записей нашего сервиса это

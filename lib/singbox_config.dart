@@ -515,9 +515,10 @@ class SubParseResult {
   /// Сервис прислал уведомление вместо узлов («Подписка истекла», «Лимит устройств») —
   /// показываем его пользователю вместо попытки подключения.
   final String? notice;
-  /// Записи, которые не попали в список узлов: битые (без адреса), отброшенные гейтом
-  /// доверия (чужой хост) и обрезанные капом [kSubMaxNodes], — не путать с узлами,
-  /// которые просто не поддерживает конкретный движок.
+  /// Записи, которые не попали в список узлов: битые (без адреса или с multi-member
+  /// vnext/servers — их не поднимет и движок), отброшенные гейтом доверия (чужой хост)
+  /// и обрезанные капом [kSubMaxNodes], — не путать с узлами, которые просто не
+  /// поддерживает конкретный движок.
   final int skipped;
   const SubParseResult({this.nodes = const [], this.notice, this.skipped = 0});
   bool get hasNodes => nodes.isNotEmpty;
@@ -560,7 +561,7 @@ SubParseResult parseSubscription(String body, {String? headerNotice}) {
     }
     final host = _xrayHostPort(proxy);
     if (host == null) {
-      skipped++; // запись без адреса — разобрать нечего
+      skipped++; // запись без адреса или с multi-member vnext/servers — разобрать нечего
       continue;
     }
     // Узел обязан жить на доверенном хосте bitaps (аудит): одна поддельная запись с ремарком
@@ -730,14 +731,19 @@ Future<SubFetchResult> fetchSubscription(
 // ---------- разбор одной xray-записи ----------
 
 /// Адрес и порт из xray-outbound (vnext — vless/vmess, servers — trojan/shadowsocks).
+/// Член обязан быть РОВНО один (аудит, defense-in-depth): multi-member vnext/servers движок
+/// не поднимает (не старт = DoS), а гейт проверял бы только ПЕРВЫЙ член — проверка и
+/// исполнение обязаны совпадать, иначе чужой член за доверенным первым прошёл бы мимо гейта.
 (String, int)? _xrayHostPort(Map<String, dynamic> proxy) {
   final settings = (proxy['settings'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
   for (final key in ['vnext', 'servers']) {
     final list = settings[key];
-    if (list is List && list.isNotEmpty && list.first is Map) {
+    if (list is List && list.isNotEmpty) {
+      if (list.length != 1 || list.first is! Map) return null;
       final m = (list.first as Map).cast<String, dynamic>();
       final host = (m['address'] ?? '').toString();
-      if (host.isNotEmpty) return (host, _int(m['port']) ?? 443);
+      if (host.isEmpty) return null;
+      return (host, _int(m['port']) ?? 443);
     }
   }
   return null;

