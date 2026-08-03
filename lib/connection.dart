@@ -22,6 +22,7 @@ enum ConnFix {
 //   keyOf/serverOf   — актуальные ключ и выбранный сервер из ShellState
 //   dropAlertOn      — тумблер «Обрыв соединения»
 //   trafWarnOn       — тумблер «Лимит трафика»
+//   killSwitchOn     — тумблер «Килл-свитч»: при НЕОЖИДАННОМ обрыве держим fail-closed
 //   demoOn           — тумблер «Демо-режим» (Настройки): разрешена ли демо-сессия без движка
 //   onToast          — показать тост (реализует ShellState)
 //   onPersist        — сохранить состояние (_save; нужен для счётчика сессий)
@@ -36,6 +37,7 @@ class ConnectionController extends ChangeNotifier {
     required this.nodeTagOf,
     required this.dropAlertOn,
     required this.trafWarnOn,
+    required this.killSwitchOn,
     required this.demoOn,
     required this.onNodeDead,
     required this.onToast,
@@ -54,6 +56,9 @@ class ConnectionController extends ChangeNotifier {
   final String? Function() nodeTagOf;
   final bool Function() dropAlertOn;
   final bool Function() trafWarnOn;
+  /// Тумблер «Килл-свитч» (Настройки): при НЕОЖИДАННОМ обрыве VPN трафик блокируется
+  /// (fail-closed), а не идёт напрямую. По умолчанию ВЫКЛ.
+  final bool Function() killSwitchOn;
   /// Разрешена ли демо-сессия там, где движка нет. По умолчанию ВЫКЛЮЧЕНА: молчаливое демо
   /// после оплаты выглядело как рабочий VPN и человек не понимал, почему ничего не открывается.
   final bool Function() demoOn;
@@ -69,6 +74,12 @@ class ConnectionController extends ChangeNotifier {
   /// сработало». Причина обязана оставаться на экране до следующей попытки — см. карточку на Главной.
   String? failMsg;
   ConnFix failFix = ConnFix.none;
+  /// Килл-свитч сработал: VPN отвалился НЕОЖИДАННО (не по кнопке) и системный прокси нарочно
+  /// не снят — трафик заблокирован (fail-closed). Живёт до кнопки «Снять блокировку» или новой
+  /// попытки подключения. Нарочно НЕ персистится: при старте приложения протухший прокси всё
+  /// равно снимает cleanupStale (main.dart) — после перезапуска блокировки фактически нет,
+  /// и UI не должен её выдумывать.
+  bool blocked = false;
   int secs = 0;
   int down = 0, up = 0;
   int sessions = 0;
@@ -104,6 +115,11 @@ class ConnectionController extends ChangeNotifier {
       return;
     }
     if (conn == 0) {
+      // Новая попытка из состояния блокировки сперва снимает её: килл-свитч — защита от
+      // НЕОЖИДАННОГО обрыва, а явный коннект — осознанное действие человека. Прокси перед
+      // подключением всё равно переписывается (_connectDesktop → _stopDesktop), но снимаем
+      // уже здесь — до загрузки подписки и системного диалога разрешения.
+      if (blocked) { blocked = false; await TunnelEngine.instance.disconnect(); }
       final gen = ++_gen; // это конкретное подключение; отмена/реконнект сменят _gen
       conn = 1;
       failMsg = null; failFix = ConnFix.none; // новая попытка — старую причину с экрана убираем
@@ -276,6 +292,7 @@ class ConnectionController extends ChangeNotifier {
   void _startSession({required int down, required int up}) {
     conn = 2; secs = 0; this.down = down; this.up = up; sessions++;
     failMsg = null; failFix = ConnFix.none; // получилось — причина прошлой неудачи неактуальна
+    blocked = false; // подключились — блокировки килл-свитча больше нет
     _sessMB = 0; _trafWarned = false;
     notifyListeners();
     onPersist();
@@ -315,28 +332,58 @@ class ConnectionController extends ChangeNotifier {
     onToast(msg);
   }
 
+  // Держим ли при обрыве системный прокси (fail-closed). Только десктоп с xray удерживает
+  // блокировку через неснятый прокси (порт мёртв → трафик умирает); на Android/iOS приложению
+  // удерживать нечего (см. комментарий к TunnelEngine.failClosed) — объявлять там «трафик
+  // заблокирован» было бы ложью. Вынесено в чистую функцию: правило покрыто killswitch_test.
+  static bool holdProxyOnDrop(bool killSwitch, EngineKind kind) =>
+      killSwitch && kind == EngineKind.desktopXray;
+
   // движок сообщил об обрыве соединения — снимаем «подключено»
   void _dropped(int gen, {String? why}) {
     if (_disposed || gen != _gen) return;
+    // Килл-свитч ≠ отключение по кнопке. Кнопка/reset()/выход — осознанные действия человека,
+    // там прокси снимается всегда и интернет снова прямой. Здесь же обрыв НЕОЖИДАННЫЙ: при
+    // включённом тумблере системный прокси НЕ снимаем (fail-closed) — порт мёртв, и трафик
+    // умирает, а не течёт мимо туннеля. При выключенном тумблере — прежнее поведение.
+    final hold = kRealTunnel && holdProxyOnDrop(killSwitchOn(), TunnelEngine.kind());
     // синхронизируем натив с UI: явно гасим движок, чтобы после обрыва он не остался в
     // полу-поднятом/реконнектящем состоянии (как reset()/disconnect-ветка toggle()).
-    if (kRealTunnel) { TunnelEngine.instance.disconnect(); gEngineReal = false; }
+    if (kRealTunnel) {
+      if (hold) { TunnelEngine.instance.failClosed(); } else { TunnelEngine.instance.disconnect(); }
+      gEngineReal = false;
+    }
     _stopWatch();
     onSpin(false);
     conn = 0; secs = 0;
+    blocked = hold;
     // Причину обрыва держим на экране так же, как причину неудачного старта: человек мог
-    // отойти от компьютера и вернуться уже после того, как тост погас.
+    // отойти от компьютера и вернуться уже после того, как тост погас. При блокировке обычную
+    // карточку причины заменяет карточка килл-свитча (см. home.dart) — fix ей не нужен.
     failMsg = (why != null && why.isNotEmpty) ? why : tr('Соединение разорвано');
-    failFix = ConnFix.support;
+    failFix = hold ? ConnFix.none : ConnFix.support;
     notifyListeners();
-    // Причину от движка показываем ВСЕГДА, независимо от тумблера «Обрыв соединения»: тумблер
-    // про фоновые уведомления, а это ответ на действие пользователя — без него отказ выглядит
-    // как «нажал подключить, ничего не произошло».
-    if (why != null && why.isNotEmpty) {
+    // При блокировке тостим сам факт fail-closed (это важнее причины: интернет «пропал»
+    // намеренно). Иначе — как раньше: причину от движка показываем ВСЕГДА, независимо от
+    // тумблера «Обрыв соединения»: тумблер про фоновые уведомления, а это ответ на действие
+    // пользователя — без него отказ выглядит как «нажал подключить, ничего не произошло».
+    if (hold) {
+      onToast(tr('VPN отвалился — трафик заблокирован'));
+    } else if (why != null && why.isNotEmpty) {
       onToast(tr(why));
     } else if (dropAlertOn()) {
       onToast(tr('Соединение разорвано'));
     }
+  }
+
+  /// «Снять блокировку» — единственный выход из fail-closed без нового подключения:
+  /// снимает системный прокси (интернет снова прямой) и возвращает обычное «Отключено».
+  Future<void> unblock() async {
+    if (!blocked) return;
+    blocked = false; // UI сразу возвращаем в «Отключено», прокси догоняет асинхронно
+    notifyListeners();
+    // disconnect идемпотентен: движок уже мёртв, здесь важно именно снятие прокси.
+    await TunnelEngine.instance.disconnect();
   }
 
   // полный сброс подключения (напр. при выходе из аккаунта): гасит поколение, таймеры, статус
@@ -349,6 +396,9 @@ class ConnectionController extends ChangeNotifier {
     _stopWatch();
     onSpin(false);
     conn = 0; secs = 0;
+    // сброс — осознанное действие (logout/закрытие окна), а не обрыв: блокировки килл-свитча
+    // здесь быть не должно, прокси уже снял disconnect выше.
+    blocked = false;
     failMsg = null; failFix = ConnFix.none; // причина прошлого аккаунта новому не показывается
     notifyListeners();
   }

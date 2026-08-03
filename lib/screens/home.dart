@@ -54,20 +54,33 @@ extension ShellHome on ShellState {
         Center(child: _powerButton()),
         const SizedBox(height: 4),
         Center(child: Text(
-          // в демо (kRealTunnel=false) НЕ заявляем «Подключено/под защитой» — реального туннеля нет
-          conn == 0 ? tr('Отключено') : conn == 1 ? tr('Подключение…') : (gEngineReal ? tr('Подключено') : tr('Демо-режим')),
-          style: disp(22, w: FontWeight.w700, c: connected ? C.accent : (conn == 1 ? C.warn : C.text)))),
+          // в демо (kRealTunnel=false) НЕ заявляем «Подключено/под защитой» — реального туннеля нет;
+          // при сработавшем килл-свитче — не «Отключено» (это читалось бы как «интернет прямой»),
+          // а факт блокировки: прокси нарочно не снят, трафик не идёт никуда (fail-closed)
+          connBlocked ? tr('Трафик заблокирован')
+              : conn == 0 ? tr('Отключено')
+              : conn == 1 ? tr('Подключение…')
+              : (gEngineReal ? tr('Подключено') : tr('Демо-режим')),
+          style: disp(22, w: FontWeight.w700, c: connected ? C.accent : (conn == 1 || connBlocked ? C.warn : C.text)))),
         const SizedBox(height: 6),
         Center(child: Text(connected ? hms : '00:00:00',
           style: TextStyle(fontFamily: 'JetBrainsMono', fontSize: 38, fontWeight: FontWeight.w700,
             color: connected ? C.accentSoft : C.muted, letterSpacing: 2))),
         const SizedBox(height: 4),
         Center(child: Text(
-          conn == 0 ? tr('нажми на кнопку') : conn == 1 ? tr('устанавливаем соединение…') : (gEngineReal ? _protectionScope() : tr('демо — без реального туннеля')),
+          connBlocked ? tr('VPN отвалился — килл-свитч не пускает трафик напрямую')
+              : conn == 0 ? tr('нажми на кнопку')
+              : conn == 1 ? tr('устанавливаем соединение…')
+              : (gEngineReal ? _protectionScope() : tr('демо — без реального туннеля')),
           style: mono(12))),
-        // Причина неудачи живёт на экране до следующей попытки — вместе с кнопкой «что делать».
-        // Раньше причина уходила с тостом за три секунды, и оставалось «нажал — ничего не произошло».
-        if (conn == 0 && connFail != null) ...[
+        // Сработавший килл-свитч важнее обычной карточки причины: показываем его карточку —
+        // с кнопкой «Снять блокировку» (единственный путь снять прокси без нового подключения).
+        if (conn == 0 && connBlocked) ...[
+          const SizedBox(height: 18),
+          _killSwitchCard(),
+        ] else if (conn == 0 && connFail != null) ...[
+          // Причина неудачи живёт на экране до следующей попытки — вместе с кнопкой «что делать».
+          // Раньше причина уходила с тостом за три секунды, и оставалось «нажал — ничего не произошло».
           const SizedBox(height: 18),
           _connFailCard(connFail!, connFix),
         ],
@@ -168,6 +181,38 @@ extension ShellHome on ShellState {
       ],
     );
   }
+
+  // Карточка fail-closed: VPN отвалился при включённом килл-свитче, трафик заблокирован
+  // (системный прокси нарочно не снят). Видна сразу на Главной — до неё не нужно идти в
+  // Настройки. «Снять блокировку» — единственный путь вернуть прямой интернет без реконнекта;
+  // повторное подключение большой кнопкой тоже снимает блокировку (см. toggle в connection.dart).
+  // Геометрия — как у _connFailCard/_updateBanner (16/14, радиус 14, иконка 20, gap 12).
+  Widget _killSwitchCard() => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: C.danger.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: C.danger.withValues(alpha: 0.5)),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Icon(Icons.gpp_bad_outlined, size: 20, color: C.danger),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(tr('VPN отвалился — трафик заблокирован'), style: disp(14, w: FontWeight.w700, c: C.danger)),
+              const SizedBox(height: 3),
+              Text(
+                // причина обрыва от движка + пояснение, что блокировка — сработавший
+                // килл-свитч, а не «сломался интернет». tr() к причине — как в _connFailCard.
+                '${connFail != null && connFail!.isNotEmpty ? '${tr(connFail!)}\n' : ''}'
+                '${tr('Килл-свитч держит прокси включённым: интернет не пойдёт мимо туннеля. Сними блокировку или подключись снова.')}',
+                style: mono(11.5, c: C.muted)),
+            ])),
+          ]),
+          const SizedBox(height: 12),
+          _btn(tr('Снять блокировку'), kind: 1, icon: Icons.lock_open, onTap: () => _conn.unblock()),
+        ]),
+      );
 
   // Карточка «почему не подключилось»: причина + одно конкретное действие под неё.
   // Геометрия и цвета — как у _updateBanner/_expiryBanner (16/14, радиус 14, иконка 20, gap 12),
@@ -282,8 +327,8 @@ extension ShellHome on ShellState {
       button: true,
       label: connected ? tr('Отключить') : tr('Подключиться'),
       // value повторяет видимый статус (строка 41), включая honesty-гейт: в демо скринридер
-      // тоже слышит «Демо-режим», а не «Подключено».
-      value: conn == 0 ? tr('Отключено') : conn == 1 ? tr('Подключение…') : (gEngineReal ? tr('Подключено') : tr('Демо-режим')),
+      // тоже слышит «Демо-режим», а не «Подключено»; при блокировке — «Трафик заблокирован».
+      value: connBlocked ? tr('Трафик заблокирован') : conn == 0 ? tr('Отключено') : conn == 1 ? tr('Подключение…') : (gEngineReal ? tr('Подключено') : tr('Демо-режим')),
       onTap: toggle,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,

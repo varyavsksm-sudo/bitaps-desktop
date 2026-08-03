@@ -174,6 +174,13 @@ const Map<String, String> _kEn = {
   'Подключаться к лучшему серверу': 'Connect to the best server',
   'при подключении сам возьму оптимальный под режим': "auto-picks the optimal server for your mode",
   'выключено — сервер выбираешь ты': 'off — you pick the server',
+  // карточка килл-свитча (fail-closed после неожиданного обрыва)
+  'Трафик заблокирован': 'Traffic blocked',
+  'VPN отвалился — трафик заблокирован': 'VPN dropped — traffic is blocked',
+  'VPN отвалился — килл-свитч не пускает трафик напрямую': 'VPN dropped — the kill switch keeps traffic from going direct',
+  'Килл-свитч держит прокси включённым: интернет не пойдёт мимо туннеля. Сними блокировку или подключись снова.':
+      'The kill switch keeps the proxy on: no traffic goes direct. Unblock it or reconnect.',
+  'Снять блокировку': 'Unblock',
 
   // ---- servers.dart ----
   'Пинг серверов': 'Ping servers',
@@ -351,6 +358,9 @@ const Map<String, String> _kEn = {
   'Только экран: от доступа к устройству не защищает': 'Screen only — it does not protect against device access',
   'Обрыв соединения': 'Connection drop',
   'Уведомлять, если VPN отвалился': 'Notify if the VPN drops',
+  'Килл-свитч': 'Kill switch',
+  'Килл-свитч на Android': 'Kill switch on Android',
+  'Понятно': 'Got it',
   'Напомнить за пару дней': 'Remind me a couple of days ahead',
   'Лимит трафика': 'Traffic limit',
   'Сигнал при расходе от 5 ГБ за сессию': 'Alert at 5 GB+ used per session',

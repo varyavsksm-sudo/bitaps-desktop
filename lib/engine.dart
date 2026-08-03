@@ -254,6 +254,31 @@ class TunnelEngine {
     }
   }
 
+  /// Неожиданный обрыв при включённом килл-свитче (см. connection.dart): гасим движок, но
+  /// НЕ снимаем системный прокси — он указывает в уже мёртвый локальный порт, и трафик,
+  /// уважающий системные настройки, умирает вместо того, чтобы молча пойти напрямую
+  /// (fail-closed). Килл-свитч ≠ отключение по кнопке: там прокси снимаем всегда (_stopDesktop),
+  /// здесь его удержание и есть защита. Снимают блокировку только явные действия человека:
+  /// кнопка «Снять блокировку», новая попытка подключения (_connectDesktop переписывает прокси
+  /// через _stopDesktop) или перезапуск приложения (cleanupStale на старте).
+  ///
+  /// Только десктоп. На Android после смерти VpnService маршруты удерживает лишь системный
+  /// «Постоянный VPN» + «Блокировать соединения без VPN» (настройки ОС — см. диалог тумблера
+  /// в Настройках): приложению здесь держать нечего. На iOS fail-closed обеспечивает сам
+  /// NetworkExtension через includeAllNetworks (native_ios/AppDelegate.swift).
+  Future<void> failClosed() async {
+    if (kind() != EngineKind.desktopXray) { await disconnect(); return; }
+    _statsTimer?.cancel();
+    _statsTimer = null;
+    // Всё как в _stopDesktop, кроме SystemProxy.disable(): прокси намеренно остаётся.
+    final p = _proc;
+    _proc = null;
+    _metricsPort = null;
+    _activeHttpPort = null;
+    _lastTotals = null;
+    if (p != null) await p.stop();
+  }
+
   Future<void> _stopDesktop() async {
     _statsTimer?.cancel();
     _statsTimer = null;

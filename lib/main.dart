@@ -199,6 +199,10 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   /// Узлы из подписки — источник правды для списка серверов и для подключения.
   List<SubNode> subNodes = const [];
   bool tgl1 = false, tgl2 = true, tgl3 = true, tgl4 = false;
+  /// Килл-свитч: при НЕОЖИДАННОМ обрыве VPN трафик блокируется (fail-closed), а не идёт
+  /// напрямую мимо туннеля. По умолчанию ВЫКЛ — блокировка интернета не должна случаться
+  /// без ведома человека. Само состояние блокировки живёт в _conn.blocked и не персистится.
+  bool killSwitch = false;
   String? appPin; // PIN блокировки приложения
   bool _locked = false;
   final TextEditingController _pinCtrl = TextEditingController();
@@ -269,6 +273,9 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   /// Причина последней неудачи подключения и предлагаемое действие — карточка на Главной.
   String? get connFail => _conn.failMsg;
   ConnFix get connFix => _conn.failFix;
+  /// VPN отвалился при включённом килл-свитче — трафик заблокирован (fail-closed):
+  /// на Главной показываем карточку блокировки вместо «Отключено», см. home.dart.
+  bool get connBlocked => _conn.blocked;
   void toggle() {
     // Режим «лучший сервер»: перед стартом коннекта сами берём оптимальный для текущего режима
     // сервер (для «Авто»/«Игры» это минимальный пинг — с учётом живых замеров pingOf). Только при
@@ -365,6 +372,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       nodeTagOf: () => server.id.isEmpty ? null : server.id,
       dropAlertOn: () => tgl2,
       trafWarnOn: () => tgl4,
+      killSwitchOn: () => killSwitch,
       demoOn: () => demoMode,
       // Узел не пропустил трафик: помечаем его тут же, чтобы он перестал считаться доступным
       // и не был выбран «лучшим» на следующем подключении.
@@ -434,9 +442,10 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   // подключения/подписки/режима (см. _refreshTray, зовём из слушателя _conn и _applySub/_save).
   Future<void> _updateTrayMenu() async {
     try {
-      // строка статуса — тот же honesty-гейт, что и на Главной: в демо не пишем «Подключено»
+      // строка статуса — тот же honesty-гейт, что и на Главной: в демо не пишем «Подключено»,
+      // а при сработавшем килл-свитче — не «Отключено», а факт блокировки
       final statusLabel = conn == 0
-          ? tr('Отключено')
+          ? (connBlocked ? tr('Трафик заблокирован') : tr('Отключено'))
           : conn == 1
               ? tr('Подключение…')
               : (gEngineReal ? tr('Подключено') : tr('Демо-режим'));
@@ -690,6 +699,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       tgl2 = p.getBool('tgl2') ?? true;
       tgl3 = p.getBool('tgl3') ?? true;
       tgl4 = p.getBool('tgl4') ?? false;
+      killSwitch = p.getBool('killSwitch') ?? false;
       _conn.sessions = p.getInt('sessions') ?? 0;
       customCfg = secCfg;
       keyStr = secKey ?? kDemoKey;
@@ -812,6 +822,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     await p.setBool('tgl2', tgl2);
     await p.setBool('tgl3', tgl3);
     await p.setBool('tgl4', tgl4);
+    await p.setBool('killSwitch', killSwitch);
     await p.setInt('sessions', sessions);
     await p.setStringList('favs', favs.toList());
     await _secWrite(p, 'cfg', customCfg); // secure storage (может нести vless-ключ), не plaintext

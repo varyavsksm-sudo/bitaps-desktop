@@ -219,6 +219,8 @@ extension ShellSettings on ShellState {
             _divider(),
             _toggle(tr('Обрыв соединения'), tr('Уведомлять, если VPN отвалился'), tgl2, (v) { rebuild(() => tgl2 = v); _save(); }),
             _divider(),
+            _toggle(tr('Килл-свитч'), _killSwitchSub(), killSwitch, _setKillSwitch),
+            _divider(),
             _toggle(tr('Подписка истекает'), tr('Напомнить за пару дней'), tgl3, (v) { rebuild(() => tgl3 = v); _save(); }),
             _divider(),
             _toggle(tr('Лимит трафика'), tr('Сигнал при расходе от 5 ГБ за сессию'), tgl4, (v) { rebuild(() => tgl4 = v); _save(); }),
@@ -326,6 +328,60 @@ extension ShellSettings on ShellState {
       );
 
   bool get _isDesktop => Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+
+  // ---------------- КИЛЛ-СВИТЧ ----------------
+  // Подпись-подсказка с платформенным примечанием: на iOS fail-closed действует всегда
+  // (includeAllNetworks в NetworkExtension, native_ios/AppDelegate.swift), на Android его
+  // даёт только системная настройка — см. диалог при первом включении (_setKillSwitch).
+  // Строки собраны тернарником appLang, а не tr(): текст платформо-зависимый.
+  String _killSwitchSub() {
+    final base = appLang == 'en'
+        ? 'if the VPN drops, traffic is blocked instead of going direct'
+        : 'если VPN отвалится, интернет блокируется, а не идёт напрямую';
+    if (Platform.isIOS) {
+      return appLang == 'en'
+          ? '$base · on iOS this is always on (includeAllNetworks)'
+          : '$base · на iOS действует всегда (includeAllNetworks)';
+    }
+    if (Platform.isAndroid) {
+      return appLang == 'en'
+          ? '$base · strongest via the system “Always-on VPN” + “Block connections without VPN”'
+          : '$base · надёжнее всего системные «Постоянный VPN» + «Блокировать соединения без VPN»';
+    }
+    return base;
+  }
+
+  // Переключение килл-свитча. На Android при ПЕРВОМ включении — одноразовый диалог: системная
+  // защита там сильнее приложения, потому что после смерти VpnService маршруты удерживает лишь
+  // «Постоянный VPN» + «Блокировать соединения без VPN» в настройках ОС. Открыть системные
+  // настройки VPN из приложения нельзя: ни flutter_v2ray_client, ни наш канал такого метода
+  // не имеют, а android-модуля у сборки нет — поэтому диалог с инструкцией, без кнопки-перехода.
+  void _setKillSwitch(bool v) {
+    rebuild(() => killSwitch = v);
+    _save();
+    if (v && Platform.isAndroid) _showKillSwitchAndroidHintOnce();
+  }
+
+  Future<void> _showKillSwitchAndroidHintOnce() async {
+    final p = await SharedPreferences.getInstance();
+    if ((p.getBool('ksHintShown') ?? false) || !mounted) return; // показываем один раз
+    await p.setBool('ksHintShown', true);
+    if (!mounted) return;
+    showDialog<void>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: C.bg2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
+        title: Text(tr('Килл-свитч на Android'), style: disp(18, w: FontWeight.w700)),
+        content: SizedBox(width: 360, child: Text(
+          appLang == 'en'
+              ? 'Android protects this better at the system level: enable “Always-on VPN” and “Block connections without VPN” for bitaps in system settings (Network & internet → VPN → gear icon). Then traffic cannot bypass the tunnel even if the app dies.'
+              : 'Системная защита Android надёжнее приложения: включи для bitaps «Постоянный VPN» и «Блокировать соединения без VPN» в настройках системы (Сеть и интернет → VPN → шестерёнка). Тогда трафик не пойдёт мимо туннеля, даже если приложение упадёт.',
+          style: mono(13, c: C.text))),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Понятно'), style: mono(13, c: C.accent)))],
+      ),
+    );
+  }
 
   /// Туннель на этой системе поднять нечем (десктоп без бинаря xray рядом и т.п.).
   /// От этого зависят тумблер «Демо-режим» и честные формулировки в знакомстве/диагностике.
