@@ -334,7 +334,10 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
 
   // ----- tray (десктоп): иконка в меню-баре/трее, показать/скрыть окно -----
   bool _trayReady = false;
-  int _lastTrayConn = -1; // фаза conn, под которую последний раз пересобрано трей-меню (анти-спам)
+  // Пара (conn, blocked), под которую последний раз пересобрано трей-меню (анти-спам).
+  // blocked меняется БЕЗ смены conn (unblock/_fail килл-свитча) — по одному conn меню врало:
+  // после «Снять блокировку» в трее горело «Трафик заблокирован».
+  (int, bool)? _lastTrayState;
 
   // ----- автозапуск (десктоп): «запускать при входе» + «старт свёрнутым» -----
   bool autoLaunch = false;   // приложение стартует при входе в систему
@@ -397,8 +400,9 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       if (mounted && !_locked) {
         setState(() {});
         _syncAnimations();
-        // трей-меню пересобираем ТОЛЬКО при смене фазы conn (0/1/2), а не на каждый тик таймера сессии
-        if (_conn.conn != _lastTrayConn) { _lastTrayConn = _conn.conn; _refreshTray(); }
+        // трей-меню пересобираем ТОЛЬКО при смене пары (conn, blocked), а не на каждый тик таймера
+        final trayState = (_conn.conn, _conn.blocked);
+        if (trayState != _lastTrayState) { _lastTrayState = trayState; _refreshTray(); }
       }
     });
     _load();

@@ -107,7 +107,9 @@ class ConnectionController extends ChangeNotifier {
     if (conn == 1) {
       // отмена во время «Подключение…»: инвалидируем поколение → awaited/отложенный коллбэк отвалится
       _gen++;
-      if (kRealTunnel) { await TunnelEngine.instance.disconnect(); gEngineReal = false; }
+      // Отмена попытки, поднятой ИЗ блокировки: прокси держим (fail-closed), гасим только
+      // движок — иначе blocked-карточка осталась бы при уже снятом прокси (ложь и голый трафик).
+      if (kRealTunnel) { await _stopEngine(); gEngineReal = false; }
       _stopWatch();
       onSpin(false);
       conn = 0;
@@ -115,11 +117,11 @@ class ConnectionController extends ChangeNotifier {
       return;
     }
     if (conn == 0) {
-      // Новая попытка из состояния блокировки сперва снимает её: килл-свитч — защита от
-      // НЕОЖИДАННОГО обрыва, а явный коннект — осознанное действие человека. Прокси перед
-      // подключением всё равно переписывается (_connectDesktop → _stopDesktop), но снимаем
-      // уже здесь — до загрузки подписки и системного диалога разрешения.
-      if (blocked) { blocked = false; await TunnelEngine.instance.disconnect(); }
+      // Новая попытка ИЗ состояния блокировки прокси НЕ снимает и blocked НЕ сбрасывает заранее:
+      // старый прокси указывает в мёртвый порт (трафик заблокирован), а разрыв «снял → поднял»
+      // оставлял бы секунды голого трафика напрямую. Новый движок атомарно перепишет порты в
+      // SystemProxy.enable (keepProxy в _connectDesktop), blocked снимается ТОЛЬКО в _startSession,
+      // а при неудаче возвращается в _fail — блокировка держится всю попытку.
       final gen = ++_gen; // это конкретное подключение; отмена/реконнект сменят _gen
       conn = 1;
       failMsg = null; failFix = ConnFix.none; // новая попытка — старую причину с экрана убираем
@@ -197,7 +199,9 @@ class ConnectionController extends ChangeNotifier {
           final only = nodeTagOf();
           await TunnelEngine.instance
               .connect(nodes, onlyTag: only != null && nodes.any((n) => n.tag == only) ? only : null,
-                       server: serverOf().city)
+                       server: serverOf().city,
+                       // из блокировки — прокси держим: enable() перепишет порты атомарно
+                       keepProxy: blocked)
               .timeout(const Duration(seconds: 40));
         } on TunnelUnavailable catch (e) {
           // Нет разрешения на VPN-подключение: чинится повторной попыткой и «разрешить» в системе.
@@ -211,26 +215,28 @@ class ConnectionController extends ChangeNotifier {
           // Движок мог подняться уже ПОСЛЕ таймаута — тогда останется «осиротевший» туннель:
           // ключ в шторке горит, а интерфейс показывает «Отключено». Гасим дважды с паузой:
           // первый вызов ловит уже поднятый туннель, второй — тот, что встал следом.
-          await TunnelEngine.instance.disconnect().catchError((_) {});
+          // При живой блокировке гасим БЕЗ снятия прокси (_stopEngine → failClosed).
+          await _stopEngine().catchError((_) {});
           Future<void>.delayed(const Duration(seconds: 3),
-              () => TunnelEngine.instance.disconnect().catchError((_) {}));
+              () => _stopEngine().catchError((_) {}));
           _fail(gen, appLang == 'en' ? 'Connection timed out' : 'Подключение не удалось — таймаут', fix: ConnFix.none);
           return;
         } catch (e) {
           _fail(gen, appLang == 'en' ? 'Failed to connect: $e' : 'Не удалось подключиться: $e');
           return;
         }
-        if (_disposed || gen != _gen) { await TunnelEngine.instance.disconnect(); return; } // отменили во время старта
+        if (_disposed || gen != _gen) { await _stopEngine(); return; } // отменили во время старта
         // «Подключено» и «работает» — разные вещи. Движок поднимает туннель и рапортует об успехе,
         // а сессию сквозь фильтрацию может рвать: у человека горит ключ в шторке и не грузится
         // ничего. Именно так сейчас ведут себя ПРЯМЫЕ узлы при глушении интернета, тогда как узлы
         // через CDN работают. Поэтому сразу после старта тянем маленький ответ СКВОЗЬ туннель.
         final passes = await TunnelEngine.instance.verifyConnected();
-        if (_disposed || gen != _gen) { await TunnelEngine.instance.disconnect(); return; }
+        if (_disposed || gen != _gen) { await _stopEngine(); return; }
         if (!passes) {
           // Узел не пропускает трафик — держать на нём человека нельзя, это и есть то самое
-          // «подключено, но интернета нет». Гасим, помечаем узел и предлагаем взять рабочий.
-          await TunnelEngine.instance.disconnect().catchError((_) {});
+          // «подключено, но интернета нет». Гасим (при живой блокировке — без снятия прокси),
+          // помечаем узел и предлагаем взять рабочий.
+          await _stopEngine().catchError((_) {});
           onNodeDead(serverOf().id);
           _fail(gen,
               appLang == 'en'
@@ -304,6 +310,12 @@ class ConnectionController extends ChangeNotifier {
     _tunEvents?.cancel(); _tunEvents = null;
   }
 
+  // Остановить движок после неудачной/отменённой попытки. При живой блокировке килл-свитча
+  // прокси НЕ снимаем (fail-closed: блокировка переживает неудачный реконнект), иначе снимаем
+  // как раньше — иначе карточка «трафик заблокирован» осталась бы при уже прямом интернете.
+  Future<void> _stopEngine() =>
+      blocked ? TunnelEngine.instance.failClosed() : TunnelEngine.instance.disconnect();
+
   // накопление расхода за сессию + разовое предупреждение при большом расходе («Лимит трафика»)
   void _accTraffic() {
     // Движок шлёт down/up в kbps (килобитах/с) — см. NativeTunnel.events() контракт.
@@ -327,6 +339,16 @@ class ConnectionController extends ChangeNotifier {
     _stopWatch();
     onSpin(false);
     conn = 0;
+    // Килл-свитч: блокировка переживает НЕУДАЧНУЮ попытку. toggle() из blocked прокси не снимал,
+    // поэтому если тумблер включён и наш прокси в системе остался (SystemProxy.enabled) —
+    // возвращаем blocked=true и карточку: молчаливый fail-open после сработавшего килл-свитча
+    // недопустим. Если прокси в этой попытке уже снят (откат в _connectDesktop) или тумблер
+    // успели выключить — блокировки фактически нет, и карточку не выдумываем; возможный
+    // прокси-сироту (тумблер выключили после обрыва) при этом снимаем, чтобы человек не
+    // остался без интернета без единой подсказки.
+    final hold = kRealTunnel && holdProxyOnDrop(killSwitchOn(), TunnelEngine.kind()) && SystemProxy.enabled;
+    if (blocked && !hold) TunnelEngine.instance.disconnect(); // fire-and-forget, как в reset()
+    blocked = hold;
     failMsg = msg; failFix = fix;
     notifyListeners();
     onToast(msg);
@@ -384,6 +406,16 @@ class ConnectionController extends ChangeNotifier {
     notifyListeners();
     // disconnect идемпотентен: движок уже мёртв, здесь важно именно снятие прокси.
     await TunnelEngine.instance.disconnect();
+    // Снятие могло не случиться: на macOS человек отменил системный запрос пароля — тогда
+    // прокси остался указывать в мёртвый порт (интернета нет), а UI уже врёт «Отключено».
+    // Проверяем факт и честно возвращаем карточку блокировки. looksOurs() работает на всех
+    // трёх десктопах, поэтому проверка общая, а не только под macOS.
+    if (kRealTunnel && TunnelEngine.kind() == EngineKind.desktopXray && await SystemProxy.looksOurs()) {
+      if (_disposed) return;
+      blocked = true;
+      notifyListeners();
+      onToast(tr('Не удалось снять блокировку — ответь на системный запрос пароля'));
+    }
   }
 
   // полный сброс подключения (напр. при выходе из аккаунта): гасит поколение, таймеры, статус

@@ -57,9 +57,12 @@ extension ShellHome on ShellState {
           // в демо (kRealTunnel=false) НЕ заявляем «Подключено/под защитой» — реального туннеля нет;
           // при сработавшем килл-свитче — не «Отключено» (это читалось бы как «интернет прямой»),
           // а факт блокировки: прокси нарочно не снят, трафик не идёт никуда (fail-closed)
-          connBlocked ? tr('Трафик заблокирован')
+          // «Подключение…» важнее «Трафик заблокирован»: при реконнекте ИЗ блокировки blocked
+          // остаётся true всю попытку (см. toggle в connection.dart), и без этого приоритета
+          // человек не видел бы, что подключение вообще идёт.
+          conn == 1 ? tr('Подключение…')
+              : connBlocked ? tr('Трафик заблокирован')
               : conn == 0 ? tr('Отключено')
-              : conn == 1 ? tr('Подключение…')
               : (gEngineReal ? tr('Подключено') : tr('Демо-режим')),
           style: disp(22, w: FontWeight.w700, c: connected ? C.accent : (conn == 1 || connBlocked ? C.warn : C.text)))),
         const SizedBox(height: 6),
@@ -68,9 +71,9 @@ extension ShellHome on ShellState {
             color: connected ? C.accentSoft : C.muted, letterSpacing: 2))),
         const SizedBox(height: 4),
         Center(child: Text(
-          connBlocked ? tr('VPN отвалился — килл-свитч не пускает трафик напрямую')
+          conn == 1 ? tr('устанавливаем соединение…')
+              : connBlocked ? tr('VPN отвалился — килл-свитч не пускает трафик напрямую')
               : conn == 0 ? tr('нажми на кнопку')
-              : conn == 1 ? tr('устанавливаем соединение…')
               : (gEngineReal ? _protectionScope() : tr('демо — без реального туннеля')),
           style: mono(12))),
         // Сработавший килл-свитч важнее обычной карточки причины: показываем его карточку —

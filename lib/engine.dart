@@ -96,15 +96,18 @@ class TunnelEngine {
   }
 
   /// Поднять туннель по узлам подписки. [onlyTag] — если пользователь выбрал сервер вручную.
+  /// [keepProxy] — реконнект из блокировки килл-свитча: старый системный прокси НЕ снимаем
+  /// (он указывает в мёртвый порт и держит fail-closed), новый SystemProxy.enable перепишет
+  /// порты атомарно — без окна голого трафика между «снял» и «поднял».
   /// Бросает [EngineUnavailable] / [TunnelUnavailable] с текстом для пользователя.
-  Future<void> connect(List<SubNode> nodes, {String? onlyTag, String server = ''}) async {
+  Future<void> connect(List<SubNode> nodes, {String? onlyTag, String server = '', bool keepProxy = false}) async {
     final usable = usableNodes(nodes);
     if (usable.isEmpty) {
       throw EngineUnavailable('в подписке нет узлов, поддерживаемых этой сборкой');
     }
     switch (kind()) {
       case EngineKind.desktopXray:
-        await _connectDesktop(usable, onlyTag);
+        await _connectDesktop(usable, onlyTag, keepProxy: keepProxy);
         return;
       case EngineKind.androidXray:
         await _connectAndroid(usable, onlyTag, server);
@@ -132,8 +135,11 @@ class TunnelEngine {
     }
   }
 
-  Future<void> _connectDesktop(List<SubNode> nodes, String? onlyTag) async {
-    await _stopDesktop(); // повторный connect не должен плодить процессы
+  Future<void> _connectDesktop(List<SubNode> nodes, String? onlyTag, {bool keepProxy = false}) async {
+    // повторный connect не должен плодить процессы. При реконнекте из блокировки (keepProxy)
+    // старый прокси НЕ снимаем — иначе между «снял» и «enable переписал» трафик пошёл бы
+    // напрямую; блокировку килл-свитча держим до поднятия нового движка.
+    await _stopDesktop(disableProxy: !keepProxy);
     final bin = XrayBinary.locate();
     if (bin == null) throw EngineUnavailable('VPN-движок не найден в сборке');
     // Порты берём свободные: фиксированные конфликтуют со вторым запуском и чужими клиентами.
@@ -259,8 +265,9 @@ class TunnelEngine {
   /// уважающий системные настройки, умирает вместо того, чтобы молча пойти напрямую
   /// (fail-closed). Килл-свитч ≠ отключение по кнопке: там прокси снимаем всегда (_stopDesktop),
   /// здесь его удержание и есть защита. Снимают блокировку только явные действия человека:
-  /// кнопка «Снять блокировку», новая попытка подключения (_connectDesktop переписывает прокси
-  /// через _stopDesktop) или перезапуск приложения (cleanupStale на старте).
+  /// кнопка «Снять блокировку» (unblock), успешный реконнект (SystemProxy.enable в
+  /// _connectDesktop атомарно переписывает порты поверх наших — см. keepProxy) или перезапуск
+  /// приложения (cleanupStale на старте).
   ///
   /// Только десктоп. На Android после смерти VpnService маршруты удерживает лишь системный
   /// «Постоянный VPN» + «Блокировать соединения без VPN» (настройки ОС — см. диалог тумблера
@@ -279,12 +286,15 @@ class TunnelEngine {
     if (p != null) await p.stop();
   }
 
-  Future<void> _stopDesktop() async {
+  Future<void> _stopDesktop({bool disableProxy = true}) async {
     _statsTimer?.cancel();
     _statsTimer = null;
     // Системный прокси снимаем ПЕРВЫМ: если упасть между шагами, лучше остаться без прокси,
     // чем с прокси в уже мёртвый порт (иначе у пользователя пропадёт интернет).
-    await SystemProxy.disable();
+    // Исключение — реконнект из блокировки килл-свитча (disableProxy: false): там прокси
+    // держим, новый движок атомарно перепишет порты в SystemProxy.enable, а разрыв
+    // «снял → поднял» дал бы секунды голого трафика напрямую.
+    if (disableProxy) await SystemProxy.disable();
     final p = _proc;
     _proc = null;
     _metricsPort = null;

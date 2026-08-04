@@ -181,6 +181,8 @@ const Map<String, String> _kEn = {
   'Килл-свитч держит прокси включённым: интернет не пойдёт мимо туннеля. Сними блокировку или подключись снова.':
       'The kill switch keeps the proxy on: no traffic goes direct. Unblock it or reconnect.',
   'Снять блокировку': 'Unblock',
+  'Не удалось снять блокировку — ответь на системный запрос пароля':
+      'Could not unblock — answer the system password prompt',
 
   // ---- servers.dart ----
   'Пинг серверов': 'Ping servers',

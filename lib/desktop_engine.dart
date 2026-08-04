@@ -249,8 +249,11 @@ class SystemProxy {
         // и потому там врёт). Честно говорим «не поддержано» вместо ложного «защищено».
         final de = (Platform.environment['XDG_CURRENT_DESKTOP'] ?? '').toUpperCase();
         const gtk = ['GNOME', 'UNITY', 'PANTHEON', 'CINNAMON', 'BUDGIE', 'MATE', 'XFCE'];
-        if (de.isNotEmpty && !gtk.any(de.contains)) {
-          stderr.writeln('system proxy: окружение «$de» не читает gsettings — режим прокси не поддержан');
+        // Пустое/незнакомое DE — тоже «не поддержано»: readback своих же ключей gsettings
+        // ничего не доказывает о реальном применении, а fail-open с зелёным статусом хуже
+        // честной ошибки (TunnelUnavailable покажет текст пользователю).
+        if (de.isEmpty || !gtk.any(de.contains)) {
+          stderr.writeln('system proxy: окружение «${de.isEmpty ? 'неизвестно' : de}» не читает gsettings — режим прокси не поддержан');
           return false;
         }
         await Process.run('gsettings', ['set', 'org.gnome.system.proxy', 'mode', 'manual']);
@@ -392,6 +395,10 @@ class SystemProxy {
   /// запущено с нужными правами, лишний запрос пароля не нужен. Не получилось — повторяем
   /// ОДНИМ вызовом с правами администратора, чтобы система спросила пароль один раз на всю
   /// операцию, а не на каждую команду. (Смена сетевых настроек в macOS требует root.)
+  /// Бросает [EngineUnavailable] при ненулевом exitCode osascript: отмена пароля («User
+  /// canceled», -128) раньше проглатывалась — команды не выполнялись, а вызывающий считал
+  /// прокси применённым/снятым. Вызывающие сами решают по факту: enable() вернёт false,
+  /// disable()/_restore() проглотят, но unblock() перепроверит looksOurs().
   static Future<void> _macRun(List<List<String>> cmds) async {
     var allOk = true;
     for (final args in cmds) {
@@ -402,10 +409,15 @@ class SystemProxy {
     final script = cmds.map((a) => '/usr/sbin/networksetup ${a.map(_shellQuote).join(' ')}').join(' ; ');
     // экранирование для строки AppleScript: обратный слэш и кавычки
     final applescript = script.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
-    await Process.run('osascript', [
+    final r = await Process.run('osascript', [
       '-e',
       'do shell script "$applescript" with administrator privileges',
     ]);
+    if (r.exitCode != 0) {
+      final err = (r.stderr ?? '').toString().trim();
+      throw EngineUnavailable(
+          'macOS не дала сменить системный прокси (код ${r.exitCode})${err.isEmpty ? '' : ': $err'}');
+    }
   }
 
   static String _shellQuote(String a) => "'${a.replaceAll("'", r"'\''")}'";
@@ -414,12 +426,16 @@ class SystemProxy {
   // Команды настройки прокси возвращают успех и там, где их результат никто не читает
   // (KDE вместо GNOME, macOS без прав администратора). Поэтому после записи перечитываем.
   static Future<bool> _macApplied(int socksPort) async {
+    if (_macServices.isEmpty) return false;
+    // Частичное применение — НЕ успех: сервис без нашего прокси ходит напрямую, а «нашлось на
+    // одном сервисе» раньше читалось зелёным. Зелёный — только «наш порт на ВСЕХ активных
+    // сервисах» (primary из -listnetworkserviceorder входит в этот список по построению).
     for (final svc in _macServices) {
       final r = await Process.run('/usr/sbin/networksetup', ['-getsocksfirewallproxy', svc]);
       final out = (r.stdout ?? '').toString();
-      if (out.contains('Enabled: Yes') && out.contains('$socksPort')) return true;
+      if (!(out.contains('Enabled: Yes') && out.contains('$socksPort'))) return false;
     }
-    return false;
+    return true;
   }
 
   static Future<bool> _winApplied(int httpPort) async {

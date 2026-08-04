@@ -330,9 +330,12 @@ extension ShellSettings on ShellState {
   bool get _isDesktop => Platform.isWindows || Platform.isMacOS || Platform.isLinux;
 
   // ---------------- КИЛЛ-СВИТЧ ----------------
-  // Подпись-подсказка с платформенным примечанием: на iOS fail-closed действует всегда
-  // (includeAllNetworks в NetworkExtension, native_ios/AppDelegate.swift), на Android его
-  // даёт только системная настройка — см. диалог при первом включении (_setKillSwitch).
+  // Подпись-подсказка с платформенным примечанием. Честность важнее маркетинга:
+  //   • Android: сам по себе тумблер НИЧЕГО не блокирует — после смерти VpnService маршруты
+  //     удерживает только система («Постоянный VPN» + «Блокировать соединения без VPN»),
+  //     см. диалог при первом включении (_setKillSwitch) и holdProxyOnDrop в connection.dart.
+  //   • iOS: нативная сторона (NetworkExtension) ещё не собрана, поэтому «действует всегда»
+  //     обещать нельзя — честно пишем «после выхода iOS-версии».
   // Строки собраны тернарником appLang, а не tr(): текст платформо-зависимый.
   String _killSwitchSub() {
     final base = appLang == 'en'
@@ -340,13 +343,13 @@ extension ShellSettings on ShellState {
         : 'если VPN отвалится, интернет блокируется, а не идёт напрямую';
     if (Platform.isIOS) {
       return appLang == 'en'
-          ? '$base · on iOS this is always on (includeAllNetworks)'
-          : '$base · на iOS действует всегда (includeAllNetworks)';
+          ? '$base · on iOS — built in once the iOS version ships'
+          : '$base · на iOS — из коробки после выхода iOS-версии';
     }
     if (Platform.isAndroid) {
       return appLang == 'en'
-          ? '$base · strongest via the system “Always-on VPN” + “Block connections without VPN”'
-          : '$base · надёжнее всего системные «Постоянный VPN» + «Блокировать соединения без VPN»';
+          ? '$base · on Android the switch alone blocks nothing — enable the system “Always-on VPN” + “Block connections without VPN”'
+          : '$base · на Android сам по себе не блокирует — включи системные «Постоянный VPN» и «Блокировать соединения без VPN»';
     }
     return base;
   }
