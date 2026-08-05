@@ -54,6 +54,31 @@ jobs:
       - run: flutter create --org com.bitapsvpn --platforms=windows,android --project-name bitaps_vpn .
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
+      # VERSIONINFO в exe: шаблон flutter create подставляет org/имя проекта
+      # (CompanyName=com.bitapsvpn, ProductName=bitaps_vpn). У «безымянного» бинаря нет ни
+      # издателя, ни репутации — SmartScreen и Chrome относятся к нему заметно строже.
+      # windows/ в git не хранится, поэтому патчим Runner.rc здесь, до сборки.
+      - name: VERSIONINFO (издатель/продукт/версия) в Runner.rc
+        shell: pwsh
+        run: |
+          $rc = "windows\runner\Runner.rc"
+          if (-not (Test-Path $rc)) { throw "$rc не найден — шаблон flutter create изменился" }
+          # Версия приложения из pubspec.yaml (version: X.Y.Z+N), 4-е число — номер прогона
+          $ver = (Select-String -Path pubspec.yaml -Pattern '^version:\s*([0-9]+\.[0-9]+\.[0-9]+)').Matches[0].Groups[1].Value
+          if (-not $ver) { throw "версия из pubspec.yaml не разобрана" }
+          $comma = $ver -replace '\.', ','
+          $c = Get-Content $rc -Raw
+          $c = $c -replace '#define VERSION_AS_NUMBER .*', "#define VERSION_AS_NUMBER $comma,${{ github.run_number }}"
+          $c = $c -replace '#define VERSION_AS_STRING .*', "#define VERSION_AS_STRING `"$ver.${{ github.run_number }}`""
+          $c = $c -replace 'VALUE "CompanyName", "[^"]*"', 'VALUE "CompanyName", "bitaps"'
+          $c = $c -replace 'VALUE "FileDescription", "[^"]*"', 'VALUE "FileDescription", "bitaps VPN Client"'
+          $c = $c -replace 'VALUE "ProductName", "[^"]*"', 'VALUE "ProductName", "bitaps VPN"'
+          $c = $c -replace 'VALUE "LegalCopyright", "[^"]*"', 'VALUE "LegalCopyright", "Copyright (C) 2026 bitaps"'
+          Set-Content $rc $c -NoNewline
+          foreach ($needle in @('CompanyName", "bitaps"', 'FileDescription", "bitaps VPN Client"', 'ProductName", "bitaps VPN"', "VERSION_AS_NUMBER $comma")) {
+            if (-not (Select-String -Path $rc -Pattern ([regex]::Escape($needle)) -Quiet)) { throw "VERSIONINFO не применён: $needle" }
+          }
+          Select-String -Path $rc -Pattern 'CompanyName|ProductName|FileDescription|LegalCopyright|VERSION_AS_'
       - run: flutter build windows --release --dart-define=BUILD_NUMBER=${{ github.run_number }}
       # VPN-движок кладём РЯДОМ с исполняемым файлом: приложение ищет его там (desktop_engine.dart).
       # Версия и контрольная сумма закреплены (см. pkg/THIRD-PARTY.md) — молча подменённый бинарь
@@ -117,6 +142,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "подпись установщика не удалась ($LASTEXITCODE)" }
           Remove-Item "$env:RUNNER_TEMP\codesign.pfx" -Force
           echo "установщик подписан"
+      # Контрольные суммы артефактов в релиз: пользователь может сверить скачанное
+      # (Get-FileHash == SHA256SUMS.txt), а для вендоров/поддержки есть эталонный хэш сборки.
+      - name: SHA256SUMS.txt
+        shell: pwsh
+        run: |
+          Get-FileHash bitaps-setup.exe, bitaps-windows-x64.zip -Algorithm SHA256 |
+            ForEach-Object { "{0}  {1}" -f $_.Hash.ToLower(), (Split-Path $_.Path -Leaf) } |
+            Set-Content SHA256SUMS.txt -Encoding ascii
+          Get-Content SHA256SUMS.txt
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
@@ -125,6 +159,7 @@ jobs:
           files: |
             bitaps-setup.exe
             bitaps-windows-x64.zip
+            SHA256SUMS.txt
 
   linux:
     needs: test
