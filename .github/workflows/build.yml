@@ -126,6 +126,20 @@ jobs:
           echo "exe подписаны"
       - name: Portable zip
         run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath bitaps-windows-x64.zip -Force
+      # Версия установщика из pubspec + номер прогона (тот же приём, что у VERSIONINFO):
+      # иначе в «Установке и удалении программ» вечно висит 1.0.0 из pkg/installer.iss.
+      - name: AppVersion в installer.iss из pubspec
+        shell: pwsh
+        run: |
+          $iss = "pkg\installer.iss"
+          if (-not (Test-Path $iss)) { throw "$iss не найден" }
+          $ver = (Select-String -Path pubspec.yaml -Pattern '^version:\s*([0-9]+\.[0-9]+\.[0-9]+)').Matches[0].Groups[1].Value
+          if (-not $ver) { throw "версия из pubspec.yaml не разобрана" }
+          $c = Get-Content $iss -Raw
+          $c = $c -replace '(?m)^AppVersion=.*', "AppVersion=$ver.${{ github.run_number }}"
+          Set-Content $iss $c -NoNewline
+          if (-not (Select-String -Path $iss -Pattern ([regex]::Escape("AppVersion=$ver.${{ github.run_number }}")) -Quiet)) { throw "AppVersion не применён" }
+          Select-String -Path $iss -Pattern '^AppVersion='
       - name: Installer (Inno Setup)
         run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" pkg\installer.iss'
       # Установщик подписываем ОТДЕЛЬНО после сборки: SmartScreen смотрит подпись скачанного файла.

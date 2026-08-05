@@ -63,5 +63,8 @@
   FileDescription `bitaps VPN Client`, LegalCopyright, FileVersion/ProductVersion
   из версии приложения (шаг «VERSIONINFO … в Runner.rc» в build.yml).
 - В релиз выкладывается `SHA256SUMS.txt` с контрольными суммами артефактов.
-- Установщик (Inno Setup) собирается с `AppPublisher=bitaps` и версией
-  (см. `pkg/installer.iss`).
+- Установщик (Inno Setup) собирается с `AppPublisher=bitaps`, зафиксированным `AppId`
+  (обновление встаёт поверх) и версией из pubspec + номера прогона (шаг «AppVersion в
+  installer.iss» в build.yml). Деинсталлятор сам прибирает системный прокси (только наш,
+  127.0.0.1), автозапуск, схему bitaps:// и процессы из папки установки
+  (см. `pkg/installer.iss`, секция [Code]).
