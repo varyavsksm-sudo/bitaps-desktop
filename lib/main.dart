@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform, File, Directory, Process;
+import 'dart:io' show Platform, File, Directory, Process, exit, stderr;
 import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -15,6 +15,7 @@ import 'singbox_config.dart';
 import 'xray_config.dart';
 import 'engine.dart';
 import 'desktop_engine.dart';
+import 'instance_lock.dart';
 import 'native_tunnel.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:tray_manager/tray_manager.dart';
@@ -59,11 +60,35 @@ Future<void> main(List<String> args) async {
   await _applyStoredThemeEarly();
   // window_manager — только десктоп (на Android/iOS его нет → иначе краш на старте)
   if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
-    // Прошлый запуск мог завершиться падением/убийством процесса с включённым системным
-    // прокси — тогда у пользователя «нет интернета» до ручной правки настроек. Прибираем за
-    // собой на старте (снимаем только прокси, указывающий на localhost, — чужой не трогаем).
-    unawaited(SystemProxy.cleanupStale());
+    // ОДНА КОПИЯ приложения (аудит п.1): вторая, запущенная при живом VPN первой, доходила бы
+    // до cleanupStale ниже и могла снять «наш» прокси при живом туннеле — fail-open. Поэтому
+    // блокировка занимается ДО любой уборки: вторая копия просит первую показаться и выходит.
+    final inst = await InstanceLock.acquire();
+    if (inst.verdict == InstanceVerdict.secondary) {
+      stderr.writeln('bitaps VPN уже запущен — активирую открытое окно и выхожу');
+      exit(0);
+    }
+    if (inst.verdict == InstanceVerdict.foreignSquatter) {
+      stderr.writeln('порт ${InstanceLock.kInstanceLockPort} занят чужим процессом — '
+          'блокировка одной копии недоступна, запускаюсь как есть');
+    }
+    _instanceLock = inst.lock; // держатель сокета живёт до конца процесса (поле ниже)
+    // Прошлый запуск мог завершиться падением/убийством процесса (либо перезагрузкой Windows)
+    // с включённым системным прокси — тогда у пользователя «нет интернета» до ручной правки
+    // настроек. Прибираем за собой на старте. cleanupStale сам решает по liveness: порт
+    // движка слушает — туннель чужой ЖИВОЙ копии, прокси не трогаем; молчит — прокси наш
+    // протухший, снимаем и добиваем осиротевший xray (аудит п.3/п.4). Ждём ДО runApp:
+    // иначе коннект в первые секунды мог перехватить протухший прокси в «снимок пользователя».
+    final stale = await SystemProxy.cleanupStale();
+    if (stale == StaleCleanup.keptAlive) {
+      stderr.writeln('обнаружен живой туннель другой копии — системный прокси не трогаю');
+    }
     await windowManager.ensureInitialized();
+    // Просьба второй копии «поднимись»: окно уже инициализировано — показываем и фокусируем.
+    _instanceLock?.onRaise = () async {
+      try { await windowManager.setSkipTaskbar(false); } catch (_) {}
+      try { await windowManager.show(); await windowManager.focus(); } catch (_) {}
+    };
     // hotkey_manager требует сброса «залипших» с прошлого запуска хоткеев на старте (десктоп).
     // fail-soft: на платформе без нативной стороны бросит — глотаем, живём без хоткея.
     try { await hotKeyManager.unregisterAll(); } catch (_) {}
@@ -106,6 +131,11 @@ Future<void> main(List<String> args) async {
 // сохраняет PNG собственного кадра (RepaintBoundary поверх MaterialApp). В release kDebugMode
 // == false → вся ветка мертва и выкидывается компилятором; на поведение приложения не влияет.
 final GlobalKey _shotKey = GlobalKey();
+
+/// Держатель блокировки одной копии (десктоп): сокет занят в main() до windowManager
+/// и живёт до выхода процесса — освобождает его ОС. null на мобильных и при чужом
+/// процессе на порту блокировки.
+InstanceLock? _instanceLock;
 
 void _maybeStartShotLoop() {
   if (!kDebugMode) return;
@@ -428,7 +458,15 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     // приложение просто живёт без трея, не падая).
     if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) _initTray();
     // закрытие окна крестиком/Alt+F4: гасим туннель до выхода (см. onWindowClose ниже)
-    if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) windowManager.addListener(this);
+    if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+      windowManager.addListener(this);
+      // Удерживаем окно при просьбе закрыться: без preventClose процесс мог умереть раньше,
+      // чем reg.exe допишет снятие прокси из onWindowClose — и человек оставался бы без
+      // интернета (прокси в мёртвый порт). Отпускаем сами после уборки (аудит п.2).
+      unawaited(() async {
+        try { await windowManager.setPreventClose(true); } catch (_) {}
+      }());
+    }
     // deep-link (bitaps://) — все платформы; автозапуск+хоткей — только десктоп. Всё fail-soft.
     _initDeepLinks();
     if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) _initNativeDesktop();
@@ -573,11 +611,21 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     }
   }
 
-  // Крестик/Alt+F4: до фактического закрытия гасим туннель (прокси снимается первым — см.
-  // _stopDesktop). Окно не удерживаем: сбой disconnect не должен блокировать выход.
+  // Крестик/Alt+F4: окно удержано (setPreventClose в initState) — сначала гасим туннель
+  // (прокси снимается ПЕРВЫМ, см. _stopDesktop) и только потом отпускаем закрытие. Жёсткий
+  // таймаут: сбой/зависание disconnect выход блокировать не должно — отпускаем как есть.
   @override
   void onWindowClose() async {
-    try { _conn.reset(); await TunnelEngine.instance.disconnect(); } catch (_) {}
+    try {
+      _conn.reset();
+      await TunnelEngine.instance.disconnect().timeout(const Duration(seconds: 8));
+    } catch (_) {/* туннель мог уже быть погашен — закрываемся всё равно */}
+    try {
+      await windowManager.setPreventClose(false);
+      await windowManager.destroy();
+    } catch (_) {
+      exit(0); // плагин отказал — роняем процесс сами; туннель к этому моменту уже погашен
+    }
   }
 
   Future<void> _toggleWindowVisible() async {

@@ -13,6 +13,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ffi' as ffi;
 import 'dart:io';
 
 /// Не нашли или не смогли запустить движок — вызывающий показывает текст пользователю.
@@ -204,6 +205,19 @@ class XrayStats {
   }
 }
 
+/// Исход стартовой уборки за прошлой сессией (см. SystemProxy.cleanupStale).
+enum StaleCleanup {
+  /// В системе нет нашего прокси — убирать нечего.
+  nothing,
+
+  /// Прокси наш, но порт движка слушает: туннель принадлежит другой ЖИВОЙ копии —
+  /// не трогаем (снять = fail-open).
+  keptAlive,
+
+  /// Протухший прокси снят, осиротевший движок добит.
+  cleaned,
+}
+
 /// Системный прокси на время сессии. Включаем ТОЛЬКО после готовности движка и снимаем всегда,
 /// в том числе при падении: иначе пользователь останется без интернета с указателем в мёртвый порт.
 class SystemProxy {
@@ -245,8 +259,13 @@ class SystemProxy {
         const key = r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings';
         final value = 'http=127.0.0.1:$httpPort;https=127.0.0.1:$httpPort;socks=127.0.0.1:$socksPort';
         await Process.run('reg', ['add', key, '/v', 'ProxyServer', '/t', 'REG_SZ', '/d', value, '/f']);
+        // Обход прокси для локальных адресов (localhost/интранет идут напрямую, аудит п.5).
+        // Чужие записи обхода не теряем: сливаем со снятыми в снимок — _restore вернёт как было.
+        final ovr = winProxyOverride(_winSaved?['override'] ?? '');
+        await Process.run('reg', ['add', key, '/v', 'ProxyOverride', '/t', 'REG_SZ', '/d', ovr, '/f']);
         await Process.run('reg', ['add', key, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', '1', '/f']);
         _enabled = await _winApplied(httpPort);
+        _winNotifyProxyChanged(); // иначе WinINet-клиенты держат старые настройки до перезапуска
         return _enabled;
       }
       if (Platform.isLinux) {
@@ -308,6 +327,7 @@ class SystemProxy {
       if (Platform.isWindows) {
         const key = r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings';
         await Process.run('reg', ['add', key, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', '0', '/f']);
+        _winNotifyProxyChanged();
         return;
       }
       if (Platform.isLinux) {
@@ -324,10 +344,14 @@ class SystemProxy {
         const key = r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings';
         final en = await Process.run('reg', ['query', key, '/v', 'ProxyEnable']);
         final srv = await Process.run('reg', ['query', key, '/v', 'ProxyServer']);
+        final ovr = await Process.run('reg', ['query', key, '/v', 'ProxyOverride']);
         _winSaved = {
           'enable': (en.stdout ?? '').toString().contains('0x1') ? '1' : '0',
           'server': RegExp(r'ProxyServer\s+REG_SZ\s+(\S.*)')
                   .firstMatch((srv.stdout ?? '').toString())?.group(1)?.trim() ?? '',
+          // ProxyOverride может отсутствовать вовсе — тогда снимок пуст, и _restore удалит наш.
+          'override': RegExp(r'ProxyOverride\s+REG_SZ\s+(\S.*)')
+                  .firstMatch((ovr.stdout ?? '').toString())?.group(1)?.trim() ?? '',
         };
         return;
       }
@@ -367,7 +391,15 @@ class SystemProxy {
         if (srv.isNotEmpty) {
           await Process.run('reg', ['add', key, '/v', 'ProxyServer', '/t', 'REG_SZ', '/d', srv, '/f']);
         }
+        // Обход прокси — как было до нас: был свой — возвращаем; не было — удаляем наш '<local>'.
+        final ovr = _winSaved!['override'] ?? '';
+        if (ovr.isNotEmpty) {
+          await Process.run('reg', ['add', key, '/v', 'ProxyOverride', '/t', 'REG_SZ', '/d', ovr, '/f']);
+        } else {
+          await Process.run('reg', ['delete', key, '/v', 'ProxyOverride', '/f']);
+        }
         await Process.run('reg', ['add', key, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', _winSaved!['enable'] ?? '0', '/f']);
+        _winNotifyProxyChanged();
         return;
       }
       if (Platform.isMacOS) {
@@ -489,11 +521,156 @@ class SystemProxy {
     return false;
   }
 
-  /// Прибраться на старте приложения: если в системе висит наш прокси от прошлой сессии
-  /// (падение/убийство процесса), снимаем его — иначе у пользователя «нет интернета».
-  static Future<void> cleanupStale() async {
-    if (!(Platform.isWindows || Platform.isMacOS || Platform.isLinux)) return;
-    if (await looksOurs()) await disable();
+  /// Прибраться на старте приложения за прошлой сессией (аудит п.1/п.3/п.4).
+  ///
+  /// Решение по liveness, а не по одному «прокси наш»: прокси указывает на localhost, но
+  /// ПОРТ ДВИЖКА СЛУШАЕТ — значит, туннель принадлежит другой ЖИВОЙ копии приложения, и
+  /// снимать прокси = убить ей трафик (fail-open). Порт молчит — это протухший прокси от
+  /// упавшей/перезагруженной сессии: снимаем его (иначе у человека «нет интернета») и
+  /// добиваем осиротевший xray нашей установки (родитель умер, процесс остался).
+  static Future<StaleCleanup> cleanupStale() async {
+    if (!(Platform.isWindows || Platform.isMacOS || Platform.isLinux)) return StaleCleanup.nothing;
+    final ours = await looksOurs();
+    var alive = false;
+    if (ours) {
+      for (final port in await _ourProxyPorts()) {
+        if (await _portAlive(port)) { alive = true; break; }
+      }
+    }
+    switch (decideStaleCleanup(proxyIsOurs: ours, engineAlive: alive)) {
+      case StaleCleanup.nothing:
+        return StaleCleanup.nothing;
+      case StaleCleanup.keptAlive:
+        return StaleCleanup.keptAlive; // вызывающий сообщает наверх: «другая копия жива»
+      case StaleCleanup.cleaned:
+        await disable();
+        await _killOrphanedEngine();
+        return StaleCleanup.cleaned;
+    }
+  }
+
+  /// Решение уборки по факту liveness. Чистая функция — покрыта stale_cleanup_test.
+  static StaleCleanup decideStaleCleanup({required bool proxyIsOurs, required bool engineAlive}) {
+    if (!proxyIsOurs) return StaleCleanup.nothing; // чужой прокси не трогаем в любом случае
+    return engineAlive ? StaleCleanup.keptAlive : StaleCleanup.cleaned;
+  }
+
+  /// Порты 127.0.0.1 из строки ProxyServer вида «http=127.0.0.1:40000;…;socks=127.0.0.1:40002».
+  /// Чистая функция — покрыта stale_cleanup_test.
+  static Set<int> winProxyServerPorts(String server) {
+    final ports = <int>{};
+    for (final m in RegExp(r'127\.0\.0\.1:(\d{1,5})').allMatches(server)) {
+      final p = int.tryParse(m.group(1)!) ?? 0;
+      if (p > 0 && p <= 65535) ports.add(p);
+    }
+    return ports;
+  }
+
+  /// Значение ProxyOverride при нашем включении: '<local>' (localhost/интранет мимо прокси)
+  /// + записи, которые уже были у пользователя (без дублей). Чистая функция — покрыта тестом.
+  static String winProxyOverride(String existing) {
+    final parts = <String>[];
+    for (final e in existing.split(';')) {
+      final t = e.trim();
+      if (t.isNotEmpty && t.toLowerCase() != '<local>') parts.add(t);
+    }
+    parts.add('<local>');
+    return parts.join(';');
+  }
+
+  /// PID'ы xray.exe ИЗ НАШЕЙ ПАПКИ УСТАНОВКИ по выводу
+  /// `Get-CimInstance Win32_Process … | ConvertTo-Csv` (строки вида «"1234","C:\…\xray.exe"»).
+  /// Совпадение — полный путь к нашему бинарю, регистронезависимо: чужой xray (Happ и т.п.)
+  /// добивать нельзя. Чистая функция — покрыта stale_cleanup_test.
+  static List<int> parseOwnEnginePids(String csv, String installDir) {
+    final dir = installDir.replaceAll('/', '\\').replaceAll(RegExp(r'\\+$'), '').toLowerCase();
+    final want = '$dir\\xray.exe';
+    final pids = <int>[];
+    for (final raw in const LineSplitter().convert(csv)) {
+      final m = RegExp(r'^"?(\d+)"?,\s*"?(.*?)"?\s*$').firstMatch(raw.trim());
+      if (m == null) continue;
+      final pid = int.tryParse(m.group(1)!);
+      final path = m.group(2)!.replaceAll('/', '\\').toLowerCase();
+      if (pid != null && path == want) pids.add(pid);
+    }
+    return pids;
+  }
+
+  /// Локальные порты движка из ТЕКУЩИХ системных настроек (вызывается после looksOurs()).
+  static Future<Set<int>> _ourProxyPorts() async {
+    try {
+      if (Platform.isWindows) {
+        const key = r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings';
+        final srv = await Process.run('reg', ['query', key, '/v', 'ProxyServer']);
+        return winProxyServerPorts((srv.stdout ?? '').toString());
+      }
+      if (Platform.isMacOS) {
+        final ports = <int>{};
+        for (final svc in _macServices) {
+          final r = await Process.run('/usr/sbin/networksetup', ['-getsocksfirewallproxy', svc]);
+          final p = int.tryParse(RegExp(r'Port:\s*(\d+)')
+                  .firstMatch((r.stdout ?? '').toString())?.group(1) ?? '') ?? 0;
+          if (p > 0) ports.add(p);
+        }
+        return ports;
+      }
+      if (Platform.isLinux) {
+        final r = await Process.run('gsettings', ['get', 'org.gnome.system.proxy.socks', 'port']);
+        final p = int.tryParse((r.stdout ?? '').toString().trim()) ?? 0;
+        return p > 0 ? {p} : {};
+      }
+    } catch (_) {/* не прочитали — считаем портов нет (прежнее поведение: снять прокси) */}
+    return {};
+  }
+
+  /// Слушает ли кто-то локальный порт (тот же критерий, что готовность socks у XrayProcess).
+  static Future<bool> _portAlive(int port) async {
+    try {
+      final s = await Socket.connect('127.0.0.1', port,
+          timeout: const Duration(milliseconds: 300));
+      s.destroy();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Добить осиротевший xray.exe НАШЕЙ установки: родитель умер (краш/диспетчер задач),
+  /// процесс остался — держит порты и грузит CPU. Только Windows и только полный путь нашего
+  /// бинаря (см. parseOwnEnginePids). wmic в новых Windows 11 может отсутствовать, поэтому
+  /// PowerShell + CIM; на macOS/Linux сироту добивает ОС по deathwatch сокета/PPID — трогать
+  /// там посторонние процессы из приложения не будем.
+  static Future<void> _killOrphanedEngine() async {
+    if (!Platform.isWindows) return;
+    try {
+      final exeDir = File(Platform.resolvedExecutable).parent.path;
+      final r = await Process.run('powershell.exe', [
+        '-NoProfile', '-WindowStyle', 'Hidden', '-Command',
+        "Get-CimInstance Win32_Process -Filter \"Name='xray.exe'\" "
+        '| Select-Object ProcessId,ExecutablePath | ConvertTo-Csv -NoTypeInformation',
+      ]);
+      for (final pid in parseOwnEnginePids((r.stdout ?? '').toString(), exeDir)) {
+        await Process.run('taskkill', ['/PID', '$pid', '/F']);
+      }
+    } catch (_) {/* уборка best-effort: не получилось — старт не блокируем */}
+  }
+
+  /// Уведомить систему о смене прокси (аудит п.5): reg.exe НЕ рассылает broadcast, поэтому
+  /// WinINet-клиенты (браузеры, большинство софта) держали бы СТАРЫЕ настройки до своего
+  /// перезапуска — прокси «включался/выключался» для них с опозданием. Шлём сами через
+  /// wininet InternetSetOption: SETTINGS_CHANGED (39) + REFRESH (37). dart:ffi, Windows only.
+  static void _winNotifyProxyChanged() {
+    if (!Platform.isWindows) return;
+    try {
+      final wininet = ffi.DynamicLibrary.open('wininet.dll');
+      final setOption = wininet.lookupFunction<
+          ffi.Int32 Function(ffi.Pointer<ffi.Void>, ffi.Uint32, ffi.Pointer<ffi.Void>, ffi.Uint32),
+          int Function(ffi.Pointer<ffi.Void>, int, ffi.Pointer<ffi.Void>, int)>(
+          'InternetSetOptionA');
+      final nullHandle = ffi.Pointer<ffi.Void>.fromAddress(0);
+      setOption(nullHandle, 39, nullHandle, 0); // INTERNET_OPTION_SETTINGS_CHANGED
+      setOption(nullHandle, 37, nullHandle, 0); // INTERNET_OPTION_REFRESH
+    } catch (_) {/* нет wininet (теоретически) — поведение как раньше, старт не блокируем */}
   }
 
   /// Сетевые сервисы macOS (Wi-Fi, Ethernet…), кроме отключённых (строки со «*»).
