@@ -221,6 +221,8 @@ extension ShellSettings on ShellState {
             _divider(),
             _toggle(tr('Килл-свитч'), _killSwitchSub(), killSwitch, _setKillSwitch),
             _divider(),
+            _toggle(tr('Автопереподключение'), tr('Сам подключусь снова, если VPN оборвётся'), autoReconnect, (v) { rebuild(() => autoReconnect = v); _save(); }),
+            _divider(),
             _toggle(tr('Подписка истекает'), tr('Напомнить за пару дней'), tgl3, (v) { rebuild(() => tgl3 = v); _save(); }),
             _divider(),
             _toggle(tr('Лимит трафика'), tr('Сигнал при расходе от 5 ГБ за сессию'), tgl4, (v) { rebuild(() => tgl4 = v); _save(); }),

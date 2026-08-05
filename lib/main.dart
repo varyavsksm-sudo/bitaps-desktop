@@ -198,11 +198,18 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   String? subNotice;
   /// Узлы из подписки — источник правды для списка серверов и для подключения.
   List<SubNode> subNodes = const [];
+  /// Когда сервис выдачи в последний раз УСПЕШНО отдал список узлов. Нужен экрану «Серверы»:
+  /// при открытии он подтягивает список, только если прошло >5 мин (см. _maybeRefreshNodes).
+  DateTime? nodesFetchedAt;
   bool tgl1 = false, tgl2 = true, tgl3 = true, tgl4 = false;
   /// Килл-свитч: при НЕОЖИДАННОМ обрыве VPN трафик блокируется (fail-closed), а не идёт
   /// напрямую мимо туннеля. По умолчанию ВЫКЛ — блокировка интернета не должна случаться
   /// без ведома человека. Само состояние блокировки живёт в _conn.blocked и не персистится.
   bool killSwitch = false;
+  /// Автопереподключение: после НЕОЖИДАННОГО обрыва сами переподключаемся с нарастающей
+  /// паузой (2/5/15/30 с, дальше каждые 60 с). По умолчанию ВКЛ — тумблер и есть согласие
+  /// человека; выключил — после обрыва остаёмся отключёнными, как раньше.
+  bool autoReconnect = true;
   String? appPin; // PIN блокировки приложения
   bool _locked = false;
   final TextEditingController _pinCtrl = TextEditingController();
@@ -319,8 +326,6 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   // закрывает это без большого рефактора god-object. mounted — публичный геттер, его звать можно.
   void rebuild([VoidCallback? fn]) { if (mounted) setState(fn ?? () {}); }
 
-  bool _updateAvail = false; // доступна новая сборка (build_number из релиза > вшитого)
-
   // ----- онбординг (первый запуск / «Показать знакомство» в Настройках) -----
   bool _showOnboarding = false; // поверх всего UI (после PIN-замка)
   int _onbPage = 0;
@@ -376,6 +381,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       dropAlertOn: () => tgl2,
       trafWarnOn: () => tgl4,
       killSwitchOn: () => killSwitch,
+      reconnectOn: () => autoReconnect,
       demoOn: () => demoMode,
       // Узел не пропустил трафик: помечаем его тут же, чтобы он перестал считаться доступным
       // и не был выбран «лучшим» на следующем подключении.
@@ -704,6 +710,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       tgl3 = p.getBool('tgl3') ?? true;
       tgl4 = p.getBool('tgl4') ?? false;
       killSwitch = p.getBool('killSwitch') ?? false;
+      autoReconnect = p.getBool('autoReconnect') ?? true; // по умолчанию ВКЛ (см. поле)
       _conn.sessions = p.getInt('sessions') ?? 0;
       customCfg = secCfg;
       keyStr = secKey ?? kDemoKey;
@@ -827,6 +834,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     await p.setBool('tgl3', tgl3);
     await p.setBool('tgl4', tgl4);
     await p.setBool('killSwitch', killSwitch);
+    await p.setBool('autoReconnect', autoReconnect);
     await p.setInt('sessions', sessions);
     await p.setStringList('favs', favs.toList());
     await _secWrite(p, 'cfg', customCfg); // secure storage (может нести vless-ключ), не plaintext
@@ -856,8 +864,20 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     }
   }
 
-  // Пинг сервера: живой замер (кнопка «Пинг» на Серверах), пока его нет — статичный из models.dart.
-  int pingOf(Server s) => pingMeasured[s.id] ?? s.ping;
+  // Пинг сервера: живой замер кнопкой «Пинг»; при его отсутствии и поднятом туннеле — живой
+  // пинг из observatory движка (обновляется раз в секунду вместе со статами, отдельный таймер
+  // не нужен); иначе статичный s.ping из models.dart (0 — «не замерено»).
+  int pingOf(Server s) => pingMeasured[s.id] ?? (conn == 2 ? _observatoryPing(s.id) : null) ?? s.ping;
+
+  /// Пинг узла из observatory движка (null — движок его не видит/узел молчит). Тег outbound'а
+  /// в конфиге — 'node-<индекс>' по месту узла в подписке (см. xray_config.dart), поэтому мапим
+  /// через индекс в subNodes. На Android замера нет вовсе (конфиг подписки метрик не несёт).
+  int? _observatoryPing(String nodeTag) {
+    final idx = subNodes.indexWhere((n) => n.tag == nodeTag);
+    if (idx < 0) return null;
+    final ms = TunnelEngine.instance.nodePings['node-$idx'];
+    return (ms != null && ms > 0) ? ms : null;
+  }
 
   /// Доступные серверы — ТОЛЬКО узлы подписки. Запасного списка нет намеренно: пустой экран
   /// с объяснением честнее, чем выдуманные серверы, к которым нельзя подключиться.
@@ -1104,6 +1124,9 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   void _goTab(int i) {
     setState(() => tab = i);
     _syncAnimations();
+    // Открытие «Серверов» подтягивает свежие узлы (не чаще раза в 5 минут — внутри): новые
+    // ноды подписки обязаны появляться без перелогина.
+    if (i == 1) _maybeRefreshNodes();
   }
 
   void _pickServer(Server s) {

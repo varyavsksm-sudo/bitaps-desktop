@@ -10,39 +10,18 @@ extension ShellHome on ShellState {
       : tr('под защитой');
 
   // ---------------- HOME ----------------
-  // Semantics: баннер — одна кнопка для скринридера (обе строки читаются одним узлом).
-  Widget _updateBanner() => Semantics(
-        button: true,
-        child: MergeSemantics(child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () => _open(kDownloadUrl),
-        // геометрия согласована с _expiryBanner в Кабинете (16/14, радиус 14, иконка 20, gap 12)
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          decoration: BoxDecoration(
-            color: C.accent.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: C.accent.withValues(alpha: 0.5)),
-          ),
-          child: Row(children: [
-            Icon(Icons.system_update, size: 20, color: C.accent),
-            const SizedBox(width: 12),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(tr('Доступна новая версия'), style: disp(14, w: FontWeight.w700, c: C.accent)),
-              const SizedBox(height: 2),
-              Text(tr('Нажми, чтобы скачать обновление'), style: mono(11, c: C.muted)),
-            ])),
-            Icon(Icons.download, size: 18, color: C.accent),
-          ]),
-        ),
-      )));
-
   Widget _home() {
     final connected = conn == 2;
+    // Серия автопереподключения идёт: ждём паузу (conn == 0, тикает таймер) или прямо сейчас
+    // подключаемся из серии (conn == 1 с номером попытки). Человек обязан это видеть — иначе
+    // пауза между попытками выглядит мёртвым «Отключено».
+    final reconnecting = conn == 1 ? _conn.reconnectAttempt > 0 : _conn.reconnecting;
+    final attemptLine = appLang == 'en'
+        ? 'reconnecting, attempt ${_conn.reconnectAttempt}'
+        : 'переподключение, попытка ${_conn.reconnectAttempt}';
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
       children: [
-        if (_updateAvail) ...[_updateBanner(), const SizedBox(height: 12)],
         // Flexible+FittedBox: на узких телефонах (360px) логотип и пилюля статуса вместе не
         // помещались, и правый край пилюли обрезался. Теперь при нехватке места они ужимаются.
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
@@ -59,19 +38,22 @@ extension ShellHome on ShellState {
           // а факт блокировки: прокси нарочно не снят, трафик не идёт никуда (fail-closed)
           // «Подключение…» важнее «Трафик заблокирован»: при реконнекте ИЗ блокировки blocked
           // остаётся true всю попытку (см. toggle в connection.dart), и без этого приоритета
-          // человек не видел бы, что подключение вообще идёт.
+          // человек не видел бы, что подключение вообще идёт. «Переподключение…» в ожидании
+          // таймера — тоже важнее блокировки: карточка килл-свитча при этом остаётся на месте.
           conn == 1 ? tr('Подключение…')
+              : reconnecting ? tr('Переподключение…')
               : connBlocked ? tr('Трафик заблокирован')
               : conn == 0 ? tr('Отключено')
               : (gEngineReal ? tr('Подключено') : tr('Демо-режим')),
-          style: disp(22, w: FontWeight.w700, c: connected ? C.accent : (conn == 1 || connBlocked ? C.warn : C.text)))),
+          style: disp(22, w: FontWeight.w700, c: connected ? C.accent : (conn == 1 || reconnecting || connBlocked ? C.warn : C.text)))),
         const SizedBox(height: 6),
         Center(child: Text(connected ? hms : '00:00:00',
           style: TextStyle(fontFamily: 'JetBrainsMono', fontSize: 38, fontWeight: FontWeight.w700,
             color: connected ? C.accentSoft : C.muted, letterSpacing: 2))),
         const SizedBox(height: 4),
         Center(child: Text(
-          conn == 1 ? tr('устанавливаем соединение…')
+          conn == 1 ? (reconnecting ? attemptLine : tr('устанавливаем соединение…'))
+              : reconnecting ? attemptLine
               : connBlocked ? tr('VPN отвалился — килл-свитч не пускает трафик напрямую')
               : conn == 0 ? tr('нажми на кнопку')
               : (gEngineReal ? _protectionScope() : tr('демо — без реального туннеля')),

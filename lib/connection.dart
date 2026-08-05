@@ -23,6 +23,8 @@ enum ConnFix {
 //   dropAlertOn      — тумблер «Обрыв соединения»
 //   trafWarnOn       — тумблер «Лимит трафика»
 //   killSwitchOn     — тумблер «Килл-свитч»: при НЕОЖИДАННОМ обрыве держим fail-closed
+//   reconnectOn      — тумблер «Автопереподключение»: после НЕОЖИДАННОГО обрыва сами
+//                      переподключаемся с нарастающей паузой (см. reconnectDelay)
 //   demoOn           — тумблер «Демо-режим» (Настройки): разрешена ли демо-сессия без движка
 //   onToast          — показать тост (реализует ShellState)
 //   onPersist        — сохранить состояние (_save; нужен для счётчика сессий)
@@ -38,6 +40,7 @@ class ConnectionController extends ChangeNotifier {
     required this.dropAlertOn,
     required this.trafWarnOn,
     required this.killSwitchOn,
+    required this.reconnectOn,
     required this.demoOn,
     required this.onNodeDead,
     required this.onToast,
@@ -59,6 +62,10 @@ class ConnectionController extends ChangeNotifier {
   /// Тумблер «Килл-свитч» (Настройки): при НЕОЖИДАННОМ обрыве VPN трафик блокируется
   /// (fail-closed), а не идёт напрямую. По умолчанию ВЫКЛ.
   final bool Function() killSwitchOn;
+  /// Тумблер «Автопереподключение» (Настройки): после НЕОЖИДАННОГО обрыва переподключаемся
+  /// сами, с нарастающей паузой и бессрочно. По умолчанию ВКЛ — тумблер и есть согласие
+  /// человека; выключил — после обрыва остаёмся отключёнными, как раньше.
+  final bool Function() reconnectOn;
   /// Разрешена ли демо-сессия там, где движка нет. По умолчанию ВЫКЛЮЧЕНА: молчаливое демо
   /// после оплаты выглядело как рабочий VPN и человек не понимал, почему ничего не открывается.
   final bool Function() demoOn;
@@ -86,6 +93,15 @@ class ConnectionController extends ChangeNotifier {
   int _gen = 0; // поколение подключения: гасит «поздние» коллбэки отменённых/сменённых попыток
   Timer? _timer;
   StreamSubscription<EngineEvent>? _tunEvents;
+  // ── авто-реконнект: серия попыток после НЕОЖИДАННОГО обрыва ──
+  Timer? _reconnectTimer; // ждём паузу перед очередной попыткой
+  /// Номер текущей попытки автопереподключения (0 — серии нет). Показываем его на Главной
+  /// («переподключение, попытка N»): молчащая пауза между попытками выглядела бы как
+  /// «отключено и ничего не происходит».
+  int reconnectAttempt = 0;
+  /// Идёт ли серия автопереподключения: ждём таймер (ожидание паузы). Во время самой попытки
+  /// (conn == 1) признак серии — reconnectAttempt > 0.
+  bool get reconnecting => _reconnectTimer != null;
   double _sessMB = 0;       // накопленный расход за текущую сессию (для «Лимит трафика»)
   bool _trafWarned = false; // предупреждение о большом расходе уже показано в этой сессии
   bool _disposed = false;
@@ -104,9 +120,14 @@ class ConnectionController extends ChangeNotifier {
   }
 
   Future<void> toggle() async {
+    // Ручная команда (кнопка/трей/хоткей) во время ожидания очередной попытки отменяет серию
+    // автопереподключения: человек взял управление на себя. Вызов ИЗ таймера серии сюда не
+    // задевает: к этому моменту _reconnectTimer уже снят (см. _scheduleReconnect).
+    if (_reconnectTimer != null) _cancelReconnect();
     if (conn == 1) {
       // отмена во время «Подключение…»: инвалидируем поколение → awaited/отложенный коллбэк отвалится
       _gen++;
+      _cancelReconnect(); // отменяет и попытку ИЗ серии автопереподключения — гасим её всю
       // Отмена попытки, поднятой ИЗ блокировки: прокси держим (fail-closed), гасим только
       // движок — иначе blocked-карточка осталась бы при уже снятом прокси (ложь и голый трафик).
       if (kRealTunnel) { await _stopEngine(); gEngineReal = false; }
@@ -286,6 +307,7 @@ class ConnectionController extends ChangeNotifier {
       });
     } else {
       _gen++; // отключение инвалидирует любое незавершённое поколение
+      _cancelReconnect(); // ручное отключение — серия автопереподключения больше не нужна
       if (kRealTunnel) { await TunnelEngine.instance.disconnect(); gEngineReal = false; }
       _stopWatch();
       onSpin(false);
@@ -296,6 +318,7 @@ class ConnectionController extends ChangeNotifier {
 
   // старт сессии: обнуляем счётчики трафика/времени и поднимаем статус в «Подключено»
   void _startSession({required int down, required int up}) {
+    _cancelReconnect(); // успешное подключение сбрасывает серию автопереподключения (backoff)
     conn = 2; secs = 0; this.down = down; this.up = up; sessions++;
     failMsg = null; failFix = ConnFix.none; // получилось — причина прошлой неудачи неактуальна
     blocked = false; // подключились — блокировки килл-свитча больше нет
@@ -308,6 +331,34 @@ class ConnectionController extends ChangeNotifier {
   void _stopWatch() {
     _timer?.cancel(); _timer = null;
     _tunEvents?.cancel(); _tunEvents = null;
+  }
+
+  // ── авто-реконнект ──
+
+  /// Запланировать очередную попытку автопереподключения через паузу из reconnectDelay.
+  /// Тумблер выключен — молча ничего не делаем (прежнее поведение: обрыв = «Отключено»).
+  void _scheduleReconnect() {
+    final delay = reconnectDelay(reconnectOn(), reconnectAttempt + 1);
+    if (delay == null || _disposed) return;
+    _reconnectTimer?.cancel();
+    reconnectAttempt++;
+    _reconnectTimer = Timer(delay, () {
+      _reconnectTimer = null;
+      // За паузу человек мог сам подключиться или размонтировать экран — тогда не лезем.
+      // Реконнект ИЗ блокировки килл-свитча идёт с keepProxy сам: blocked ещё жив, и toggle()
+      // (ветка conn==0) передаст его движку — прокси держится всю попытку.
+      if (_disposed || conn != 0) return;
+      toggle();
+    });
+    notifyListeners(); // на Главной появляется «переподключение, попытка N»
+  }
+
+  /// Снять серию автопереподключения: таймер и номер попытки. Зовут осознанные действия
+  /// человека (подключить/отключить/отмена/выход/снятие блокировки) и успешное подключение.
+  void _cancelReconnect() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    reconnectAttempt = 0;
   }
 
   // Остановить движок после неудачной/отменённой попытки. При живой блокировке килл-свитча
@@ -352,6 +403,12 @@ class ConnectionController extends ChangeNotifier {
     failMsg = msg; failFix = fix;
     notifyListeners();
     onToast(msg);
+    // Серия автопереподключения переживает неудачную попытку: при лежащей сети каждая попытка
+    // падает (подписка не скачивается, туннель не поднимается) — перепланируем с нарастающей
+    // паузой. Исключение — ConnFix.happ: сборка принципиально не умеет эти узлы, повторять
+    // бессрочно бессмысленно. Первичная (ручная) неудача серии не создаёт: reconnectAttempt
+    // там нулевой — реконнект начинается только после ОБРЫВА установленного соединения.
+    if (reconnectAttempt > 0 && fix != ConnFix.happ) _scheduleReconnect();
   }
 
   // Держим ли при обрыве системный прокси (fail-closed). Только десктоп с xray удерживает
@@ -360,6 +417,18 @@ class ConnectionController extends ChangeNotifier {
   // заблокирован» было бы ложью. Вынесено в чистую функцию: правило покрыто killswitch_test.
   static bool holdProxyOnDrop(bool killSwitch, EngineKind kind) =>
       killSwitch && kind == EngineKind.desktopXray;
+
+  // Пауза перед [attempt]-й попыткой автопереподключения (нумерация с 1): 2с, 5с, 15с, 30с,
+  // дальше каждые 60с — бессрочно, пока не подключимся или человек не отменит серию.
+  /// null — серии не быть: тумблер «Автопереподключение» выключен. Вынесено в чистую функцию:
+  /// правило покрыто reconnect_test (сам обрыв без живого движка не воспроизвести — события
+  /// шлёт только TunnelEngine, та же причина, что у killswitch_test).
+  static Duration? reconnectDelay(bool toggleOn, int attempt) {
+    if (!toggleOn) return null;
+    const steps = [2, 5, 15, 30];
+    final i = (attempt < 1 ? 1 : attempt) - 1;
+    return Duration(seconds: i < steps.length ? steps[i] : 60);
+  }
 
   // движок сообщил об обрыве соединения — снимаем «подключено»
   void _dropped(int gen, {String? why}) {
@@ -396,12 +465,18 @@ class ConnectionController extends ChangeNotifier {
     } else if (dropAlertOn()) {
       onToast(tr('Соединение разорвано'));
     }
+    // Авто-реконнект: обрыв сюда приходит ТОЛЬКО неожиданный — осознанные действия (кнопка
+    // «Отключить», отмена коннекта, выход) _dropped не зовут и серию гасят сами. При включённом
+    // тумблере планируем возврат с нарастающей паузой; при выключенном — молча остаёмся в
+    // «Отключено», как раньше.
+    _scheduleReconnect();
   }
 
   /// «Снять блокировку» — единственный выход из fail-closed без нового подключения:
   /// снимает системный прокси (интернет снова прямой) и возвращает обычное «Отключено».
   Future<void> unblock() async {
     if (!blocked) return;
+    _cancelReconnect(); // «Снять блокировку» — осознанное решение не переподключаться
     blocked = false; // UI сразу возвращаем в «Отключено», прокси догоняет асинхронно
     notifyListeners();
     // disconnect идемпотентен: движок уже мёртв, здесь важно именно снятие прокси.
@@ -421,6 +496,7 @@ class ConnectionController extends ChangeNotifier {
   // полный сброс подключения (напр. при выходе из аккаунта): гасит поколение, таймеры, статус
   void reset() {
     _gen++;
+    _cancelReconnect(); // выход — осознанное действие: серии автопереподключения здесь нет
     // боевой режим: гасим и НАСТОЯЩИЙ туннель — иначе после logout трафик продолжал бы идти через
     // движок (reset раньше только обнулял UI). fire-and-forget, как ветка disconnect в toggle().
     // Демо-режим (kRealTunnel=false) туннель не поднимает — там гасить нечего, поведение не меняем.
@@ -439,6 +515,7 @@ class ConnectionController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _stopWatch();
+    _cancelReconnect();
     super.dispose();
   }
 }

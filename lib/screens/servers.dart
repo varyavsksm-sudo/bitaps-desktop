@@ -11,7 +11,14 @@ extension ShellServers on ShellState {
     // выглядит кликабельным → показываем тонкий inline-хинт и приглушаем некликабельные-сейчас строки
     // (текущий сервер остаётся читаемым). Логику/тосты не трогаем — только визуальная подсказка.
     final locked = conn != 0;
-    return ListView(
+    return RefreshIndicator(
+      color: C.accent,
+      backgroundColor: C.bg2,
+      // pull-to-refresh: свежие узлы подписки без перелогина (новые серверы появляются сами)
+      onRefresh: _loadNodes,
+      child: ListView(
+        // AlwaysScrollable: pull-to-refresh обязан работать и на коротком списке
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(20),
         children: [
           Text(tr('Серверы'), style: disp(26, w: FontWeight.w800)),
@@ -28,6 +35,8 @@ extension ShellServers on ShellState {
           ])),
           const SizedBox(height: 16),
           // Кнопка «Пинг»: живой замер отклика по всем доступным серверам (_pingServers в api.dart).
+          // Работает и при поднятом туннеле — тогда замер идёт сквозь него (с фолбэком на живые
+          // пинги observatory); приговоры «пропускает ли узел трафик напрямую» при этом не пишутся.
           // Semantics: во время замера кнопка неактивна — сообщаем это и скринридеру.
           Semantics(
             button: true,
@@ -35,8 +44,7 @@ extension ShellServers on ShellState {
             label: tr('Проверить серверы'),
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              // При поднятом туннеле замер бессмыслен (мерил бы сам туннель) — гасим кнопку
-              onTap: (_pinging || conn != 0) ? null : _pingServers,
+              onTap: _pinging ? null : _pingServers,
               child: _card(strong: true, child: Row(children: [
                 _gIcon(Icons.network_ping),
                 const SizedBox(width: 12),
@@ -46,7 +54,7 @@ extension ShellServers on ShellState {
                   Text(_pinging
                           ? tr('проверяю, где идёт трафик…')
                           : conn != 0
-                              ? tr('отключись — при включённом VPN замер пойдёт через туннель')
+                              ? tr('замер сквозь активный туннель')
                               : tr('проверить, через какие серверы реально идёт трафик'),
                       style: mono(12)),
                 ])),
@@ -67,7 +75,8 @@ extension ShellServers on ShellState {
           const SizedBox(height: 22),
           ..._serverSections(locked),
         ],
-      );
+      ),
+    );
   }
 
   // Русские склонения для счётчиков плиток: 1 сервер / 2-4 сервера / 5+ серверов
@@ -144,17 +153,20 @@ extension ShellServers on ShellState {
     final sel = s.id == server.id;
     final ping = pingOf(s);
     final st = stateOf(s.id);
-    // Число показываем ТОЛЬКО у проверенных узлов и только сквозное — время ответа через сам
-    // туннель. Раньше здесь стоял TCP-коннект до адреса: при глушении интернета он проходит,
-    // а трафик — нет, и человек видел зелёный отклик у сервера, через который ничего не грузится.
-    final measured = st == NodeState.works && ping > 0;
+    // Число показываем только за честный замер: сквозная проверка узла (приговор «работает»),
+    // а при поднятом туннеле — ещё замер кнопкой сквозь туннель и живой пинг observatory
+    // (pingOf уже подмешал его узлам без ручного замера). Раньше здесь стоял TCP-коннект до
+    // адреса: при глушении интернета он проходит, а трафик — нет, и человек видел зелёный
+    // отклик у сервера, через который ничего не грузится.
+    final measured = st == NodeState.works ? ping > 0 : (conn == 2 && ping > 0);
     final pingCol = st == NodeState.blocked
         ? C.danger
         : !measured ? C.muted : ping < 60 ? C.ok : ping < 120 ? C.warn : C.danger;
     final pingLabel = switch (st) {
       NodeState.blocked => tr('через этот сервер трафик не идёт'),
-      NodeState.unknown => tr('не проверен'),
-      NodeState.works => ping < 60 ? tr('быстрый отклик') : ping < 120 ? tr('средний отклик') : tr('медленный отклик'),
+      // «не проверен» — только без единого числа; живой пинг observatory оцениваем как обычный
+      _ when !measured => tr('не проверен'),
+      _ => ping < 60 ? tr('быстрый отклик') : ping < 120 ? tr('средний отклик') : tr('медленный отклик'),
     };
     // При locked (conn!=0) все строки кроме текущего сервера некликабельны-сейчас → приглушаем их,
     // чтобы список не выглядел обманчиво активным. Текущий сервер (sel) оставляем читаемым.

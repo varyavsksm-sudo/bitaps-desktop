@@ -148,7 +148,16 @@ class TunnelEngine {
     final metricsPort = await _freePort();
     final cfg = xrayConfigJsonFromNodes(nodes,
         only: onlyTag, socksPort: socksPort, httpPort: httpPort, metricsPort: metricsPort);
-    final proc = await XrayProcess.start(cfg, socksPort: socksPort, binaryPath: bin);
+    final proc = await XrayProcess.start(cfg, socksPort: socksPort, binaryPath: bin,
+        // Смерть процесса посреди сессии пробрасываем в общий поток событий: без этого десктоп
+        // обрыв не замечал вообще (UI тикал «Подключено» при мёртвом туннеле), а контроллер
+        // слушает именно этот поток — там обрыв превращается в авто-реконнект/килл-свитч.
+        onDied: (p, code) {
+          // Гонка с реконнектом: поверх уже поднят новый движок — смерть прежнего не событие.
+          if (!identical(_proc, p)) return;
+          _events.add(const EngineEvent('disconnected',
+              message: 'движок туннеля неожиданно завершил работу'));
+        });
     final proxyOk = await SystemProxy.enable(socksPort: socksPort, httpPort: httpPort);
     if (!proxyOk) {
       // Прокси мог встать частично (на части сервисов/платформы) — снимаем ДО остановки

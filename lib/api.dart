@@ -5,15 +5,57 @@ part of 'main.dart';
 // notify) + сетевые инструменты (спид-тест, проверка утечек) + авто-проверка обновлений.
 extension ShellApi on ShellState {
   // Авто-проверка обновлений: сравниваем номер вшитой сборки с номером последнего релиза.
-  // Тихо: любой сбой/таймаут/дев-сборка (kBuildNumber==0) — просто не показываем баннер.
+  // Тихо: любой сбой/таймаут/дев-сборка (kBuildNumber==0) — просто ничего не показываем.
+  // Показ — ОДИН диалог на запуск вместо вечного баннера на Главной: «Скачать» / «Позже» /
+  // «Больше не предлагать эту версию». Версию из prefs больше не спрашиваем, «Позже» держится
+  // до следующего запуска само — _checkUpdate зовётся один раз, из initState.
   Future<void> _checkUpdate() async {
     if (kBuildNumber == 0) return;
     try {
       final r = await http.get(Uri.parse(kBuildNumberUrl)).timeout(const Duration(seconds: 10));
       if (r.statusCode != 200) return;
       final latest = int.tryParse(r.body.trim()) ?? 0;
-      if (latest > kBuildNumber && mounted) rebuild(() => _updateAvail = true);
+      if (latest <= kBuildNumber || !mounted) return;
+      final p = await SharedPreferences.getInstance();
+      // «Больше не предлагать эту версию» — выбор человека важнее нового запуска.
+      if ((p.getInt('updateSkipBuild') ?? 0) >= latest) return;
+      if (!mounted) return;
+      _askUpdate(latest);
     } catch (_) {/* тихо */}
+  }
+
+  // Единственный диалог обновления. Работу не блокирует: обычный dismissible-диалог, любой
+  // исход (включая тап мимо) до следующего запуска больше не спрашивает.
+  void _askUpdate(int latest) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: C.bg2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: C.line)),
+        title: Text(tr('Доступно обновление'), style: disp(18, w: FontWeight.w700)),
+        // фикс. ширина — как у остальных диалогов (иначе полоса на широком окне)
+        content: SizedBox(width: 360, child: Text(
+          appLang == 'en'
+              ? 'bitaps VPN build $latest is out (yours is $kBuildNumber). Update now?'
+              : 'Вышла сборка bitaps VPN $latest (у тебя $kBuildNumber). Обновить сейчас?',
+          style: mono(13, c: C.text))),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final p = await SharedPreferences.getInstance();
+              await p.setInt('updateSkipBuild', latest); // эту версию больше не предлагаем
+            },
+            child: Text(tr('Больше не предлагать эту версию'), style: mono(13, c: C.muted))),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(tr('Позже'), style: mono(13, c: C.muted))),
+          TextButton(
+            onPressed: () { Navigator.pop(ctx); _open(kDownloadUrl); },
+            child: Text(tr('Скачать обновление'), style: mono(13, c: C.accent))),
+        ],
+      ),
+    );
   }
 
   // Инструмент с сетью: окно с крутилкой → результат прямо в окне (видно всегда)
@@ -514,22 +556,17 @@ extension ShellApi on ShellState {
   /// как узлы через CDN работали. Теперь на каждый узел поднимается временный экземпляр движка
   /// и сквозь него тянется маленький ответ из сети: дошло — узел рабочий, и число рядом с ним
   /// это честное время ответа СКВОЗЬ туннель; не дошло — узел непригоден и выбирать его нечего.
+  ///
+  /// При ПОДНЯТОМ туннеле замер тоже работает: временный экземпляр движка идёт к узлу сам
+  /// (на десктопе его сокеты в системный прокси не попадают, на Android плагин умеет замер
+  /// поверх живого VpnService), а если сквозной замер не ответил — фолбэк на живой пинг из
+  /// observatory поднятого туннеля. Разница в итоге: приговор «узел пропускает трафик С ЭТОЙ
+  /// сети» выносим только по прямому замеру (conn == 0) — путь пакета при включённом VPN не
+  /// совпадает с выключенным состоянием, и переносить его вывод на прямую сеть было бы ложью.
+  /// Поэтому при conn != 0 обновляем только живое число сессии (pingMeasured), не приговор.
   Future<void> _pingServers({bool silent = false}) async {
     if (_pinging) return; // гвард от двойного тапа
-    // ПРИ ПОДНЯТОМ ТУННЕЛЕ НЕ ЗАМЕРЯЕМ. Замер идёт из этого же приложения, а при активном VPN
-    // весь его трафик уходит в туннель — то есть мерялся бы путь «мой VPN → другой узел», а не
-    // то, что нужно человеку: доступность узла с его обычного интернета. Числа получились бы
-    // завышенными, а заблокированный у оператора узел выглядел бы рабочим, потому что до него
-    // дотянулись через уже поднятый VPN. Плагин умеет выводить свои сокеты из туннеля, но только
-    // когда успел зарегистрировать защитника, — на такой зыбкости строить приговор нельзя.
-    if (conn != 0) {
-      if (!silent) {
-        _toast(appLang == 'en'
-            ? 'Disconnect first — with the VPN on we would measure the tunnel, not your network'
-            : 'Сначала отключись — при включённом VPN замер пойдёт через сам туннель, а не по твоей сети');
-      }
-      return;
-    }
+    final viaTunnel = conn != 0; // замер при поднятом туннеле: числа есть, приговоры не трогаем
     rebuild(() => _pinging = true);
     var okCount = 0, badCount = 0;
     try {
@@ -541,9 +578,13 @@ extension ShellApi on ShellState {
         return;
       }
       // Отпечаток сети снимаем ОДИН раз на проверку: приговоры привязаны к сети, потому что
-      // узел, закрытый у мобильного оператора, прекрасно работает с домашнего Wi-Fi.
-      final net = await _networkId();
-      if (mounted) rebuild(() => netId = net);
+      // узел, закрытый у мобильного оператора, прекрасно работает с домашнего Wi-Fi. При замере
+      // сквозь туннель приговоры не пишем — и отпечаток не нужен.
+      var net = netId;
+      if (!viaTunnel) {
+        net = await _networkId();
+        if (mounted) rebuild(() => netId = net);
+      }
 
       // Проверка тяжелее TCP-коннекта: каждый узел это отдельный запуск движка. На Android
       // идём по одному (там временный экземпляр поднимает системная часть), на десктопе — по
@@ -553,30 +594,48 @@ extension ShellApi on ShellState {
       Future<void> worker() async {
         while (queue.isNotEmpty) {
           final n = queue.removeAt(0);
-          final ms = await TunnelEngine.instance.probe(n);
+          var ms = await TunnelEngine.instance.probe(n);
+          // Сквозной замер молчит — фолбэк на живой пинг observatory поднятого туннеля.
+          if (ms == null && viaTunnel) ms = _observatoryPing(n.tag);
           if (!mounted) return;
-          final v = NodeVerdict(ok: ms != null, ms: ms, at: DateTime.now(), net: net);
-          rebuild(() {
-            nodeVerdicts[n.tag] = v;
-            if (ms != null) { pingMeasured[n.tag] = ms; okCount++; }
-            else { pingMeasured.remove(n.tag); badCount++; }
-          });
+          if (viaTunnel) {
+            // Только живое число сессии: молчащий узел старый ручной замер НЕ стирает —
+            // замер сквозь VPN ничего не говорит о прямой доступности.
+            rebuild(() {
+              if (ms != null) { pingMeasured[n.tag] = ms; okCount++; } else { badCount++; }
+            });
+          } else {
+            final v = NodeVerdict(ok: ms != null, ms: ms, at: DateTime.now(), net: net);
+            rebuild(() {
+              nodeVerdicts[n.tag] = v;
+              if (ms != null) { pingMeasured[n.tag] = ms; okCount++; }
+              else { pingMeasured.remove(n.tag); badCount++; }
+            });
+          }
         }
       }
       await Future.wait([for (var i = 0; i < lanes; i++) worker()]);
-      await _saveVerdicts();
+      if (!viaTunnel) await _saveVerdicts();
 
       // Выбор «лучшего сервера» пересобираем ПОСЛЕ проверки: до неё приговоров не было, и
       // режим держал бы узел, через который ничего не грузится.
       if (mounted && bestServer && conn == 0) rebuild(() => server = serverForMode(mode));
       if (!silent) {
-        _toast(okCount > 0
-            ? (appLang == 'en'
-                ? 'Checked: $okCount working, $badCount not passing traffic'
-                : 'Проверено: $okCount рабочих, $badCount не пропускают трафик')
-            : (appLang == 'en'
-                ? 'None of the servers is passing traffic right now'
-                : 'Сейчас ни один сервер не пропускает трафик'));
+        _toast(viaTunnel
+            ? (okCount > 0
+                ? (appLang == 'en'
+                    ? 'Measured through the active tunnel: $okCount answered, $badCount silent'
+                    : 'Замер сквозь активный туннель: $okCount отвечают, $badCount молчат')
+                : (appLang == 'en'
+                    ? 'No server answered even through the tunnel'
+                    : 'Сквозь туннель не ответил ни один сервер'))
+            : (okCount > 0
+                ? (appLang == 'en'
+                    ? 'Checked: $okCount working, $badCount not passing traffic'
+                    : 'Проверено: $okCount рабочих, $badCount не пропускают трафик')
+                : (appLang == 'en'
+                    ? 'None of the servers is passing traffic right now'
+                    : 'Сейчас ни один сервер не пропускает трафик')));
       }
     } finally {
       if (mounted) { rebuild(() => _pinging = false); } else { _pinging = false; }
@@ -622,6 +681,9 @@ extension ShellApi on ShellState {
     try {
       final sub = await fetchSubscription(key, hwid: hwid, deviceOs: Platform.operatingSystem);
       if (!mounted) return;
+      // Отметка свежести — только по успешному ответу сервиса: открытие «Серверов» гоняет
+      // fetch не чаще раза в 5 минут (см. _maybeRefreshNodes), а сбой не должен его откладывать.
+      if (sub.ok) nodesFetchedAt = DateTime.now();
       // Причину пустого списка запоминаем и показываем на экране «Серверы». Сервис выдачи
       // отвечает осмысленно («Лимит устройств исчерпан», «Подписка истекла»), а раньше этот
       // текст выбрасывался — человек видел вместо серверов заглушку и не понимал, что не так.
@@ -638,6 +700,15 @@ extension ShellApi on ShellState {
     } catch (e) {
       debugPrint('_loadNodes: $e');
     }
+  }
+
+  /// Подтянуть узлы при открытии экрана «Серверы», но не чаще раза в 5 минут: свежий список
+  /// не гоняем впустую, а новые серверы подписки обязаны появляться без перелогина (раньше
+  /// список обновлял только старт приложения — люди не видели новые ноды неделями).
+  Future<void> _maybeRefreshNodes() async {
+    final at = nodesFetchedAt;
+    if (at != null && DateTime.now().difference(at) < const Duration(minutes: 5)) return;
+    await _loadNodes();
   }
 
 

@@ -65,11 +65,15 @@ class XrayProcess {
   String get lastError => _errLines.isEmpty ? '' : _errLines.take(4).join('\n');
 
   /// Запустить движок на готовом конфиге. Бросает [EngineUnavailable] с внятной причиной.
+  /// [onDied] — смерть процесса ВНЕ штатной остановки (краш, kill, OOM): без неё обрыв посреди
+  /// сессии на десктопе нигде не отражался — туннель мёртв, а UI тикает «Подключено». Своя
+  /// остановка (stop/disconnect/failClosed) колбэка не даёт.
   static Future<XrayProcess> start(
     String configJson, {
     required int socksPort,
     String? binaryPath,
     Duration readyTimeout = const Duration(seconds: 12),
+    void Function(XrayProcess proc, int code)? onDied,
   }) async {
     final bin = binaryPath ?? XrayBinary.locate();
     if (bin == null) {
@@ -98,12 +102,14 @@ class XrayProcess {
     final p = XrayProcess._(proc, socksPort);
     proc.stderr.transform(utf8.decoder).transform(const LineSplitter()).listen(p._onLog);
     proc.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen(p._onLog);
-    // Смерть процесса вне stop(): помечаем и пишем в лог. Без этого цикл готовности ниже
-    // ждал бы весь таймаут уже умерший движок, а обрыв посреди сессии нигде не отражался.
+    // Смерть процесса вне stop(): помечаем, пишем в лог и сообщаем подписчику (onDied) —
+    // контроллер подключения услышит обрыв и запустит авто-реконнект. Без пометки цикл
+    // готовности ниже ждал бы весь таймаут уже умерший движок.
     proc.exitCode.then((code) {
       if (p._stopped) return; // своя остановка — не событие
       p._exited = true;
       p._onLog('xray exited: $code');
+      onDied?.call(p, code);
     });
     // Готовность = локальный socks реально принимает соединения. Пока порт не слушает,
     // включать системный прокси нельзя — иначе весь трафик уедет в закрытый порт.
