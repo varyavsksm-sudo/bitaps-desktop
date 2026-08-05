@@ -52,7 +52,9 @@ extension ShellServers on ShellState {
                   Text(tr('Проверить серверы'), style: disp(16, w: FontWeight.w700)),
                   const SizedBox(height: 3),
                   Text(_pinging
-                          ? tr('проверяю, где идёт трафик…')
+                          ? (pingTotal > 0
+                              ? (appLang == 'en' ? 'checked $pingDone of $pingTotal…' : 'готово $pingDone из $pingTotal…')
+                              : tr('проверяю, где идёт трафик…'))
                           : conn != 0
                               ? tr('замер сквозь активный туннель')
                               : tr('проверить, через какие серверы реально идёт трафик'),

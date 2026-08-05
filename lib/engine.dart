@@ -322,14 +322,20 @@ class TunnelEngine {
   // СКВОЗЬ туннель. Не дошло — узел непригоден, сколько бы его порт ни отвечал на TCP.
   //
   // Что тянем. Свой /gen204 — основной: всегда живой и отдаёт пустой ответ, то есть проверка
-  // стоит доли килобайта. Второй адрес независимый: если наш ориджин прилёг, нельзя объявлять
-  // непригодными все узлы разом.
+  // стоит доли килобайта. Второй адрес — независимый gen204 от Google (gstatic): если наш
+  // ориджин прилёг, нельзя объявлять непригодными все узлы разом. Успех = хотя бы один
+  // ответил в бюджете.
   static const List<String> probeUrls = [
     'https://origin.bit-core.online/gen204',
-    'https://cp.cloudflare.com/generate_204',
+    'https://www.gstatic.com/generate_204',
   ];
-  // Реальные узлы отвечают за 0.3–1.5 с. Шесть секунд — это уже не «медленно», а «не работает».
-  static const Duration probeTimeout = Duration(seconds: 6);
+  // Бюджет на ОДИН узел в замере кнопкой «Пинг»: реальные узлы отвечают за 0.3–1.5 с, четыре
+  // секунды — уже «не работает». При параллельном замере (6 одновременно) флот из ~13 узлов
+  // укладывается в ~10–12 с общего времени.
+  static const Duration probeTimeout = Duration(seconds: 4);
+  // Бюджет одного круга проверки «трафик реально идёт» при подключении (два адреса делят его).
+  // Щедрее probeTimeout: отрицательный ответ здесь гонит перебор на следующий сервер.
+  static const Duration verifyTimeout = Duration(seconds: 6);
 
   /// Время ответа сквозь узел в мс, либо null — трафик не пошёл. Никогда не бросает:
   /// непригодный узел это результат проверки, а не сбой приложения.
@@ -364,22 +370,27 @@ class TunnelEngine {
   }
 
   Future<bool> _verifyOnce() async {
+    // Оба адреса делят один бюджет verifyTimeout: успех = хотя бы один ответил вовремя
+    // СКВОЗЬ туннель (не TCP до адреса узла и не пинг — только реальный fetch сквозь него).
+    final deadline = DateTime.now().add(verifyTimeout);
     for (final url in probeUrls) {
+      final left = deadline.difference(DateTime.now());
+      if (left <= Duration.zero) return false;
       try {
         if (kind() == EngineKind.androidXray) {
-          final ms = await _android.connectedDelay(url).timeout(probeTimeout);
+          final ms = await _android.connectedDelay(url).timeout(left);
           if (ms > 0) return true;
           continue;
         }
         // Десктоп: системный прокси для dart:io не существует (HttpClient его игнорирует) —
         // прямой запрос измерял бы НАШУ сеть, а не туннель. Идём через локальный HTTP-вход
         // поднятого движка, как в _probeDesktop; порта нет (не должно быть) — прямой запрос.
-        final client = HttpClient()..connectionTimeout = probeTimeout;
+        final client = HttpClient()..connectionTimeout = left;
         final httpPort = kind() == EngineKind.desktopXray ? _activeHttpPort : null;
         if (httpPort != null) client.findProxy = (_) => 'PROXY 127.0.0.1:$httpPort';
         try {
-          final req = await client.getUrl(Uri.parse(url)).timeout(probeTimeout);
-          final res = await req.close().timeout(probeTimeout);
+          final req = await client.getUrl(Uri.parse(url)).timeout(left);
+          final res = await req.close().timeout(left);
           await res.drain<void>();
           if (res.statusCode < 400) return true;
         } finally {
@@ -392,18 +403,18 @@ class TunnelEngine {
 
   Future<int?> _probeAndroid(SubNode node) async {
     final cfg = xrayEntryConfigJson(node, socksPort: kXrayProbeSocksPort);
-    // Две попытки, а не одна. Проверено на живом прогоне: при холодном старте и загруженном
-    // устройстве рабочий узел иногда не укладывается в таймаут, и с одного раза его записали бы
-    // в непригодные — а потом человек видел бы «не работает» у сервера, который работает.
-    // Хоронить узел можно только по ПОДТВЕРЖДЁННОЙ неудаче.
-    for (var round = 0; round < 2; round++) {
-      if (round > 0) await Future<void>.delayed(const Duration(milliseconds: 700));
-      for (final url in probeUrls) {
-        try {
-          final ms = await _android.serverDelay(cfg, url).timeout(probeTimeout);
-          if (ms > 0) return ms;
-        } catch (_) { /* следующий адрес */ }
-      }
+    // Один круг в общем бюджете probeTimeout: раньше было два (рабочий узел при холодном старте
+    // не укладывался в таймаут), но параллельный замер флота не может себе это позволить —
+    // приговор ставится по одному подтверждённому отказу, сомнительный узел перепроверяется
+    // повторным нажатием «Проверить серверы».
+    final deadline = DateTime.now().add(probeTimeout);
+    for (final url in probeUrls) {
+      final left = deadline.difference(DateTime.now());
+      if (left <= Duration.zero) break;
+      try {
+        final ms = await _android.serverDelay(cfg, url).timeout(left);
+        if (ms > 0) return ms;
+      } catch (_) { /* следующий адрес */ }
     }
     return null;
   }
@@ -422,11 +433,15 @@ class TunnelEngine {
     try {
       final cfg = xrayConfigJsonFromNodes([node], only: node.tag, socksPort: socksPort, httpPort: httpPort);
       proc = await XrayProcess.start(cfg, socksPort: socksPort, binaryPath: bin);
+      // Оба адреса делят общий бюджет probeTimeout на узел (см. константу).
+      final deadline = DateTime.now().add(probeTimeout);
       for (final url in probeUrls) {
+        final left = deadline.difference(DateTime.now());
+        if (left <= Duration.zero) break;
         final sw = Stopwatch()..start();
         try {
-          final req = await client.getUrl(Uri.parse(url)).timeout(probeTimeout);
-          final res = await req.close().timeout(probeTimeout);
+          final req = await client.getUrl(Uri.parse(url)).timeout(left);
+          final res = await req.close().timeout(left);
           await res.drain<void>();
           sw.stop();
           if (res.statusCode < 400) return sw.elapsedMilliseconds.clamp(1, 99999);
@@ -445,4 +460,22 @@ class TunnelEngine {
     await s.close();
     return port;
   }
+}
+
+/// Выполнить [tasks] с ограничением одновременности [lanes]: классический пул воркеров над
+/// общей очередью (замер флота — 6 параллельных probe на десктопе: процесс xray на узел,
+/// шесть — ок, двадцать — нет). Результаты — по индексам задач. Забор индекса атомарен:
+/// между проверкой `next < length` и `next++` нет await, а Dart однопоточен.
+/// Чистая механика без движка — покрыта ping_pool_test.
+Future<List<T>> runPooled<T>(List<Future<T> Function()> tasks, int lanes) async {
+  final results = List<T?>.filled(tasks.length, null);
+  var next = 0;
+  Future<void> worker() async {
+    while (next < tasks.length) {
+      final i = next++;
+      results[i] = await tasks[i]();
+    }
+  }
+  await Future.wait([for (var l = 0; l < lanes && l < tasks.length; l++) worker()]);
+  return results.cast();
 }

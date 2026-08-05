@@ -36,7 +36,8 @@ class ConnectionController extends ChangeNotifier {
     required this.hwidOf,
     required this.serverOf,
     required this.onNodes,
-    required this.nodeTagOf,
+    required this.bestServerOn,
+    required this.nextServerOf,
     required this.dropAlertOn,
     required this.trafWarnOn,
     required this.killSwitchOn,
@@ -55,8 +56,12 @@ class ConnectionController extends ChangeNotifier {
   /// Свежие узлы подписки — чтобы список серверов в интерфейсе не расходился с тем,
   /// к чему реально подключаемся.
   final void Function(List<SubNode>) onNodes;
-  /// Тег узла при ручном выборе сервера (null — авто-выбор лучшего).
-  final String? Function() nodeTagOf;
+  /// Режим «лучший сервер» включён? Тогда узел, не пропустивший трафик, не тупик:
+  /// тем же нажатием перебираем следующих кандидатов (см. цикл в toggle()).
+  final bool Function() bestServerOn;
+  /// Следующий кандидат автоперебора — та же логика выбора, что дала стартовый сервер,
+  /// но уже с учётом свежего приговора только что помеченному узлу (см. onNodeDead).
+  final Server Function() nextServerOf;
   final bool Function() dropAlertOn;
   final bool Function() trafWarnOn;
   /// Тумблер «Килл-свитч» (Настройки): при НЕОЖИДАННОМ обрыве VPN трафик блокируется
@@ -102,6 +107,13 @@ class ConnectionController extends ChangeNotifier {
   /// Идёт ли серия автопереподключения: ждём таймер (ожидание паузы). Во время самой попытки
   /// (conn == 1) признак серии — reconnectAttempt > 0.
   bool get reconnecting => _reconnectTimer != null;
+  // ── автоперебор кандидатов (режим «лучший сервер»): кто сейчас на пробе ──
+  /// Сколько кандидатов перебираем максимум за одно нажатие «Подключиться».
+  static const int kMaxTryAttempts = 5;
+  /// Какой по счёту кандидат сейчас подключается (0 — перебора нет: ручной выбор или покой)
+  /// и его название — прогресс «пробуем {сервер}… (N/5)» на Главной.
+  int tryAttempt = 0;
+  String tryServer = '';
   double _sessMB = 0;       // накопленный расход за текущую сессию (для «Лимит трафика»)
   bool _trafWarned = false; // предупреждение о большом расходе уже показано в этой сессии
   bool _disposed = false;
@@ -128,6 +140,7 @@ class ConnectionController extends ChangeNotifier {
       // отмена во время «Подключение…»: инвалидируем поколение → awaited/отложенный коллбэк отвалится
       _gen++;
       _cancelReconnect(); // отменяет и попытку ИЗ серии автопереподключения — гасим её всю
+      _resetTry(); // отмена и автоперебора: цикл кандидатов умрёт по gen != _gen
       // Отмена попытки, поднятой ИЗ блокировки: прокси держим (fail-closed), гасим только
       // движок — иначе blocked-карточка осталась бы при уже снятом прокси (ложь и голый трафик).
       if (kRealTunnel) { await _stopEngine(); gEngineReal = false; }
@@ -213,59 +226,85 @@ class ConnectionController extends ChangeNotifier {
           return;
         }
         if (_disposed || gen != _gen) return; // отменили, пока человек читал диалог
-        try {
-          // таймаут: если движок завис и не вернул ни успех, ни ошибку — не залипаем
-          // навсегда в «Подключение…», а честно откатываемся в «выключено» с тостом.
-          // ручной выбор сервера уважаем: подключаемся ровно к нему, а не к «лучшему»
-          final only = nodeTagOf();
-          await TunnelEngine.instance
-              .connect(nodes, onlyTag: only != null && nodes.any((n) => n.tag == only) ? only : null,
-                       server: serverOf().city,
-                       // из блокировки — прокси держим: enable() перепишет порты атомарно
-                       keepProxy: blocked)
-              .timeout(const Duration(seconds: 40));
-        } on TunnelUnavailable catch (e) {
-          // Нет разрешения на VPN-подключение: чинится повторной попыткой и «разрешить» в системе.
-          _fail(gen, '$e', fix: ConnFix.none);
-          return;
-        } on EngineUnavailable catch (e) {
-          // Проблема самого движка (нет бинаря, занят порт) — Happ поднимет тот же ключ мимо него.
-          _fail(gen, '$e', fix: ConnFix.happ);
-          return;
-        } on TimeoutException {
-          // Движок мог подняться уже ПОСЛЕ таймаута — тогда останется «осиротевший» туннель:
-          // ключ в шторке горит, а интерфейс показывает «Отключено». Гасим дважды с паузой:
-          // первый вызов ловит уже поднятый туннель, второй — тот, что встал следом.
-          // При живой блокировке гасим БЕЗ снятия прокси (_stopEngine → failClosed).
-          await _stopEngine().catchError((_) {});
-          Future<void>.delayed(const Duration(seconds: 3),
-              () => _stopEngine().catchError((_) {}));
-          _fail(gen, appLang == 'en' ? 'Connection timed out' : 'Подключение не удалось — таймаут', fix: ConnFix.none);
-          return;
-        } catch (e) {
-          _fail(gen, appLang == 'en' ? 'Failed to connect: $e' : 'Не удалось подключиться: $e');
-          return;
-        }
-        if (_disposed || gen != _gen) { await _stopEngine(); return; } // отменили во время старта
-        // «Подключено» и «работает» — разные вещи. Движок поднимает туннель и рапортует об успехе,
-        // а сессию сквозь фильтрацию может рвать: у человека горит ключ в шторке и не грузится
-        // ничего. Именно так сейчас ведут себя ПРЯМЫЕ узлы при глушении интернета, тогда как узлы
-        // через CDN работают. Поэтому сразу после старта тянем маленький ответ СКВОЗЬ туннель.
-        final passes = await TunnelEngine.instance.verifyConnected();
-        if (_disposed || gen != _gen) { await _stopEngine(); return; }
-        if (!passes) {
+        // Автоперебор до первого ЖИВОГО трафика (только режим «лучший сервер»): узел, не
+        // пропустивший трафик, помечается приговором, и тем же нажатием пробуем следующего
+        // кандидата — всего до kMaxTryAttempts. Раньше человек жмал «подключиться» по пять
+        // раз вручную. Ручной выбор — одна попытка, как раньше (roam == false).
+        // Реконнект сюда не лезет: он начинается после ОБРЫВА УСТАНОВЛЕННОГО соединения,
+        // а перебор работает до первого успешного коннекта и серии не создаёт.
+        final roam = bestServerOn();
+        var candidate = serverOf();
+        for (var attempt = 1; ; attempt++) {
+          // прогресс на Главной: «пробуем {сервер}… (N/5)» — иначе минуты перебора выглядели
+          // бы зависшим «Подключение…».
+          if (roam) { tryAttempt = attempt; tryServer = candidate.city; notifyListeners(); }
+          try {
+            // таймаут: если движок завис и не вернул ни успех, ни ошибку — не залипаем
+            // навсегда в «Подключение…», а честно откатываемся в «выключено» с тостом.
+            // Выбор сервера уважаем: подключаемся ровно к кандидату, а не к «лучшему».
+            await TunnelEngine.instance
+                .connect(nodes,
+                         onlyTag: candidate.id.isNotEmpty && nodes.any((n) => n.tag == candidate.id) ? candidate.id : null,
+                         server: candidate.city,
+                         // из блокировки — прокси держим: enable() перепишет порты атомарно
+                         keepProxy: blocked)
+                .timeout(const Duration(seconds: 40));
+          } on TunnelUnavailable catch (e) {
+            // Нет разрешения на VPN-подключение: чинится повторной попыткой и «разрешить» в системе.
+            _resetTry(); _fail(gen, '$e', fix: ConnFix.none);
+            return;
+          } on EngineUnavailable catch (e) {
+            // Проблема самого движка (нет бинаря, занят порт) — Happ поднимет тот же ключ мимо него.
+            // К узлу это отношения не имеет — перебирать кандидатов бессмысленно.
+            _resetTry(); _fail(gen, '$e', fix: ConnFix.happ);
+            return;
+          } on TimeoutException {
+            // Движок мог подняться уже ПОСЛЕ таймаута — тогда останется «осиротевший» туннель:
+            // ключ в шторке горит, а интерфейс показывает «Отключено». Гасим дважды с паузой:
+            // первый вызов ловит уже поднятый туннель, второй — тот, что встал следом.
+            // При живой блокировке гасим БЕЗ снятия прокси (_stopEngine → failClosed).
+            await _stopEngine().catchError((_) {});
+            Future<void>.delayed(const Duration(seconds: 3),
+                () => _stopEngine().catchError((_) {}));
+            _resetTry(); _fail(gen, appLang == 'en' ? 'Connection timed out' : 'Подключение не удалось — таймаут', fix: ConnFix.none);
+            return;
+          } catch (e) {
+            _resetTry(); _fail(gen, appLang == 'en' ? 'Failed to connect: $e' : 'Не удалось подключиться: $e');
+            return;
+          }
+          if (_disposed || gen != _gen) { await _stopEngine(); return; } // отменили во время старта
+          // «Подключено» и «работает» — разные вещи. Движок поднимает туннель и рапортует об успехе,
+          // а сессию сквозь фильтрацию может рвать: у человека горит ключ в шторке и не грузится
+          // ничего. Именно так сейчас ведут себя ПРЯМЫЕ узлы при глушении интернета, тогда как узлы
+          // через CDN работают. Поэтому сразу после старта тянем маленький ответ СКВОЗЬ туннель —
+          // это и есть критерий успеха кандидата (не TCP-пинг до его адреса).
+          final passes = await TunnelEngine.instance.verifyConnected();
+          if (_disposed || gen != _gen) { await _stopEngine(); return; }
+          if (passes) break; // трафик пошёл — кандидат найден, выходим в сессию
           // Узел не пропускает трафик — держать на нём человека нельзя, это и есть то самое
           // «подключено, но интернета нет». Гасим (при живой блокировке — без снятия прокси),
-          // помечаем узел и предлагаем взять рабочий.
+          // помечаем приговором (не будет ни выбран «лучшим», ни показан доступным) и либо
+          // пробуем следующего, либо честно останавливаемся.
           await _stopEngine().catchError((_) {});
-          onNodeDead(serverOf().id);
-          _fail(gen,
-              appLang == 'en'
-                  ? 'This server is not passing traffic right now'
-                  : 'Через этот сервер сейчас не идёт трафик',
-              fix: ConnFix.pickOther);
-          return;
+          onNodeDead(candidate.id);
+          Server? next;
+          if (roamContinues(roam, attempt)) {
+            next = nextServerOf(); // пересчёт с учётом свежего приговора
+            // кандидаты кончились (все помечены мёртвыми на этой сети) — считаем как «все мимо»
+            if (next.id.isEmpty || next.id == candidate.id) next = null;
+          }
+          if (next == null) {
+            _resetTry();
+            _fail(gen,
+                roam ? tr('Ни один сервер не ответил — проверь интернет')
+                     : tr('Через этот сервер сейчас не идёт трафик — выбери другой или включи «лучший сервер»'),
+                fix: roam ? ConnFix.support : ConnFix.pickOther);
+            return;
+          }
+          candidate = next;
+          if (_disposed || gen != _gen) return; // отменили на стыке кандидатов
         }
+        _resetTry();
         gEngineReal = true;
         _startSession(down: 0, up: 0);
         _timer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -430,6 +469,20 @@ class ConnectionController extends ChangeNotifier {
     return Duration(seconds: i < steps.length ? steps[i] : 60);
   }
 
+  // Продолжать ли автоперебор после того, как кандидат [attempt] (нумерация с 1) не пропустил
+  // трафик: только в режиме «лучший сервер» и пока не исчерпали kMaxTryAttempts за нажатие.
+  /// Ручной выбор — всегда стоп (поведение прежнее: причина + подсказка про «лучший сервер»).
+  /// Чистая функция — правило покрыто roam_test (перебор без живого движка не воспроизвести).
+  static bool roamContinues(bool bestServer, int attempt) =>
+      bestServer && attempt < kMaxTryAttempts;
+
+  /// Спрятать прогресс автоперебора (успех/стоп/отмена). Без notifyListeners: вызывается рядом
+  /// с _fail/_startSession, которые и так перерисуют экран.
+  void _resetTry() {
+    tryAttempt = 0;
+    tryServer = '';
+  }
+
   // движок сообщил об обрыве соединения — снимаем «подключено»
   void _dropped(int gen, {String? why}) {
     if (_disposed || gen != _gen) return;
@@ -497,6 +550,7 @@ class ConnectionController extends ChangeNotifier {
   void reset() {
     _gen++;
     _cancelReconnect(); // выход — осознанное действие: серии автопереподключения здесь нет
+    _resetTry(); // и автоперебор тоже гасится по смене поколения
     // боевой режим: гасим и НАСТОЯЩИЙ туннель — иначе после logout трафик продолжал бы идти через
     // движок (reset раньше только обнулял UI). fire-and-forget, как ветка disconnect в toggle().
     // Демо-режим (kRealTunnel=false) туннель не поднимает — там гасить нечего, поведение не меняем.

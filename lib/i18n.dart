@@ -224,7 +224,9 @@ const Map<String, String> _kEn = {
   'замер сквозь активный туннель': 'measure through the active tunnel',
   'не работает': 'not working',
   'Выбрать сервер': 'Pick a server',
-  'Через этот сервер сейчас не идёт трафик': 'No traffic is getting through this server right now',
+  'Через этот сервер сейчас не идёт трафик — выбери другой или включи «лучший сервер»':
+      'This server is not passing traffic right now — pick another one or turn on "Best server"',
+  'Ни один сервер не ответил — проверь интернет': 'No server answered — check your internet',
   'скоро': 'soon',
   'прямой узел': 'direct node',
   'через CDN': 'via CDN',

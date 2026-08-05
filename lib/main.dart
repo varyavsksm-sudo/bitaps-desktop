@@ -238,6 +238,10 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   /// оператор блокируют по-разному, и приговор с одной сети нельзя показывать на другой.
   String netId = '';
   bool _pinging = false; // идёт замер пинга — гвард от двойного запуска
+  /// Прогресс замера «Проверить серверы»: сколько узлов уже проверено и сколько всего
+  /// (показывается на кнопке «готово X из Y» — иначе параллельный замер флота выглядел бы
+  /// зависшим на ~10 секунд).
+  int pingDone = 0, pingTotal = 0;
   String keyStr = kDemoKey;
   String? customCfg;
   String? importedHost;
@@ -373,11 +377,15 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       hwidOf: () => hwid,
       serverOf: () => server,
       onNodes: _applyNodes,
-      // Даже в режиме «лучший сервер» отдаём движку КОНКРЕТНЫЙ узел — тот же, что показан на
-      // экране. Раньше в авто-режиме сюда шёл null, и на Android движок выбирал узел сам, своим
-      // правилом: интерфейс писал «Румыния», а туннель уходил в Финляндию. Выбор делает интерфейс
-      // (serverForMode), движок его исполняет. null остаётся только если выбирать пока не из чего.
-      nodeTagOf: () => server.id.isEmpty ? null : server.id,
+      // Даже в режиме «лучший сервер» движок получает КОНКРЕТНЫЙ узел — тот же, что показан на
+      // экране. Выбор делает интерфейс (serverForMode), движок его исполняет: стартовый кандидат
+      // ставит toggle() (best → serverForMode), следующих при автопереборе контроллер просит
+      // через nextServerOf — после свежего приговора это уже другой узел.
+      bestServerOn: () => bestServer,
+      nextServerOf: () {
+        rebuild(() => server = serverForMode(mode));
+        return server;
+      },
       dropAlertOn: () => tgl2,
       trafWarnOn: () => tgl4,
       killSwitchOn: () => killSwitch,

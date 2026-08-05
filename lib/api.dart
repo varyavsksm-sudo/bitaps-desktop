@@ -586,35 +586,37 @@ extension ShellApi on ShellState {
         if (mounted) rebuild(() => netId = net);
       }
 
-      // Проверка тяжелее TCP-коннекта: каждый узел это отдельный запуск движка. На Android
-      // идём по одному (там временный экземпляр поднимает системная часть), на десктопе — по
-      // двое, чтобы 13 узлов не проверялись минуту.
-      final lanes = Platform.isAndroid ? 1 : 2;
-      final queue = List<SubNode>.from(targets);
-      Future<void> worker() async {
-        while (queue.isNotEmpty) {
-          final n = queue.removeAt(0);
-          var ms = await TunnelEngine.instance.probe(n);
-          // Сквозной замер молчит — фолбэк на живой пинг observatory поднятого туннеля.
-          if (ms == null && viaTunnel) ms = _observatoryPing(n.tag);
-          if (!mounted) return;
-          if (viaTunnel) {
-            // Только живое число сессии: молчащий узел старый ручной замер НЕ стирает —
-            // замер сквозь VPN ничего не говорит о прямой доступности.
-            rebuild(() {
-              if (ms != null) { pingMeasured[n.tag] = ms; okCount++; } else { badCount++; }
-            });
-          } else {
-            final v = NodeVerdict(ok: ms != null, ms: ms, at: DateTime.now(), net: net);
-            rebuild(() {
-              nodeVerdicts[n.tag] = v;
-              if (ms != null) { pingMeasured[n.tag] = ms; okCount++; }
-              else { pingMeasured.remove(n.tag); badCount++; }
-            });
-          }
-        }
-      }
-      await Future.wait([for (var i = 0; i < lanes; i++) worker()]);
+      // Проверка тяжелее TCP-коннекта: каждый узел это отдельный запуск движка. Идём пулом с
+      // ограничением одновременности (runPooled): на десктопе 6 параллельных процессов xray —
+      // ок, больше — нет; на Android временный экземпляр поднимает системная часть — по одному.
+      // Бюджет на узел 4 с (probeTimeout) → флот из ~13 узлов укладывается в ~10–12 с вместо
+      // минут последовательного обхода.
+      final lanes = Platform.isAndroid ? 1 : 6;
+      rebuild(() { pingTotal = targets.length; pingDone = 0; });
+      await runPooled<void>([
+        for (final n in targets)
+          () async {
+            var ms = await TunnelEngine.instance.probe(n);
+            // Сквозной замер молчит — фолбэк на живой пинг observatory поднятого туннеля.
+            if (ms == null && viaTunnel) ms = _observatoryPing(n.tag);
+            if (viaTunnel) {
+              // Только живое число сессии: молчащий узел старый ручной замер НЕ стирает —
+              // замер сквозь VPN ничего не говорит о прямой доступности.
+              rebuild(() {
+                if (ms != null) { pingMeasured[n.tag] = ms; okCount++; } else { badCount++; }
+                pingDone++;
+              });
+            } else {
+              final v = NodeVerdict(ok: ms != null, ms: ms, at: DateTime.now(), net: net);
+              rebuild(() {
+                nodeVerdicts[n.tag] = v;
+                if (ms != null) { pingMeasured[n.tag] = ms; okCount++; }
+                else { pingMeasured.remove(n.tag); badCount++; }
+                pingDone++;
+              });
+            }
+          },
+      ], lanes);
       if (!viaTunnel) await _saveVerdicts();
 
       // Выбор «лучшего сервера» пересобираем ПОСЛЕ проверки: до неё приговоров не было, и

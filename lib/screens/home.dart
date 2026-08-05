@@ -19,6 +19,11 @@ extension ShellHome on ShellState {
     final attemptLine = appLang == 'en'
         ? 'reconnecting, attempt ${_conn.reconnectAttempt}'
         : 'переподключение, попытка ${_conn.reconnectAttempt}';
+    // Автоперебор (режим «лучший сервер»): какой кандидат на пробе и который он по счёту.
+    // Название сервера — через tr(): это страна из выдачи, она есть в словаре kCountryEn.
+    final tryLine = appLang == 'en'
+        ? 'trying ${tr(_conn.tryServer)}… (${_conn.tryAttempt}/${ConnectionController.kMaxTryAttempts})'
+        : 'пробуем ${tr(_conn.tryServer)}… (${_conn.tryAttempt}/${ConnectionController.kMaxTryAttempts})';
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
       children: [
@@ -52,7 +57,7 @@ extension ShellHome on ShellState {
             color: connected ? C.accentSoft : C.muted, letterSpacing: 2))),
         const SizedBox(height: 4),
         Center(child: Text(
-          conn == 1 ? (reconnecting ? attemptLine : tr('устанавливаем соединение…'))
+          conn == 1 ? (reconnecting ? attemptLine : (_conn.tryAttempt > 0 ? tryLine : tr('устанавливаем соединение…')))
               : reconnecting ? attemptLine
               : connBlocked ? tr('VPN отвалился — килл-свитч не пускает трафик напрямую')
               : conn == 0 ? tr('нажми на кнопку')
