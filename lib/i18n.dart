@@ -229,6 +229,8 @@ const Map<String, String> _kEn = {
   'Ни один сервер не ответил — проверь интернет': 'No server answered — check your internet',
   'Прямая нода недоступна в этой сети — подключил через 🛡️':
       'The direct node is unreachable on this network — connected via a 🛡️ relay',
+  'только что': 'just now',
+  'данные недоступны': 'data unavailable',
   'скоро': 'soon',
   'прямой узел': 'direct node',
   'через CDN': 'via CDN',

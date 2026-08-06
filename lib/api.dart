@@ -735,6 +735,39 @@ extension ShellApi on ShellState {
     await _loadNodes();
   }
 
+  /// Публичная статистика доступности нод (спарклайны внизу «Серверов»). Тот же троттлинг
+  /// 5 минут, что у _maybeRefreshNodes. Сбой сети/формата — НЕ ломает страницу: поднимаем
+  /// флаг nodeStatsFailed, и блок честно показывает «данные недоступны» (под «белыми
+  /// списками» origin мёртв — это ожидаемый путь, а не авария).
+  Future<void> _maybeRefreshNodeStats() async {
+    if (_statsLoading) return;
+    final at = nodeStatsFetchedAt;
+    if (at != null && DateTime.now().difference(at) < const Duration(minutes: 5)) return;
+    _statsLoading = true;
+    try {
+      final r = await http.get(Uri.parse(kNodeStatsUrl)).timeout(const Duration(seconds: 10));
+      if (!mounted) return;
+      if (r.statusCode != 200) {
+        rebuild(() => nodeStatsFailed = true);
+        return;
+      }
+      final parsed = parseNodeStats(r.body);
+      rebuild(() {
+        if (parsed != null) {
+          nodeStats = parsed;
+          nodeStatsFailed = false;
+          nodeStatsFetchedAt = DateTime.now();
+        } else {
+          nodeStatsFailed = true; // ответ не по форме — как сбой сети
+        }
+      });
+    } catch (_) {
+      if (mounted) rebuild(() => nodeStatsFailed = true);
+    } finally {
+      _statsLoading = false;
+    }
+  }
+
 
   Future<void> _leakCheck() => _runTool(tr('Проверка утечек'), () async {
         final r = await http.get(Uri.parse('https://api.ipify.org?format=json')).timeout(const Duration(seconds: 15));

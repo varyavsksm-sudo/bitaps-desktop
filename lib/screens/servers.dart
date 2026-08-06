@@ -90,8 +90,75 @@ extension ShellServers on ShellState {
           ],
           const SizedBox(height: 22),
           ..._serverSections(locked),
+          const SizedBox(height: 22),
+          _nodeStatsBlock(),
         ],
       ),
+    );
+  }
+
+  // ── «Доступность за 48 часов»: публичная статистика нод (node_stats.dart) ──
+  Widget _nodeStatsBlock() {
+    final rep = nodeStats;
+    // Сбой сети (под «белыми списками» origin мёртв — это норма) — честная строка,
+    // страница не ломается; при первой загрузке — нейтральный «Минутку…».
+    if (rep == null || rep.nodes.isEmpty) {
+      return _card(child: Row(children: [
+        Icon(Icons.show_chart, size: 15, color: C.muted),
+        const SizedBox(width: 8),
+        Expanded(child: Text(
+          '${appLang == 'en' ? 'Availability · 48h' : 'Доступность за 48 часов'} · '
+          '${nodeStatsFailed ? tr('данные недоступны') : tr('Минутку…')}',
+          style: mono(12, c: C.muted))),
+      ]));
+    }
+    var age = DateTime.now().difference(rep.generatedAt.toLocal());
+    if (age.isNegative) age = Duration.zero; // часы на устройстве спешат — не показываем «будущее»
+    final m = age.inMinutes;
+    final ago = m < 1
+        ? tr('только что')
+        : appLang == 'en'
+            ? '$m min ago'
+            : '${_ruPlural(m, 'минуту', 'минуты', 'минут')} назад';
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _kicker(appLang == 'en'
+          ? 'availability · 48h · updated $ago'
+          : 'доступность за 48 часов · обновлено $ago'),
+      const SizedBox(height: 10),
+      for (final n in rep.nodes) _nodeStatRow(n),
+    ]);
+  }
+
+  Widget _nodeStatRow(NodeStat n) {
+    final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final points = sparkPoints(n.series,
+        buckets: kSparkHours, fromSec: nowSec - kSparkHours * 3600, toSec: nowSec);
+    final level = sparkLevel(sparkAvgMs(points));
+    final color = switch (level) { 0 => C.ok, 1 => C.warn, 2 => C.danger, _ => C.muted };
+    // Имя как у узла подписки («🇫🇮 Финляндия» / «🛡️ … · LTE»): флаг отделяем, хвост рельсы
+    // убираем — иначе название не находится в словаре стран (как в serverFromSubNode).
+    final parts = n.name.trim().split(' ');
+    final flag = parts.isNotEmpty ? parts.first : '🌐';
+    var title = parts.length > 1 ? parts.sublist(1).join(' ') : n.name;
+    title = title.replaceFirst(RegExp(r'\s*·\s*(LTE|БС|CDN)\s*$', caseSensitive: false), '');
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(color: C.fill, borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: C.line)),
+      child: Row(children: [
+        Text(flag, style: const TextStyle(fontSize: 15)),
+        const SizedBox(width: 8),
+        Container(width: 7, height: 7,
+            decoration: BoxDecoration(color: n.ok ? C.ok : C.danger, shape: BoxShape.circle)),
+        const SizedBox(width: 8),
+        Expanded(child: Text(tr(title), style: disp(13, w: FontWeight.w600),
+            maxLines: 1, overflow: TextOverflow.ellipsis)),
+        Text(n.rttNow != null ? '${n.rttNow} ms' : '—', style: mono(11, c: C.muted)),
+        const SizedBox(width: 10),
+        SizedBox(width: 96, height: 26,
+            child: CustomPaint(painter: SparklinePainter(points, color))),
+      ]),
     );
   }
 
@@ -271,4 +338,47 @@ extension ShellServers on ShellState {
       ),
     );
   }
+}
+
+/// Спарклайн доступности ноды за 48 часов: линия по нормализованным точкам (sparkPoints),
+/// мёртвые промежутки (null) — разрыв. Цвет линии — по среднему rtt (см. sparkLevel),
+/// считается снаружи, painter тупой.
+class SparklinePainter extends CustomPainter {
+  SparklinePainter(this.points, this.color);
+  final List<double?> points;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final alive = points.whereType<double>().toList();
+    if (alive.isEmpty || size.width <= 0 || size.height <= 0) return;
+    final lo = alive.reduce(math.min);
+    final hi = alive.reduce(math.max);
+    final span = (hi - lo) < 1 ? 1.0 : (hi - lo); // почти ровная линия — не растягиваем шум
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final n = points.length;
+    double x(int i) => n == 1 ? size.width / 2 : size.width * i / (n - 1);
+    double y(double v) => size.height - 2 - (v - lo) / span * (size.height - 4);
+    final path = Path();
+    var pen = false; // false → следующая живая точка начинает новый сегмент (разрыв)
+    for (var i = 0; i < n; i++) {
+      final v = points[i];
+      if (v == null) { pen = false; continue; }
+      if (!pen) {
+        path.moveTo(x(i), y(v));
+        pen = true;
+      } else {
+        path.lineTo(x(i), y(v));
+      }
+    }
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(SparklinePainter old) => old.points != points || old.color != color;
 }

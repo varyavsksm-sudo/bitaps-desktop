@@ -40,6 +40,7 @@ part 'native.dart';      // deep-link (bitaps://), автозапуск при �
 part 'widgets.dart';     // painters + общие виджеты-строители
 part 'api.dart';         // сетевые вызовы к edge-функциям + сетевые инструменты
 part 'node_probe.dart';  // приговоры по узлам: что реально пропускает трафик на этой сети
+part 'node_stats.dart';  // публичная статистика доступности нод (спарклайны на «Серверах»)
 part 'screens/home.dart';
 part 'screens/servers.dart';
 part 'screens/account.dart';
@@ -231,6 +232,14 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   /// Когда сервис выдачи в последний раз УСПЕШНО отдал список узлов. Нужен экрану «Серверы»:
   /// при открытии он подтягивает список, только если прошло >5 мин (см. _maybeRefreshNodes).
   DateTime? nodesFetchedAt;
+  /// Публичная статистика доступности нод (спарклайны внизу «Серверов»): последний удачный
+  /// отчёт, момент его загрузки (троттлинг 5 мин) и признак сбоя — по нему вместо графика
+  /// показываем честную строку «данные недоступны», страница не ломается.
+  NodeStatsReport? nodeStats;
+  DateTime? nodeStatsFetchedAt;
+  bool nodeStatsFailed = false;
+  bool _statsLoading = false; // re-entrancy-гвард загрузки статистики
+  Timer? _statsTimer; // периодическое обновление, пока открыта вкладка «Серверы»
   /// Список узлов сейчас показан ИЗ КЭША (выдача недоступна — сеть в режиме «белых списков»):
   /// дата того успешного ответа. null — свежая выдача из сети. Экран «Серверы» показывает
   /// пометку «список из кэша от <дата>» — молча подменять свежий список старым нельзя.
@@ -474,6 +483,11 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     // deep-link (bitaps://) — все платформы; автозапуск+хоткей — только десктоп. Всё fail-soft.
     _initDeepLinks();
     if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) _initNativeDesktop();
+    // Статистика доступности нод: периодическое обновление, пока открыта вкладка «Серверы»
+    // (внутри троттлинг 5 мин — сеть не дёргаем впустую на других вкладках).
+    _statsTimer = Timer.periodic(const Duration(minutes: 5), (_) {
+      if (mounted && tab == 1 && !_locked) _maybeRefreshNodeStats();
+    });
     // Одноразовый пост-фрейм: первичная сверка анимаций после первого кадра (дальше — событийно).
     WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _syncAnimations(); });
   }
@@ -698,6 +712,7 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     _disposeHotkey();
     _onbCtrl.dispose();
     _pinLockTimer?.cancel();
+    _statsTimer?.cancel();
     _conn.dispose();
     _spin.dispose();
     _wave.dispose();
@@ -1190,8 +1205,9 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
     setState(() => tab = i);
     _syncAnimations();
     // Открытие «Серверов» подтягивает свежие узлы (не чаще раза в 5 минут — внутри): новые
-    // ноды подписки обязаны появляться без перелогина.
-    if (i == 1) _maybeRefreshNodes();
+    // ноды подписки обязаны появляться без перелогина. И статистику доступности — тоже
+    // (тот же троттлинг внутри _maybeRefreshNodeStats).
+    if (i == 1) { _maybeRefreshNodes(); _maybeRefreshNodeStats(); }
   }
 
   void _pickServer(Server s) {

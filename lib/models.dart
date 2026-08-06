@@ -35,6 +35,9 @@ const int kBuildNumber = int.fromEnvironment('BUILD_NUMBER', defaultValue: 0);
 // Номер последней сборки и сами файлы отдаём со СВОЕГО сервера: сторонний хостинг для
 // пользователя из РФ — лишние редиректы и риск блокировки, а нам не нужен посредник.
 const kBuildNumberUrl = 'https://origin.bit-core.online/dl/build_number.txt';
+// Публичная статистика доступности нод (спарклайны на «Серверы»): generated_at + per-node
+// ok/rtt_now/series. Публичный эндпоинт — без токена и hwid, ничего личного не уходит.
+const kNodeStatsUrl = 'https://origin.bit-core.online/public/stats';
 const kDownloadUrl = 'https://bitapsvpn.com/app.html';
 
 // «Что нового»: changelog.json на сайте (репо bitaps-web). Формат: {"entries":[{"build":N,
