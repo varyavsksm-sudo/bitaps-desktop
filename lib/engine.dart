@@ -72,6 +72,10 @@ class TunnelEngine {
 
   XrayProcess? _proc;
   int? _metricsPort;
+  /// Поколение десктоп-подключения: инкрементируется при любой остановке движка
+  /// (_stopDesktop/failClosed). Позднее завершение отменённой попытки connect по нему
+  /// откатывается (см. _connectDesktop) — иначе туннель-сирота без слушателя.
+  int _connectEpoch = 0;
   /// Подписка на статусы NetworkExtension (iOS): живёт от connect() до disconnect().
   StreamSubscription<Map<String, dynamic>>? _nativeSub;
   /// Локальный HTTP-вход поднятого десктоп-туннеля: verifyConnected идёт ЧЕРЕЗ него —
@@ -163,6 +167,12 @@ class TunnelEngine {
     // старый прокси НЕ снимаем — иначе между «снял» и «enable переписал» трафик пошёл бы
     // напрямую; блокировку килл-свитча держим до поднятия нового движка.
     await _stopDesktop(disableProxy: !keepProxy);
+    // Поколение попытки захватываем ПОСЛЕ остановки: таймаут/отмена/новая попытка снаружи
+    // гасят движок (_stopDesktop/failClosed инкрементируют _connectEpoch), а ЭТА попытка
+    // могла задержаться (медленный ответ на системный запрос пароля macOS в enable) и
+    // доехать позже — без сверки поколения она поднимала «осиротевший» туннель без
+    // слушателя поверх состояния новой попытки (багхант, MED).
+    final epoch = _connectEpoch;
     final bin = XrayBinary.locate();
     if (bin == null) throw EngineUnavailable('VPN-движок не найден в сборке');
     // Порты берём свободные: фиксированные конфликтуют со вторым запуском и чужими клиентами.
@@ -181,13 +191,28 @@ class TunnelEngine {
           _events.add(const EngineEvent('disconnected',
               message: 'движок туннеля неожиданно завершил работу'));
         });
+    if (epoch != _connectEpoch) { await proc.stop(); return; } // отменили, пока стартовал движок
     final proxyOk = await SystemProxy.enable(socksPort: socksPort, httpPort: httpPort);
     if (!proxyOk) {
       // Прокси мог встать частично (на части сервисов/платформы) — снимаем ДО остановки
       // движка, иначе система остаётся с указателем в порт, который сейчас умрёт.
-      try { await SystemProxy.disable(); } catch (_) {/* при откате ошибки глотаем */}
+      // Исключение — реконнект из блокировки (keepProxy): там прокси НЕ снимаем, он и есть
+      // fail-closed. Безусловный disable() сбрасывал флаг enabled, и _fail дальше читал это
+      // как «блокировки нет» → fail-open при ВКЛЮЧЁННОМ килл-свитче (macOS «Отмена» на
+      // запросе пароля — боевой сценарий; багхант, HIGH).
+      if (!keepProxy) {
+        try { await SystemProxy.disable(); } catch (_) {/* при откате ошибки глотаем */}
+      }
       await proc.stop();
       throw EngineUnavailable('не удалось включить системный прокси');
+    }
+    if (epoch != _connectEpoch) {
+      // Позднее завершение отменённой попытки: добиваем процесс и снимаем прокси, ТОЛЬКО
+      // если он всё ещё указывает на порты ЭТОЙ попытки — прокси новой попытки, поднятый
+      // поверх, трогать нельзя.
+      await proc.stop();
+      await SystemProxy.disableIfPorts({socksPort, httpPort});
+      return;
     }
     _proc = proc;
     _metricsPort = metricsPort;
@@ -307,6 +332,7 @@ class TunnelEngine {
   /// NetworkExtension через includeAllNetworks (native_ios/AppDelegate.swift).
   Future<void> failClosed() async {
     if (kind() != EngineKind.desktopXray) { await disconnect(); return; }
+    _connectEpoch++; // как и _stopDesktop: летящая попытка connect обязана откатиться
     _statsTimer?.cancel();
     _statsTimer = null;
     // Всё как в _stopDesktop, кроме SystemProxy.disable(): прокси намеренно остаётся.
@@ -319,6 +345,7 @@ class TunnelEngine {
   }
 
   Future<void> _stopDesktop({bool disableProxy = true}) async {
+    _connectEpoch++; // любая остановка инвалидирует летящую попытку connect
     _statsTimer?.cancel();
     _statsTimer = null;
     // Системный прокси снимаем ПЕРВЫМ: если упасть между шагами, лучше остаться без прокси,
@@ -453,35 +480,43 @@ class TunnelEngine {
   }
 
   Future<bool> _verifyOnce() async {
-    // Оба адреса делят один бюджет verifyTimeout: успех = хотя бы один ответил вовремя
-    // СКВОЗЬ туннель (не TCP до адреса узла и не пинг — только реальный fetch сквозь него).
-    final deadline = DateTime.now().add(verifyTimeout);
-    for (final url in probeUrls) {
-      final left = deadline.difference(DateTime.now());
-      if (left <= Duration.zero) return false;
+    // Оба адреса опрашиваем ПАРАЛЛЕЛЬНО в одном бюджете verifyTimeout: успех = хотя бы один
+    // ответил <400 СКВОЗЬ туннель (не TCP до адреса узла и не пинг — только реальный fetch
+    // сквозь него). Последовательный опрос отдавал весь бюджет первому адресу (getUrl/close
+    // брали полный left каждый): подвисший origin сжигал всё, gstatic не вызывался никогда,
+    // худший verify растягивался до ~25 с, а перебор кандидатов — до минут (багхант, HIGH).
+    final results = await Future.wait([
+      for (final url in probeUrls) _verifyUrl(url),
+    ]);
+    return results.any((ok) => ok);
+  }
+
+  /// Один gen204 сквозь туннель в бюджете verifyTimeout. Никогда не бросает.
+  Future<bool> _verifyUrl(String url) async {
+    try {
+      if (kind() == EngineKind.androidXray) {
+        final ms = await _android.connectedDelay(url).timeout(verifyTimeout);
+        return ms > 0;
+      }
+      // Десктоп: системный прокси для dart:io не существует (HttpClient его игнорирует) —
+      // прямой запрос измерял бы НАШУ сеть, а не туннель. Идём через локальный HTTP-вход
+      // поднятого движка. Порта нет (движок не наш/не поднялся) — напрямую НЕ идём: ложный
+      // «трафик идёт» при мёртвом туннеле хуже честного «не прошло» (багхант, LOW).
+      final httpPort = kind() == EngineKind.desktopXray ? _activeHttpPort : null;
+      if (kind() == EngineKind.desktopXray && httpPort == null) return false;
+      final client = HttpClient()..connectionTimeout = verifyTimeout;
+      if (httpPort != null) client.findProxy = (_) => 'PROXY 127.0.0.1:$httpPort';
       try {
-        if (kind() == EngineKind.androidXray) {
-          final ms = await _android.connectedDelay(url).timeout(left);
-          if (ms > 0) return true;
-          continue;
-        }
-        // Десктоп: системный прокси для dart:io не существует (HttpClient его игнорирует) —
-        // прямой запрос измерял бы НАШУ сеть, а не туннель. Идём через локальный HTTP-вход
-        // поднятого движка, как в _probeDesktop; порта нет (не должно быть) — прямой запрос.
-        final client = HttpClient()..connectionTimeout = left;
-        final httpPort = kind() == EngineKind.desktopXray ? _activeHttpPort : null;
-        if (httpPort != null) client.findProxy = (_) => 'PROXY 127.0.0.1:$httpPort';
-        try {
-          final req = await client.getUrl(Uri.parse(url)).timeout(left);
-          final res = await req.close().timeout(left);
-          await res.drain<void>();
-          if (res.statusCode < 400) return true;
-        } finally {
-          client.close(force: true);
-        }
-      } catch (_) { /* следующий адрес */ }
+        final req = await client.getUrl(Uri.parse(url)).timeout(verifyTimeout);
+        final res = await req.close().timeout(verifyTimeout);
+        await res.drain<void>();
+        return res.statusCode < 400;
+      } finally {
+        client.close(force: true);
+      }
+    } catch (_) {
+      return false;
     }
-    return false;
   }
 
   Future<int?> _probeAndroid(SubNode node) async {

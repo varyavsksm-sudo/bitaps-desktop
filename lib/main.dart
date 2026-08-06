@@ -79,7 +79,7 @@ Future<void> main(List<String> args) async {
     // движка слушает — туннель чужой ЖИВОЙ копии, прокси не трогаем; молчит — прокси наш
     // протухший, снимаем и добиваем осиротевший xray (аудит п.3/п.4). Ждём ДО runApp:
     // иначе коннект в первые секунды мог перехватить протухший прокси в «снимок пользователя».
-    final stale = await SystemProxy.cleanupStale();
+    final stale = await SystemProxy.cleanupStale(instanceLockHeld: inst.lock != null);
     if (stale == StaleCleanup.keptAlive) {
       stderr.writeln('обнаружен живой туннель другой копии — системный прокси не трогаю');
     }

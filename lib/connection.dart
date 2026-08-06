@@ -284,8 +284,13 @@ class ConnectionController extends ChangeNotifier {
             // первый вызов ловит уже поднятый туннель, второй — тот, что встал следом.
             // При живой блокировке гасим БЕЗ снятия прокси (_stopEngine → failClosed).
             await _stopEngine().catchError((_) {});
-            Future<void>.delayed(const Duration(seconds: 3),
-                () => _stopEngine().catchError((_) {}));
+            // Отложенный добив СТРОГО привязан к поколению: за эти 3 с человек мог начать
+            // НОВУЮ попытку — без проверки gen/conn он убивал бы свежий движок (вплоть до
+            // «Подключено» при мёртвом туннеле без единого события; багхант, HIGH).
+            Future<void>.delayed(const Duration(seconds: 3), () {
+              if (_disposed || gen != _gen || conn != 0) return;
+              _stopEngine().catchError((_) {});
+            });
             _resetTry(); _fail(gen, appLang == 'en' ? 'Connection timed out' : 'Подключение не удалось — таймаут', fix: ConnFix.none);
             return;
           } catch (e) {
@@ -421,6 +426,13 @@ class ConnectionController extends ChangeNotifier {
       // Реконнект ИЗ блокировки килл-свитча идёт с keepProxy сам: blocked ещё жив, и toggle()
       // (ветка conn==0) передаст его движку — прокси держится всю попытку.
       if (_disposed || conn != 0) return;
+      // Тумблер могли выключить уже ПОСЛЕ планирования: перепроверяем при срабатывании —
+      // иначе выключение «Автопереподключения» не отменяло запланированную попытку (LOW).
+      if (!reconnectOn()) {
+        reconnectAttempt = 0;
+        notifyListeners(); // убрать «переподключение, попытка N» с Главной
+        return;
+      }
       toggle();
     });
     notifyListeners(); // на Главной появляется «переподключение, попытка N»
@@ -458,19 +470,22 @@ class ConnectionController extends ChangeNotifier {
   // боевой режим: не удалось подключиться — честно откатываемся в «выключено».
   // Причину показываем ДВАЖДЫ намеренно: тост ловит момент (подключение могли запустить хоткеем
   // или из трея с любой вкладки), карточка на Главной держит её вместе с кнопкой «что делать».
-  void _fail(int gen, String msg, {ConnFix fix = ConnFix.support}) {
+  Future<void> _fail(int gen, String msg, {ConnFix fix = ConnFix.support}) async {
     if (_disposed || gen != _gen) return;
     _stopWatch();
     onSpin(false);
     conn = 0;
-    // Килл-свитч: блокировка переживает НЕУДАЧНУЮ попытку. toggle() из blocked прокси не снимал,
-    // поэтому если тумблер включён и наш прокси в системе остался (SystemProxy.enabled) —
-    // возвращаем blocked=true и карточку: молчаливый fail-open после сработавшего килл-свитча
-    // недопустим. Если прокси в этой попытке уже снят (откат в _connectDesktop) или тумблер
-    // успели выключить — блокировки фактически нет, и карточку не выдумываем; возможный
-    // прокси-сироту (тумблер выключили после обрыва) при этом снимаем, чтобы человек не
-    // остался без интернета без единой подсказки.
-    final hold = kRealTunnel && holdProxyOnDrop(killSwitchOn(), TunnelEngine.kind()) && SystemProxy.enabled;
+    // Килл-свитч: блокировка переживает НЕУДАЧНУЮ попытку. О блокировке судим по ФАКТУ в
+    // системе (looksOurs), а не по флагу памяти SystemProxy.enabled: при реконнекте из
+    // блокировки enable() мог упасть (macOS «Отмена» на запросе пароля), и хотя engine при
+    // keepProxy прокси не снимает, флаг уже мог не отражать реальность — fail-open при
+    // включённом килл-свитче недопустим (багхант, HIGH). Прокси сменился под нами или
+    // тумблер успели выключить — блокировки фактически нет, карточку не выдумываем.
+    var hold = false;
+    if (kRealTunnel && holdProxyOnDrop(killSwitchOn(), TunnelEngine.kind())) {
+      hold = await SystemProxy.looksOurs();
+      if (_disposed || gen != _gen) return; // пока проверяли систему — началась новая попытка
+    }
     if (blocked && !hold) TunnelEngine.instance.disconnect(); // fire-and-forget, как в reset()
     blocked = hold;
     failMsg = msg; failFix = fix;

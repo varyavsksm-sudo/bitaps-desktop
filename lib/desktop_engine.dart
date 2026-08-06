@@ -16,6 +16,8 @@ import 'dart:convert';
 import 'dart:ffi' as ffi;
 import 'dart:io';
 
+import 'package:shared_preferences/shared_preferences.dart';
+
 /// Не нашли или не смогли запустить движок — вызывающий показывает текст пользователю.
 class EngineUnavailable implements Exception {
   final String message;
@@ -243,9 +245,22 @@ class SystemProxy {
 
   static bool get enabled => _enabled;
 
+  /// Обертка: после успешного включения персистим НАШИ порты — по ним looksOurs отличает
+  /// наш прокси от чужого localhost-прокси (Happ на 127.0.0.1:10808 и т.п., багхант MED).
   static Future<bool> enable({required int socksPort, required int httpPort}) async {
+    final ok = await _enableInner(socksPort: socksPort, httpPort: httpPort);
+    if (ok) await _saveOwnPorts(socksPort, httpPort);
+    return ok;
+  }
+
+  static Future<bool> _enableInner({required int socksPort, required int httpPort}) async {
     try {
-      await _snapshot(); // до любой записи: потом вернуть систему как было
+      // Снимок чужих настроек — ТОЛЬКО если текущий системный прокси НЕ наш. Иначе (реконнект
+      // из блокировки килл-свитча, повторное включение поверх своего) снимок с реальными
+      // настройками пользователя затирался нашим же мёртвым 127.0.0.1:<порт>, и disable() →
+      // _restore() вписывал мёртвый порт обратно как «настройки пользователя» — «нет интернета»
+      // после отключения (багхант, CRIT).
+      if (snapshotNeeded(await looksOurs())) await _snapshot(); // до любой записи: вернуть как было
       if (Platform.isMacOS) {
         _macServices = await _macNetworkServices();
         if (_macServices.isEmpty) return false;
@@ -311,6 +326,7 @@ class SystemProxy {
   /// локальный адрес, то есть это наш.
   static Future<void> disable() async {
     _enabled = false;
+    _clearOwnPorts(); // прокси снят — записи о «наших» портах больше нет
     try {
       // Есть снимок: возвращаем чужие настройки ТОЛЬКО если текущие всё ещё наши (localhost).
       // Прокси сменился под нами — человек настроил свой сам: его выбор не трогаем вовсе.
@@ -501,20 +517,32 @@ class SystemProxy {
 
   /// Остался ли в системе НАШ прокси (указывает на localhost) — вызывается на старте
   /// приложения, чтобы прибрать за прошлым упавшим запуском.
+  ///
+  /// «localhost = наш» бьёт по другим VPN-клиентам (Happ держит 127.0.0.1:10808): наш
+  /// _stopDesktop → disable() без снимка молча гасил бы чужой работающий прокси (багхант,
+  /// MED). Поэтому свои реальные порты персистятся при enable (kOwnPortsPrefsKey), и «нашим»
+  /// считается только совпадение по ним; нет записи (сессия старой версии) — прежнее
+  /// поведение как fallback.
   static Future<bool> looksOurs() async {
     try {
+      final own = await _loadOwnPorts();
       if (Platform.isWindows) {
         const key = r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings';
         final en = await Process.run('reg', ['query', key, '/v', 'ProxyEnable']);
         if (!(en.stdout ?? '').toString().contains('0x1')) return false;
         final srv = await Process.run('reg', ['query', key, '/v', 'ProxyServer']);
-        return (srv.stdout ?? '').toString().contains('127.0.0.1');
+        final server = (srv.stdout ?? '').toString();
+        if (!server.contains('127.0.0.1')) return false;
+        return ownPortsMatch(own, winProxyServerPorts(server));
       }
       if (Platform.isMacOS) {
         for (final svc in await _macNetworkServices()) {
           final r = await Process.run('/usr/sbin/networksetup', ['-getsocksfirewallproxy', svc]);
           final out = (r.stdout ?? '').toString();
           if (out.contains('Enabled: Yes') && out.contains('127.0.0.1')) {
+            final port =
+                int.tryParse(RegExp(r'Port:\s*(\d+)').firstMatch(out)?.group(1) ?? '') ?? 0;
+            if (!ownPortsMatch(own, {port})) continue; // чужой localhost-прокси — не трогаем
             _macServices = [svc];
             return true;
           }
@@ -525,10 +553,71 @@ class SystemProxy {
         final mode = await Process.run('gsettings', ['get', 'org.gnome.system.proxy', 'mode']);
         if (!(mode.stdout ?? '').toString().contains('manual')) return false;
         final host = await Process.run('gsettings', ['get', 'org.gnome.system.proxy.socks', 'host']);
-        return (host.stdout ?? '').toString().contains('127.0.0.1');
+        if (!(host.stdout ?? '').toString().contains('127.0.0.1')) return false;
+        final pr = await Process.run('gsettings', ['get', 'org.gnome.system.proxy.socks', 'port']);
+        final port = int.tryParse((pr.stdout ?? '').toString().trim()) ?? 0;
+        return ownPortsMatch(own, {port});
       }
     } catch (_) {/* не смогли прочитать — считаем, что чужого не трогаем */}
     return false;
+  }
+
+  // ── «наши» порты: персист при enable, сверка в looksOurs ──
+
+  /// Ключ prefs с портами нашего последнего включения (строка 'socks,http').
+  static const String kOwnPortsPrefsKey = 'proxyOwnPorts';
+  static Set<int>? _ownPorts; // лениво грузится из prefs в looksOurs
+
+  /// Разбор persisted-строки портов. null — записи нет или она битая (не доверяем).
+  /// Чистая функция — покрыта proxy_guard_test.
+  static Set<int>? parseOwnPorts(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    final out = <int>{};
+    for (final part in raw.split(',')) {
+      final v = int.tryParse(part.trim());
+      if (v == null || v <= 0 || v > 65535) return null;
+      out.add(v);
+    }
+    return out.isEmpty ? null : out;
+  }
+
+  /// «Текущий прокси — наш?» по портам. Нет persisted-записи (сессия старой версии) —
+  /// прежнее поведение (localhost = наш), иначе требуем пересечения портов.
+  /// Чистая функция — покрыта proxy_guard_test.
+  static bool ownPortsMatch(Set<int>? own, Set<int> current) =>
+      own == null || own.isEmpty || current.any(own.contains);
+
+  /// Делать ли снимок системных настроек перед включением: только когда текущий прокси НЕ
+  /// наш — иначе снимок с реальными настройками пользователя затирался бы нашим же мёртвым
+  /// прокси (багхант, CRIT). Чистая функция — покрыта proxy_guard_test.
+  static bool snapshotNeeded(bool currentProxyIsOurs) => !currentProxyIsOurs;
+
+  static Future<void> _saveOwnPorts(int socksPort, int httpPort) async {
+    _ownPorts = {socksPort, httpPort};
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setString(kOwnPortsPrefsKey, '$socksPort,$httpPort');
+    } catch (_) {/* без персиста — откат на прежнее поведение */}
+  }
+
+  static Future<Set<int>?> _loadOwnPorts() async {
+    if (_ownPorts != null) return _ownPorts;
+    Set<int>? parsed;
+    try {
+      final p = await SharedPreferences.getInstance();
+      parsed = parseOwnPorts(p.getString(kOwnPortsPrefsKey));
+    } catch (_) {
+      parsed = null;
+    }
+    _ownPorts = parsed;
+    return parsed;
+  }
+
+  static void _clearOwnPorts() {
+    _ownPorts = null;
+    SharedPreferences.getInstance()
+        .then((p) => p.remove(kOwnPortsPrefsKey))
+        .catchError((_) => false); // best-effort: запись не критична
   }
 
   /// Прибраться на старте приложения за прошлой сессией (аудит п.1/п.3/п.4).
@@ -538,16 +627,19 @@ class SystemProxy {
   /// снимать прокси = убить ей трафик (fail-open). Порт молчит — это протухший прокси от
   /// упавшей/перезагруженной сессии: снимаем его (иначе у человека «нет интернета») и
   /// добиваем осиротевший xray нашей установки (родитель умер, процесс остался).
-  static Future<StaleCleanup> cleanupStale() async {
+  /// [instanceLockHeld] — мы УЖЕ держим блокировку одной копии (instance_lock.dart): живой
+  /// другой копии тогда быть не может (вторая вышла бы до уборки), и слушающий порт — это
+  /// осиротевший движок прошлой сессии: чистим и добиваем, а не keptAlive.
+  static Future<StaleCleanup> cleanupStale({bool instanceLockHeld = false}) async {
     if (!(Platform.isWindows || Platform.isMacOS || Platform.isLinux)) return StaleCleanup.nothing;
     final ours = await looksOurs();
     var alive = false;
     if (ours) {
       for (final port in await _ourProxyPorts()) {
-        if (await _portAlive(port)) { alive = true; break; }
+        if (await _socksAlive(port)) { alive = true; break; }
       }
     }
-    switch (decideStaleCleanup(proxyIsOurs: ours, engineAlive: alive)) {
+    switch (decideStaleCleanup(proxyIsOurs: ours, engineAlive: alive, instanceLockHeld: instanceLockHeld)) {
       case StaleCleanup.nothing:
         return StaleCleanup.nothing;
       case StaleCleanup.keptAlive:
@@ -560,9 +652,12 @@ class SystemProxy {
   }
 
   /// Решение уборки по факту liveness. Чистая функция — покрыта stale_cleanup_test.
-  static StaleCleanup decideStaleCleanup({required bool proxyIsOurs, required bool engineAlive}) {
+  /// [instanceLockHeld]: блокировка одной копии у нас → «живой порт» это сирота, а не другая
+  /// копия — чистим; без блокировки (порт блокировки занят чужим процессом) — прежний
+  /// консерватизм keptAlive.
+  static StaleCleanup decideStaleCleanup({required bool proxyIsOurs, required bool engineAlive, bool instanceLockHeld = false}) {
     if (!proxyIsOurs) return StaleCleanup.nothing; // чужой прокси не трогаем в любом случае
-    return engineAlive ? StaleCleanup.keptAlive : StaleCleanup.cleaned;
+    return (engineAlive && !instanceLockHeld) ? StaleCleanup.keptAlive : StaleCleanup.cleaned;
   }
 
   /// Порты 127.0.0.1 из строки ProxyServer вида «http=127.0.0.1:40000;…;socks=127.0.0.1:40002».
@@ -633,16 +728,35 @@ class SystemProxy {
     return {};
   }
 
-  /// Слушает ли кто-то локальный порт (тот же критерий, что готовность socks у XrayProcess).
-  static Future<bool> _portAlive(int port) async {
+  /// Слушает ли на порту НАШ движок. Голый TCP-connect не подходит: на порту протухшего
+  /// прокси мог сидеть ЧУЖОЙ сервис, и он читался бы как «живой туннель другой копии»
+  /// (keptAlive → протухший прокси не снимается, у человека нет интернета, UI молчит —
+  /// багхант, MED). Критерий — SOCKS5-рукопожатие нашего noauth-входа xray: шлём greeting
+  /// 05 01 00 и ждём выбор метода 05 00. Чужой не-SOCKS сервис молчит/ругается → false.
+  static Future<bool> _socksAlive(int port) async {
+    Socket? s;
     try {
-      final s = await Socket.connect('127.0.0.1', port,
+      s = await Socket.connect(InternetAddress.loopbackIPv4, port,
           timeout: const Duration(milliseconds: 300));
-      s.destroy();
-      return true;
+      s.add(const [0x05, 0x01, 0x00]);
+      await s.flush();
+      final reply = await s.first.timeout(const Duration(milliseconds: 500));
+      return reply.length >= 2 && reply[0] == 0x05 && reply[1] == 0x00;
     } catch (_) {
       return false;
+    } finally {
+      s?.destroy();
     }
+  }
+
+  /// Снять системный прокси, ТОЛЬКО если он сейчас указывает на один из [ports] (наша
+  /// попытка подключения). Откат позднего connect (engine.dart) зовёт это после смены
+  /// поколения: прокси новой попытки/чужого клиента трогать нельзя.
+  static Future<void> disableIfPorts(Set<int> ports) async {
+    try {
+      final cur = await _ourProxyPorts();
+      if (cur.any(ports.contains)) await disable();
+    } catch (_) {/* best-effort откат — старт/отмену не блокируем */}
   }
 
   /// Добить осиротевший xray.exe НАШЕЙ установки: родитель умер (краш/диспетчер задач),
