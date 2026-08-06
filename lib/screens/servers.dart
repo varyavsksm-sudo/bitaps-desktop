@@ -133,8 +133,10 @@ extension ShellServers on ShellState {
     final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final points = sparkPoints(n.series,
         buckets: kSparkHours, fromSec: nowSec - kSparkHours * 3600, toSec: nowSec);
-    final level = sparkLevel(sparkAvgMs(points));
-    final color = switch (level) { 0 => C.ok, 1 => C.warn, 2 => C.danger, _ => C.muted };
+    // Линия — акцент АКТИВНОЙ темы (неоново-оранжевый в Sunset), на светлой — затемнённый по
+    // правилу accentSoftInk; при смене темы/палитры перекрашивается пересборкой (цвет не
+    // кэшируется — считается на каждый build). Статус ноды — только точка у имени (ok/danger).
+    final color = sparkColor(C.accent, light: C.light);
     // Имя как у узла подписки («🇫🇮 Финляндия» / «🛡️ … · LTE»): флаг отделяем, хвост рельсы
     // убираем — иначе название не находится в словаре стран (как в serverFromSubNode).
     final parts = n.name.trim().split(' ');
@@ -341,8 +343,9 @@ extension ShellServers on ShellState {
 }
 
 /// Спарклайн доступности ноды за 48 часов: линия по нормализованным точкам (sparkPoints),
-/// мёртвые промежутки (null) — разрыв. Цвет линии — по среднему rtt (см. sparkLevel),
-/// считается снаружи, painter тупой.
+/// мёртвые промежутки (null) — разрыв, под линией заливка тем же цветом с альфой ~16%.
+/// Цвет приходит снаружи (акцент активной темы — см. sparkColor), painter тупой и ничего
+/// не кэширует: смена темы перекрашивает график ближайшей пересборкой.
 class SparklinePainter extends CustomPainter {
   SparklinePainter(this.points, this.color);
   final List<double?> points;
@@ -355,28 +358,54 @@ class SparklinePainter extends CustomPainter {
     final lo = alive.reduce(math.min);
     final hi = alive.reduce(math.max);
     final span = (hi - lo) < 1 ? 1.0 : (hi - lo); // почти ровная линия — не растягиваем шум
-    final paint = Paint()
+    final stroke = Paint()
       ..color = color
       ..strokeWidth = 1.5
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
+    final fill = Paint()
+      ..color = color.withValues(alpha: 0.16)
+      ..style = PaintingStyle.fill;
     final n = points.length;
     double x(int i) => n == 1 ? size.width / 2 : size.width * i / (n - 1);
     double y(double v) => size.height - 2 - (v - lo) / span * (size.height - 4);
-    final path = Path();
+    // Разрывы делят линию на сегменты: заливка и штрих рисуются посегментно, чтобы мёртвые
+    // промежутки оставались честными пустотами, а не «провисшими» соединениями.
+    final line = Path();
     var pen = false; // false → следующая живая точка начинает новый сегмент (разрыв)
+    var segStart = 0;
+    void closeSegment(int endExclusive) {
+      if (!pen) return;
+      // заливка сегмента: вниз к нижней кромке и назад
+      final f = Path()
+        ..moveTo(x(segStart), y(points[segStart]!));
+      for (var j = segStart + 1; j < endExclusive; j++) {
+        f.lineTo(x(j), y(points[j]!));
+      }
+      f
+        ..lineTo(x(endExclusive - 1), size.height)
+        ..lineTo(x(segStart), size.height)
+        ..close();
+      canvas.drawPath(f, fill);
+    }
     for (var i = 0; i < n; i++) {
       final v = points[i];
-      if (v == null) { pen = false; continue; }
+      if (v == null) {
+        closeSegment(i);
+        pen = false;
+        continue;
+      }
       if (!pen) {
-        path.moveTo(x(i), y(v));
+        line.moveTo(x(i), y(v));
+        segStart = i;
         pen = true;
       } else {
-        path.lineTo(x(i), y(v));
+        line.lineTo(x(i), y(v));
       }
     }
-    canvas.drawPath(path, paint);
+    closeSegment(n);
+    canvas.drawPath(line, stroke);
   }
 
   @override

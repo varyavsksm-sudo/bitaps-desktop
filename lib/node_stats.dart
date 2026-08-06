@@ -89,21 +89,13 @@ List<double?> sparkPoints(List<(int, int?)> series,
   return out;
 }
 
-/// Средний rtt по живым точкам (null — живых нет) — по нему красим весь спарклайн.
-double? sparkAvgMs(List<double?> points) {
-  var sum = 0.0, n = 0;
-  for (final p in points) {
-    if (p != null) { sum += p; n++; }
-  }
-  return n == 0 ? null : sum / n;
-}
-
-/// Уровень цвета линии по среднему rtt: 0 — хороший, 1 — средний, 2 — плохой, 3 — нет живых
-/// данных. Пороги те же, что у подписи пинга на строке сервера (<60 / <120 мс).
-/// Чистая функция — покрыта node_stats_test.
-int sparkLevel(double? avgMs) {
-  if (avgMs == null) return 3;
-  if (avgMs < 60) return 0;
-  if (avgMs < 120) return 1;
-  return 2;
+/// Цвет спарклайна — акцент АКТИВНОЙ темы (это декор, не статус: статус ноды — зелёная/
+/// красная точка у имени). На светлой теме неоновый акцент (#FF7A1A и пастели других палитр)
+/// выцветает на белых карточках — затемняем тем же правилом, что accentSoftInk (lightness
+/// до ≤0.38): тот же источник читаемости, что у остального UI. В тёмной (и «Фосфор») —
+/// акцент без изменений. Чистая функция — покрыта node_stats_test.
+Color sparkColor(Color accent, {required bool light}) {
+  if (!light) return accent;
+  final h = HSLColor.fromColor(accent);
+  return h.withLightness(math.min(h.lightness, 0.38)).toColor();
 }

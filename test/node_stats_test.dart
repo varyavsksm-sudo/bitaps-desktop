@@ -4,6 +4,7 @@
 // или нормализации дают либо пустой/кривой график, либо падение вёрстки. Фиксируем контракт:
 // разбор ответа (включая мусор), нормализация series в бакеты графика (мёртвые промежутки —
 // разрывы, среднее по живым точкам бакета) и уровень цвета по среднему rtt.
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:bitaps_vpn/main.dart';
 
@@ -81,20 +82,33 @@ void main() {
     });
   });
 
-  group('sparkAvgMs / sparkLevel — цвет линии по среднему rtt', () {
-    test('среднее только по живым точкам; без живых → null', () {
-      expect(sparkAvgMs([40.0, null, 80.0]), closeTo(60, 0.001));
-      expect(sparkAvgMs([null, null]), isNull);
-      expect(sparkAvgMs(const []), isNull);
+  group('sparkColor — цвет линии из акцента темы', () {
+    // Неоново-оранжевый акцент Sunset — базовая палитра приложения.
+    const sunset = Color(0xFFFF7A1A);
+
+    test('тёмная тема: акцент без изменений', () {
+      expect(sparkColor(sunset, light: false), sunset,
+          reason: 'на тёмном фоне неон читается — не трогаем');
+      expect(sparkColor(const Color(0xFF33FF66), light: false), const Color(0xFF33FF66),
+          reason: '«Фосфор» только тёмный — акцент как есть');
     });
 
-    test('пороги как у подписи пинга сервера: <60 ok, <120 warn, дальше danger', () {
-      expect(sparkLevel(40), 0);
-      expect(sparkLevel(59.9), 0);
-      expect(sparkLevel(60), 1);
-      expect(sparkLevel(119.9), 1);
-      expect(sparkLevel(120), 2);
-      expect(sparkLevel(null), 3, reason: 'живых данных нет — нейтральный цвет');
+    test('светлая тема: тот же акцент, затемнённый по правилу accentSoftInk (lightness ≤ 0.38)', () {
+      final c = sparkColor(sunset, light: true);
+      expect(c, isNot(sunset), reason: 'неоновый оранжевый на белом выцветает — затемняем');
+      final h = HSLColor.fromColor(c);
+      // HSL↔RGB раундтрип даёт float-погрешность (0.3803… вместо 0.38) — сравнение с допуском
+      expect(h.lightness, closeTo(0.38, 0.01));
+      expect(h.hue, closeTo(HSLColor.fromColor(sunset).hue, 1.0),
+          reason: 'оттенок палитры сохраняется — меняется только читаемость');
+      // То же правило, что у остального UI: сверяем с каноническим accentSoftInk-подходом.
+      final expected = HSLColor.fromColor(sunset).withLightness(0.38).toColor();
+      expect(c, expected);
+    });
+
+    test('светлая тема: уже тёмный акцент не портим', () {
+      const dark = Color(0xFF8A4A00); // lightness ≈ 0.27
+      expect(sparkColor(dark, light: true), dark);
     });
   });
 }
