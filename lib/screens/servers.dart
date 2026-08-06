@@ -66,6 +66,20 @@ extension ShellServers on ShellState {
               ])),
             ),
           ),
+          // Список поднят из кэша (выдача недоступна — сеть в режиме «белых списков»):
+          // пометка обязана быть на экране, молча показывать старый список как свежий нельзя.
+          if (subCacheAt != null && fleet.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(Icons.cloud_off_outlined, size: 14, color: C.muted),
+              const SizedBox(width: 6),
+              Flexible(child: Text(
+                appLang == 'en'
+                    ? 'Server list is from cache (${_cacheDate(subCacheAt!)}) — the network is restricted, will refresh as soon as the service is reachable'
+                    : 'Список серверов из кэша от ${_cacheDate(subCacheAt!)} — сеть ограничена, обновлю, как только выдача станет доступна',
+                style: mono(12, c: C.muted))),
+            ]),
+          ],
           if (locked) ...[
             const SizedBox(height: 16),
             Row(children: [
@@ -88,6 +102,13 @@ extension ShellServers on ShellState {
     if (n10 == 1 && n100 != 11) return one;
     if (n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14)) return few;
     return many;
+  }
+
+  // Дата кэша выдачи для пометки «список из кэша от …» — локальное время, dd.mm.yyyy hh:mm.
+  String _cacheDate(DateTime at) {
+    String two(int v) => v.toString().padLeft(2, '0');
+    final l = at.toLocal();
+    return '${two(l.day)}.${two(l.month)}.${l.year} ${two(l.hour)}:${two(l.minute)}';
   }
 
   // Секция сортируется общим компаратором compareServers (как «лучший сервер» на Главной):

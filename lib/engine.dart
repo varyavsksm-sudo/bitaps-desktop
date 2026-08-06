@@ -34,6 +34,29 @@ enum EngineKind {
   none,
 }
 
+/// Режим сети по пре-флайту ([TunnelEngine.preflight]).
+enum NetProfile {
+  /// Не измеряли или измерить не вышло — обычный порядок кандидатов.
+  unknown,
+
+  /// Прямые ноды живы (или сравнивать не с чем) — обычный порядок.
+  normal,
+
+  /// «Белые списки»: прямые ноды мертвы, а CDN-рельсы (🛡️) живы — кандидатов перебираем
+  /// рельсами вперёд, иначе подключение висло бы на мёртвых прямых нодах.
+  restricted,
+}
+
+/// Классификация сети по фактам пре-флайта. Прямые мертвы + рельсы живы → restricted.
+/// Мертвы ВСЕ → unknown: лежит весь интернет, а не «белый список», и перестановка кандидатов
+/// тут ничего не спасёт — пусть идёт обычный путь с честной ошибкой.
+/// Чистая функция — покрыта restricted_test.
+NetProfile classifyNetProfile({required bool directAlive, required bool cdnAlive}) {
+  if (!directAlive && cdnAlive) return NetProfile.restricted;
+  if (!directAlive) return NetProfile.unknown;
+  return NetProfile.normal;
+}
+
 /// Состояние туннеля для интерфейса.
 class EngineEvent {
   final String state; // connected | disconnected | error
@@ -315,6 +338,66 @@ class TunnelEngine {
   /// Свободный локальный порт (нужен и проверке узлов, поэтому не приватный).
   static Future<int> freePort() => _freePort();
 
+  // ── ПРЕ-ФЛАЙТ «ограниченная сеть» (режим «белых списков») ──
+  //
+  // Зачем. В сетях ТСПУ-режима «белых списков» прямые ноды (сырые IP :8443) заблокированы,
+  // а CDN-рельсы «🛡️ … LTE» (cdnXX.bit-core.online:443 за Яндекс CDN) живут — только они
+  // и могут подключить. Без детекта автоперебор тратил бы по ~10–15 с на каждую мёртвую
+  // прямую ноду, прежде чем дойти до рельсы. Пре-флайт — ОДИН параллельный заход (до 2 с):
+  // TCP-connect до 2–3 прямых нод и 1–2 CDN-доменов; прямые мертвы + рельсы живы →
+  // restricted, и контроллер подключения перебирает рельсы ПЕРВЫМИ (см. connection.dart и
+  // cdnFirst в compareServers). Результат кэшируется на ~60 с — каждый коннект лишними
+  // пробами не душим.
+  static const Duration preflightTimeout = Duration(seconds: 2);
+  static const Duration preflightCacheTtl = Duration(seconds: 60);
+
+  (NetProfile, DateTime)? _preflightCache;
+
+  /// Режим сети по последнему пре-флайту (unknown — ещё не измеряли). Его читает выбор
+  /// «лучшего сервера» (cdnFirst), поэтому геттер публичный.
+  NetProfile get lastProfile => _preflightCache?.$1 ?? NetProfile.unknown;
+
+  /// Измерить режим сети (с кэшем ~60 с). Никогда не бросает: пре-флайт — подсказка порядку
+  /// кандидатов, а не гейт подключения.
+  Future<NetProfile> preflight(List<SubNode> nodes) async {
+    final cached = _preflightCache;
+    if (cached != null && DateTime.now().difference(cached.$2) < preflightCacheTtl) {
+      return cached.$1;
+    }
+    NetProfile profile;
+    try {
+      profile = await _preflightNow(nodes);
+    } catch (_) {
+      profile = NetProfile.unknown;
+    }
+    _preflightCache = (profile, DateTime.now());
+    return profile;
+  }
+
+  Future<NetProfile> _preflightNow(List<SubNode> nodes) async {
+    final direct = [for (final n in nodes) if (!n.isWhitelist && n.server.isNotEmpty) n].take(3).toList();
+    final relays = [for (final n in nodes) if (n.isWhitelist && n.server.isNotEmpty) n].take(2).toList();
+    // Сравнивать не с чем (нет прямых или нет рельс в выдаче) — обычный порядок.
+    if (direct.isEmpty || relays.isEmpty) return NetProfile.normal;
+    final alive = await Future.wait([
+      for (final n in [...direct, ...relays]) _tcpAlive(n.server, n.port),
+    ]);
+    return classifyNetProfile(
+      directAlive: alive.take(direct.length).any((a) => a),
+      cdnAlive: alive.skip(direct.length).any((a) => a),
+    );
+  }
+
+  static Future<bool> _tcpAlive(String host, int port) async {
+    try {
+      final s = await Socket.connect(host, port, timeout: preflightTimeout);
+      s.destroy();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   // ── ПРОВЕРКА УЗЛА: пропускает ли он трафик С ЭТОГО УСТРОЙСТВА ──
   //
   // Смысл: поднять временный экземпляр движка ровно на один узел и вытянуть сквозь него
@@ -417,6 +500,48 @@ class TunnelEngine {
       } catch (_) { /* следующий адрес */ }
     }
     return null;
+  }
+
+  // Бюджет быстрого замера флота одним процессом: observatory с probeInterval 1с успевает
+  // сделать 3–4 круга проб — цель «полный флот ≤5с» из задачи. Непокрытых к дедлайну узлов
+  // это касается редко, их добивает per-node фолбэк в вызывающем коде.
+  static const Duration fleetProbeBudget = Duration(milliseconds: 4500);
+
+  /// Замер ВСЕГО флота ОДНИМ временным процессом движка (только десктоп): конфиг со всеми
+  /// узлами + observatory (см. xrayFleetProbeConfig), покрытие читаем из /debug/vars раз в
+  /// 400 мс, пока все узлы не будут замерены или не выйдет бюджет. Возвращает тег узла → мс
+  /// (null — узел замерен и НЕ пропускает трафик); узлы, которых обсерватория не успела
+  /// замерить, в карте ОТСУТСТВУЮТ — приговор по «нет данных» не выносим, их добивает
+  /// per-node фолбэк. null целиком — быстрый путь недоступен (не десктоп/нет бинаря) или
+  /// упал: вызывающий идёт прежним per-node перебором (runPooled + probe).
+  Future<Map<String, int?>?> probeFleet(List<SubNode> nodes) async {
+    if (kind() != EngineKind.desktopXray || nodes.isEmpty) return null;
+    final bin = XrayBinary.locate();
+    if (bin == null) return null;
+    XrayProcess? proc;
+    try {
+      final socksPort = await _freePort();
+      final metricsPort = await _freePort();
+      final cfg = xrayFleetProbeConfigJson(nodes, socksPort: socksPort, metricsPort: metricsPort);
+      proc = await XrayProcess.start(cfg, socksPort: socksPort, binaryPath: bin);
+      final deadline = DateTime.now().add(fleetProbeBudget);
+      var covered = <String, int?>{};
+      while (DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+        final r = await XrayStats.read(metricsPort);
+        if (r == null) continue;
+        covered = {
+          for (var i = 0; i < nodes.length; i++)
+            if (r.pings.containsKey('node-$i')) nodes[i].tag: r.pings['node-$i'],
+        };
+        if (covered.length >= nodes.length) break; // весь флот замерен — выходим раньше дедлайна
+      }
+      return covered;
+    } catch (_) {
+      return null;
+    } finally {
+      await proc?.stop();
+    }
   }
 
   // На десктопе движок наш собственный: поднимаем процесс на один узел с локальным ВХОДОМ HTTP

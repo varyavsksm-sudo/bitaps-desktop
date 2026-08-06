@@ -174,6 +174,20 @@ class XrayStats {
       final req = await client.getUrl(Uri.parse('http://127.0.0.1:$metricsPort/debug/vars'));
       final resp = await req.close().timeout(const Duration(seconds: 3));
       final body = await resp.transform(utf8.decoder).join();
+      return parse(body);
+    } catch (_) {
+      return null;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  /// Разбор ответа /debug/vars. Формат observatory в xray-core: per-outbound {alive, delay},
+  /// у мёртвого узла alive отсутствует (proto3 опускает значение по умолчанию), а задержка
+  /// приходит заглушкой 99999999 — показывать её как пинг нельзя. Чистая функция — покрыта
+  /// fleet_probe_test.
+  static ({int up, int down, Map<String, int?> pings})? parse(String body) {
+    try {
       final decoded = json.decode(body);
       if (decoded is! Map) return null;
       var up = 0, down = 0;
@@ -190,8 +204,6 @@ class XrayStats {
       if (obs is Map) {
         obs.forEach((tag, v) {
           if (tag is! String || v is! Map) return;
-          // У мёртвого узла поле alive отсутствует (proto3 опускает значение по умолчанию),
-          // а задержка приходит заглушкой 99999999 — показывать её как пинг нельзя.
           final delay = (v['delay'] as num?)?.toInt();
           pings[tag] = (v['alive'] == true && delay != null && delay < 99999999) ? delay : null;
         });
@@ -199,8 +211,6 @@ class XrayStats {
       return (up: up, down: down, pings: pings);
     } catch (_) {
       return null;
-    } finally {
-      client.close(force: true);
     }
   }
 }

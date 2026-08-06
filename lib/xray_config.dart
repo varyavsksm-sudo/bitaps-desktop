@@ -191,6 +191,43 @@ Map<String, dynamic> xrayConfigForIos(
 String xrayConfigJsonForIos(List<SubNode> nodes, {String? only}) =>
     jsonEncode(xrayConfigForIos(nodes, only: only));
 
+/// Конфиг БЫСТРОГО замера всего флота ОДНИМ процессом (десктоп, кнопка «Проверить серверы»).
+///
+/// Раньше на КАЖДЫЙ узел поднимался свой временный процесс xray — флот из ~13 узлов мерился
+/// 10–12 с и грузил машину шестью процессами разом. Здесь один процесс: все узлы — outbounds,
+/// observatory с интервалом в секунду прозванивает их параллельно (enableConcurrency) и пишет
+/// alive/rtt каждого в /debug/vars, который мы читаем спустя ~3–4 с (см. probeFleet в
+/// engine.dart). Балансировщик и правила наследуются от боевого конфига — трафика через
+/// процесс всё равно нет, важны только замеры обсерватории. Чистая функция — покрыта
+/// fleet_probe_test.
+Map<String, dynamic> xrayFleetProbeConfig(
+  List<SubNode> nodes, {
+  required int socksPort,
+  required int metricsPort,
+  String probeInterval = '1s',
+}) {
+  final cfg = xrayConfigFromNodes(nodes, socksPort: socksPort, metricsPort: metricsPort);
+  // Observatory ставим безусловно (база добавляет её только при балансировке): замер нужен
+  // и для флота из одного узла. Интервал 1с вместо боевых 5m — проба разовая и временная.
+  cfg['observatory'] = {
+    'subjectSelector': ['node-'],
+    'probeUrl': kXrayObservatoryUrl,
+    'probeInterval': probeInterval,
+    'enableConcurrency': true,
+  };
+  return cfg;
+}
+
+/// Тот же конфиг строкой — уходит временному процессу движка.
+String xrayFleetProbeConfigJson(
+  List<SubNode> nodes, {
+  required int socksPort,
+  required int metricsPort,
+  String probeInterval = '1s',
+}) =>
+    const JsonEncoder.withIndent('  ').convert(
+        xrayFleetProbeConfig(nodes, socksPort: socksPort, metricsPort: metricsPort, probeInterval: probeInterval));
+
 /// Конфиг ОДНОГО узла — запись подписки после САНИТИЗАЦИИ. Используется на Android.
 ///
 /// Почему не общий конфиг со всеми узлами. На Android движок живёт внутри системного

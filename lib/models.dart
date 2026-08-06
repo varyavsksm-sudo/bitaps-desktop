@@ -199,8 +199,11 @@ Server serverFromSubNode(SubNode n, {int ping = 0}) {
 /// [stateOf] — что мы знаем про узел на текущей сети (см. node_probe.dart). Проверенно рабочие
 /// всегда впереди непроверенных, а непригодные — всегда позади: «лучшим» не может быть сервер,
 /// через который заведомо ничего не грузится.
+/// [cdnFirst] — режим «ограниченная сеть» (пре-флайт, engine.dart): прямые ноды в этой сети
+/// мертвы, поэтому ВСЕ рельсы «LTE · CDN» идут впереди прямых независимо от пинга, а прямые —
+/// в конец. Ранг приговора всё равно сильнее: мёртвая рельса не обгонит работающую прямую.
 int compareServers(Server a, Server b, int Function(Server) ping,
-    {NodeState Function(Server)? stateOf}) {
+    {NodeState Function(Server)? stateOf, bool cdnFirst = false}) {
   if (stateOf != null) {
     int rank(Server s) => switch (stateOf(s)) {
           NodeState.works => 0,
@@ -209,6 +212,10 @@ int compareServers(Server a, Server b, int Function(Server) ping,
         };
     final ra = rank(a), rb = rank(b);
     if (ra != rb) return ra.compareTo(rb);
+  }
+  if (cdnFirst) {
+    final ca = a.proto.startsWith('LTE') ? 0 : 1, cb = b.proto.startsWith('LTE') ? 0 : 1;
+    if (ca != cb) return ca.compareTo(cb);
   }
   final pa = ping(a), pb = ping(b);
   if (pa > 0 && pb > 0 && pa != pb) return pa.compareTo(pb);

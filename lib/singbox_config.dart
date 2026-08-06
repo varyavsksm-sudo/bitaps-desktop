@@ -11,6 +11,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Схемы share-link, которые умеет разобрать [outboundFromKey] — единый источник
 /// правды для гарда подключения (connection.dart), чтобы он не отставал от парсера.
@@ -513,6 +514,15 @@ class SubNode {
 
   /// Узел доступен движку sing-box (у xray доступны все).
   bool get singboxReady => singbox != null;
+
+  /// Узел «белого списка» (CDN-рельса): транспорт xhttp/splithttp через CDN edge — переживает
+  /// сети, где прямые ноды заблокированы. То же правило, что выбор fallbackTag в xray_config.dart.
+  bool get isWhitelist {
+    final ss = xray['streamSettings'];
+    if (ss is! Map) return false;
+    final net = (ss['network'] ?? '').toString();
+    return net == 'xhttp' || net == 'splithttp';
+  }
 }
 
 /// Результат разбора тела подписки.
@@ -664,12 +674,22 @@ class SubFetchResult {
   final String? error;
   final int skipped;
   final DateTime? expiresAt;
+
+  /// Сырое тело выдачи при успешном ответе — его же кладём в персистентный кэш
+  /// (см. fetchSubscriptionCached). null при ошибке/кэше (кэш и так его знает).
+  final String? rawBody;
+
+  /// Список пришёл НЕ из сети, а из персистентного кэша — дата того успешного ответа.
+  /// null — свежая выдача. По нему UI показывает пометку «список из кэша от <дата>».
+  final DateTime? cachedAt;
   const SubFetchResult({
     this.nodes = const [],
     this.notice,
     this.error,
     this.skipped = 0,
     this.expiresAt,
+    this.rawBody,
+    this.cachedAt,
   });
   bool get ok => error == null && nodes.isNotEmpty;
 }
@@ -713,8 +733,9 @@ Future<SubFetchResult> fetchSubscription(
       }
     }
     if (tooBig) return const SubFetchResult(error: 'подписка слишком большая');
+    final body = utf8.decode(buf.takeBytes());
     final parsed = parseSubscription(
-      utf8.decode(buf.takeBytes()),
+      body,
       headerNotice: _decodeSubHeader(r.headers['sub-info-text'] ?? r.headers['announce']),
     );
     return SubFetchResult(
@@ -722,6 +743,8 @@ Future<SubFetchResult> fetchSubscription(
       notice: parsed.notice,
       skipped: parsed.skipped,
       expiresAt: _expiryOf(r.headers['subscription-userinfo']),
+      // сырое тело — только при реально полезной выдаче: кэшировать «лимит устройств» нельзя
+      rawBody: parsed.nodes.isNotEmpty ? body : null,
     );
   } on TimeoutException {
     return const SubFetchResult(error: 'подписка не ответила вовремя');
@@ -732,6 +755,89 @@ Future<SubFetchResult> fetchSubscription(
     return const SubFetchResult(error: 'не удалось получить подписку');
   } finally {
     if (ownClient) c.close();
+  }
+}
+
+// ---------- персистентный кэш подписки (опора против «белых списков») ----------
+//
+// В сетях режима «белых списков» (ТСПУ пропускает только одобренные ресурсы) выдача
+// origin.bit-core.online заблокирована: fetchSubscription умирает по таймауту, и без кэша
+// приложение не получает ни списка узлов, ни подключения — хотя узлы из ПРОШЛОЙ выдачи
+// (CDN-рельсы) в такой сети как раз живы. Поэтому после каждого успешного ответа сырое
+// тело кладём в prefs, а при неудачном fetch молча отдаём кэш (с пометкой cachedAt для UI).
+
+/// Ключ prefs с кэшем выдачи.
+const String kSubCachePrefsKey = 'subCache';
+
+/// Срок жизни кэша: протухший игнорируем, и вызывающий получает честную ошибку, как раньше.
+const Duration kSubCacheTtl = Duration(days: 7);
+
+/// Запись кэша одной строкой: url выдачи (токен) храним рядом, чтобы кэш одного аккаунта
+/// никогда не подставился другому.
+String subCacheEncode(String url, String body, DateTime at) =>
+    jsonEncode({'url': url, 'at': at.toIso8601String(), 'body': body});
+
+/// Разбор записи кэша. null — записи нет, она битая, от другого url или протухла ([ttl]).
+/// Чистая функция — покрыта sub_cache_test.
+({String body, DateTime at})? subCacheDecode(String? raw, String url,
+    {DateTime? now, Duration ttl = kSubCacheTtl}) {
+  if (raw == null || raw.isEmpty) return null;
+  try {
+    final d = jsonDecode(raw);
+    if (d is! Map) return null;
+    if (d['url'] != url) return null;
+    final at = DateTime.tryParse('${d['at']}');
+    final body = d['body'];
+    if (at == null || body is! String || body.isEmpty) return null;
+    if ((now ?? DateTime.now()).difference(at) >= ttl) return null; // протух — игнор
+    return (body: body, at: at);
+  } catch (_) {
+    return null;
+  }
+}
+
+/// [fetchSubscription] + персистентный кэш: успех → кэш обновлён; сбой сети → молча кэш
+/// (TTL 7 дней). ВАЖНО: осмысленный ответ сервиса (уведомление «подписка истекла» / «лимит
+/// устройств») кэшем НЕ подменяется — это не сбой сети, и подключать человека к узлам из
+/// старой выдачи в обход ответа сервиса нельзя. Кэш — только против недоступности выдачи.
+Future<SubFetchResult> fetchSubscriptionCached(
+  String url, {
+  required String hwid,
+  String deviceOs = '',
+  http.Client? client,
+  Duration timeout = const Duration(seconds: 20),
+  SharedPreferences? prefs, // под тесты; null — SharedPreferences.getInstance()
+}) async {
+  final sub =
+      await fetchSubscription(url, hwid: hwid, deviceOs: deviceOs, client: client, timeout: timeout);
+  SharedPreferences? p = prefs;
+  try {
+    p ??= await SharedPreferences.getInstance();
+  } catch (_) {
+    p = null; // хранилище недоступно — кэш просто не работает, поведение как раньше
+  }
+  if (sub.ok && sub.rawBody != null) {
+    try {
+      await p?.setString(kSubCachePrefsKey, subCacheEncode(url, sub.rawBody!, DateTime.now()));
+    } catch (_) {/* записать не вышло — не критично */}
+    return sub;
+  }
+  if (sub.error == null) return sub; // ответ сервиса (notice) — не тронуть кэшем
+  String? raw;
+  try {
+    raw = p?.getString(kSubCachePrefsKey);
+  } catch (_) {
+    raw = null;
+  }
+  final cached = subCacheDecode(raw, url);
+  if (cached == null) return sub; // кэша нет/протух — честная ошибка, как раньше
+  try {
+    final parsed = parseSubscription(cached.body);
+    if (parsed.nodes.isEmpty) return sub;
+    return SubFetchResult(
+        nodes: parsed.nodes, notice: parsed.notice, skipped: parsed.skipped, cachedAt: cached.at);
+  } catch (_) {
+    return sub;
   }
 }
 

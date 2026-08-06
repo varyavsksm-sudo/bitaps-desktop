@@ -54,8 +54,9 @@ class ConnectionController extends ChangeNotifier {
   final String Function() hwidOf;
   final Server Function() serverOf;
   /// Свежие узлы подписки — чтобы список серверов в интерфейсе не расходился с тем,
-  /// к чему реально подключаемся.
-  final void Function(List<SubNode>) onNodes;
+  /// к чему реально подключаемся. [cacheAt] != null — список поднят из персистентного
+  /// кэша (выдача недоступна — сеть в режиме «белых списков»), UI покажет пометку с датой.
+  final void Function(List<SubNode>, {DateTime? cacheAt}) onNodes;
   /// Режим «лучший сервер» включён? Тогда узел, не пропустивший трафик, не тупик:
   /// тем же нажатием перебираем следующих кандидатов (см. цикл в toggle()).
   final bool Function() bestServerOn;
@@ -182,13 +183,15 @@ class ConnectionController extends ChangeNotifier {
         if (!isSub && !kSupportedKeySchemes.any((s) => key.toLowerCase().startsWith(s))) { _fail(gen, tr('Нужен рабочий VPN-ключ'), fix: ConnFix.refreshSub); return; }
         List<SubNode> nodes = const [];
         if (isSub) {
-          final sub = await fetchSubscription(key, hwid: hwidOf(), deviceOs: Platform.operatingSystem);
+          // Кэшированная выдача: под «белыми списками» origin.bit-core.online мёртв — после
+          // сбоя сети молча поднимаем список из кэша (TTL 7 дней, см. fetchSubscriptionCached).
+          final sub = await fetchSubscriptionCached(key, hwid: hwidOf(), deviceOs: Platform.operatingSystem);
           if (_disposed || gen != _gen) return; // отменили, пока грузилась подписка
           // Сервис отвечает уведомлением вместо узлов: подписка истекла / исчерпан лимит устройств.
           // Показываем его текст как есть — он уже написан для пользователя и локализован сервисом.
           if (sub.notice != null && !sub.ok) { _fail(gen, sub.notice!, fix: ConnFix.refreshSub); return; }
           if (sub.error != null) { _fail(gen, sub.error!, fix: ConnFix.refreshSub); return; }
-          onNodes(sub.nodes);
+          onNodes(sub.nodes, cacheAt: sub.cachedAt);
           nodes = TunnelEngine.usableNodes(sub.nodes);
           if (nodes.isEmpty) {
             // Узлы пришли, но наш движок их не понимает → Happ понимает: это не тупик, а обход.
@@ -232,8 +235,25 @@ class ConnectionController extends ChangeNotifier {
         // раз вручную. Ручной выбор — одна попытка, как раньше (roam == false).
         // Реконнект сюда не лезет: он начинается после ОБРЫВА УСТАНОВЛЕННОГО соединения,
         // а перебор работает до первого успешного коннекта и серии не создаёт.
+        // Режим «ограниченная сеть» (белые списки): быстрый пре-флайт (≤2 с, кэш ~60 с) —
+        // прямые ноды мертвы, а CDN-рельсы живы → restricted. Тогда кандидатов перебираем
+        // РЕЛЬСАМИ ВПЕРЁД (cdnFirst в compareServers читает TunnelEngine.lastProfile), а
+        // ручному выбору прямой ноды разрешён один автоподхват рельсы — владелец прямо
+        // просил: «гони всё при подключении через БС-ноды, чтобы не зависало».
+        final restricted = nodes.length > 1 &&
+            await TunnelEngine.instance.preflight(nodes) == NetProfile.restricted;
+        if (_disposed || gen != _gen) return; // отменили, пока шёл пре-флайт
         final roam = bestServerOn();
         var candidate = serverOf();
+        // Стартовый кандидат выбирался ДО пре-флайта (ShellState.toggle → serverForMode) и
+        // мог оказаться прямой нодой — в restricted пересчитываем сразу: первая же попытка
+        // должна идти на рельсу, а не тратить ~15 с на заведомо мёртвую прямую.
+        if (restricted && roam) {
+          final re = nextServerOf();
+          if (re.id.isNotEmpty) candidate = re;
+        }
+        // restricted + ручной выбор прямой ноды: она мимо → подхватили рельсу (тост ниже).
+        var rescuedDirect = false;
         for (var attempt = 1; ; attempt++) {
           // прогресс на Главной: «пробуем {сервер}… (N/5)» — иначе минуты перебора выглядели
           // бы зависшим «Подключение…».
@@ -293,6 +313,15 @@ class ConnectionController extends ChangeNotifier {
             // кандидаты кончились (все помечены мёртвыми на этой сети) — считаем как «все мимо»
             if (next.id.isEmpty || next.id == candidate.id) next = null;
           }
+          // Restricted + ручной выбор ПРЯМОЙ ноды: она не пропустила трафик (ожидаемо в этой
+          // сети) → ОДИН автоподхват первой живой рельсы вместо немедленного «выбери другой».
+          if (next == null && roamRescue(roam, restricted, attempt, candidate)) {
+            final rescue = nextServerOf(); // в restricted сортировка cdnFirst — первая живая рельса
+            if (rescue.id.isNotEmpty && rescue.id != candidate.id) {
+              next = rescue;
+              rescuedDirect = true;
+            }
+          }
           if (next == null) {
             _resetTry();
             _fail(gen,
@@ -307,6 +336,11 @@ class ConnectionController extends ChangeNotifier {
         _resetTry();
         gEngineReal = true;
         _startSession(down: 0, up: 0);
+        // Restricted-подхват: человек выбирал прямую ноду, а подключили его через рельсу —
+        // молчать нельзя, иначе он не поймёт, почему сервер на экране не тот.
+        if (rescuedDirect) {
+          onToast(tr('Прямая нода недоступна в этой сети — подключил через 🛡️'));
+        }
         _timer = Timer.periodic(const Duration(seconds: 1), (_) {
           if (_disposed) return;
           secs++; _accTraffic(); notifyListeners();
@@ -475,6 +509,13 @@ class ConnectionController extends ChangeNotifier {
   /// Чистая функция — правило покрыто roam_test (перебор без живого движка не воспроизвести).
   static bool roamContinues(bool bestServer, int attempt) =>
       bestServer && attempt < kMaxTryAttempts;
+
+  /// Разрешён ли автоподхват CDN-рельсы после провала кандидата: только РУЧНОЙ выбор (в режиме
+  /// «лучший сервер» перебор и так идёт через roamContinues), только restricted-сеть (см.
+  /// пре-флайт в engine.dart), только ПЕРВАЯ попытка и только если сам кандидат — прямая нода
+  /// (провал рельсы подхватывать нечем). Чистая функция — правило покрыто restricted_test.
+  static bool roamRescue(bool bestServer, bool restricted, int attempt, Server candidate) =>
+      !bestServer && restricted && attempt == 1 && !candidate.proto.startsWith('LTE');
 
   /// Спрятать прогресс автоперебора (успех/стоп/отмена). Без notifyListeners: вызывается рядом
   /// с _fail/_startSession, которые и так перерисуют экран.

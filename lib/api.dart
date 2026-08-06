@@ -586,35 +586,54 @@ extension ShellApi on ShellState {
         if (mounted) rebuild(() => netId = net);
       }
 
-      // Проверка тяжелее TCP-коннекта: каждый узел это отдельный запуск движка. Идём пулом с
-      // ограничением одновременности (runPooled): на десктопе 6 параллельных процессов xray —
-      // ок, больше — нет; на Android временный экземпляр поднимает системная часть — по одному.
-      // Бюджет на узел 4 с (probeTimeout) → флот из ~13 узлов укладывается в ~10–12 с вместо
-      // минут последовательного обхода.
+      // Применить итог замера одного узла (общий для быстрого флот-пути и per-node фолбэка):
+      // приговор пишем только при прямом замере (conn == 0), сквозь туннель — лишь живое число.
+      void applyOne(SubNode n, int? ms) {
+        if (viaTunnel) {
+          // Только живое число сессии: молчащий узел старый ручной замер НЕ стирает —
+          // замер сквозь VPN ничего не говорит о прямой доступности.
+          rebuild(() {
+            if (ms != null) { pingMeasured[n.tag] = ms; okCount++; } else { badCount++; }
+            pingDone++;
+          });
+        } else {
+          final v = NodeVerdict(ok: ms != null, ms: ms, at: DateTime.now(), net: net);
+          rebuild(() {
+            nodeVerdicts[n.tag] = v;
+            if (ms != null) { pingMeasured[n.tag] = ms; okCount++; }
+            else { pingMeasured.remove(n.tag); badCount++; }
+            pingDone++;
+          });
+        }
+      }
+
+      // Проверка тяжелее TCP-коннекта. На десктопе сначала БЫСТРЫЙ путь: весь флот одним
+      // временным процессом движка — обсерватория отдаёт alive/rtt каждого узла за ~4 с
+      // (probeFleet), тогда как старый путь поднимал процесс xray на КАЖДЫЙ узел и шёл
+      // 10–12 с. Упал или не покрыл всех — остаток добиваем прежним per-node перебором
+      // пулом с ограничением одновременности (runPooled): на десктопе 6 параллельных
+      // процессов xray — ок, больше — нет; на Android временный экземпляр поднимает
+      // системная часть — по одному.
       final lanes = Platform.isAndroid ? 1 : 6;
       rebuild(() { pingTotal = targets.length; pingDone = 0; });
+      var rest = targets;
+      if (!viaTunnel && TunnelEngine.kind() == EngineKind.desktopXray) {
+        final fleet = await TunnelEngine.instance.probeFleet(targets);
+        if (fleet != null) {
+          rest = [for (final n in targets) if (!fleet.containsKey(n.tag)) n];
+          for (final n in targets) {
+            if (fleet.containsKey(n.tag)) applyOne(n, fleet[n.tag]);
+          }
+        }
+        if (!mounted) return;
+      }
       await runPooled<void>([
-        for (final n in targets)
+        for (final n in rest)
           () async {
             var ms = await TunnelEngine.instance.probe(n);
             // Сквозной замер молчит — фолбэк на живой пинг observatory поднятого туннеля.
             if (ms == null && viaTunnel) ms = _observatoryPing(n.tag);
-            if (viaTunnel) {
-              // Только живое число сессии: молчащий узел старый ручной замер НЕ стирает —
-              // замер сквозь VPN ничего не говорит о прямой доступности.
-              rebuild(() {
-                if (ms != null) { pingMeasured[n.tag] = ms; okCount++; } else { badCount++; }
-                pingDone++;
-              });
-            } else {
-              final v = NodeVerdict(ok: ms != null, ms: ms, at: DateTime.now(), net: net);
-              rebuild(() {
-                nodeVerdicts[n.tag] = v;
-                if (ms != null) { pingMeasured[n.tag] = ms; okCount++; }
-                else { pingMeasured.remove(n.tag); badCount++; }
-                pingDone++;
-              });
-            }
+            applyOne(n, ms);
           },
       ], lanes);
       if (!viaTunnel) await _saveVerdicts();
@@ -676,23 +695,26 @@ extension ShellApi on ShellState {
 
   /// Подтянуть узлы подписки БЕЗ подключения — чтобы список серверов был живым сразу после
   /// входа, а не только после первого коннекта. Тихо: сбой сети просто оставляет прежний список.
+  /// Под «белыми списками» выдача недоступна — fetchSubscriptionCached молча поднимает список
+  /// из кэша (TTL 7 дней), а экран «Серверы» показывает пометку «из кэша от <дата>» (subCacheAt).
   /// Идентификатор устройства тот же, что при подключении, — лишний слот не занимаем.
   Future<void> _loadNodes() async {
     final key = keyStr.trim();
     if (!isSubscriptionUrl(key) || hwid.isEmpty) return;
     try {
-      final sub = await fetchSubscription(key, hwid: hwid, deviceOs: Platform.operatingSystem);
+      final sub = await fetchSubscriptionCached(key, hwid: hwid, deviceOs: Platform.operatingSystem);
       if (!mounted) return;
-      // Отметка свежести — только по успешному ответу сервиса: открытие «Серверов» гоняет
-      // fetch не чаще раза в 5 минут (см. _maybeRefreshNodes), а сбой не должен его откладывать.
-      if (sub.ok) nodesFetchedAt = DateTime.now();
+      // Отметка свежести — только по успешному ответу сервиса ИЗ СЕТИ: открытие «Серверов» гоняет
+      // fetch не чаще раза в 5 минут (см. _maybeRefreshNodes), а сбой/кэш не должен его откладывать —
+      // иначе после ухода «белых списков» свежий список ждал бы лишние минуты.
+      if (sub.ok && sub.cachedAt == null) nodesFetchedAt = DateTime.now();
       // Причину пустого списка запоминаем и показываем на экране «Серверы». Сервис выдачи
       // отвечает осмысленно («Лимит устройств исчерпан», «Подписка истекла»), а раньше этот
       // текст выбрасывался — человек видел вместо серверов заглушку и не понимал, что не так.
       final note = sub.notice;
       if (sub.ok && sub.nodes.isNotEmpty) {
         rebuild(() => subNotice = null);
-        _applyNodes(sub.nodes);
+        _applyNodes(sub.nodes, cacheAt: sub.cachedAt);
         // Один автозамер на сессию: иначе список серверов встречает человека сплошными
         // прочерками, а карточка сервера на Главной — без отклика вовсе.
         if (pingMeasured.isEmpty) _pingServers(silent: true);

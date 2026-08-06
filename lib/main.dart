@@ -231,6 +231,10 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   /// Когда сервис выдачи в последний раз УСПЕШНО отдал список узлов. Нужен экрану «Серверы»:
   /// при открытии он подтягивает список, только если прошло >5 мин (см. _maybeRefreshNodes).
   DateTime? nodesFetchedAt;
+  /// Список узлов сейчас показан ИЗ КЭША (выдача недоступна — сеть в режиме «белых списков»):
+  /// дата того успешного ответа. null — свежая выдача из сети. Экран «Серверы» показывает
+  /// пометку «список из кэша от <дата>» — молча подменять свежий список старым нельзя.
+  DateTime? subCacheAt;
   bool tgl1 = false, tgl2 = true, tgl3 = true, tgl4 = false;
   /// Килл-свитч: при НЕОЖИДАННОМ обрыве VPN трафик блокируется (fail-closed), а не идёт
   /// напрямую мимо туннеля. По умолчанию ВЫКЛ — блокировка интернета не должна случаться
@@ -956,11 +960,13 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
       ];
 
   /// Применить свежий список узлов: обновляем парк и следим, чтобы выбранный сервер
-  /// существовал (иначе подключение ушло бы к исчезнувшему узлу).
-  void _applyNodes(List<SubNode> ns) {
+  /// существовал (иначе подключение ушло бы к исчезнувшему узлу). [cacheAt] — дата кэша,
+  /// из которого поднят список; null — выдача из сети, пометка кэша затирается.
+  void _applyNodes(List<SubNode> ns, {DateTime? cacheAt}) {
     if (!mounted || ns.isEmpty) return;
     rebuild(() {
       subNodes = ns;
+      subCacheAt = cacheAt;
       // Отложенный ручной выбор (serverId, сохранённый до загрузки узлов): сервер ещё есть
       // в свежем парке — возвращаем его; нет — обычный авто-подбор ниже.
       final pending = _pendingServerId;
@@ -974,7 +980,10 @@ class ShellState extends State<Shell> with TickerProviderStateMixin, WidgetsBind
   }
 
   int _betterServer(Server a, Server b) =>
-      compareServers(a, b, pingOf, stateOf: (s) => stateOf(s.id));
+      compareServers(a, b, pingOf, stateOf: (s) => stateOf(s.id),
+          // Restricted-сеть (пре-флайт): рельсы вперёд, прямые в конец — иначе «лучший сервер»
+          // и автоперебор начинали бы с заведомо мёртвых прямых нод.
+          cdnFirst: TunnelEngine.instance.lastProfile == NetProfile.restricted);
 
   // режим реально подбирает сервер: Стрим→мин.нагрузка, Игры/Авто→мин.пинг, Прив→зарубежный (иначе лучший)
   Server serverForMode(int m) {
